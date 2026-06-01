@@ -76,7 +76,12 @@ var TIMEZONES=[
   {value:"America/Anchorage",label:"Alaska (AKT)",offset:-4},
   {value:"Pacific/Honolulu",label:"Hawaii (HT)",offset:-5}
 ];
-function getNow(){return new Date(new Date().toLocaleString("en-US",{timeZone:USER_TIMEZONE}));}
+function getNow(){
+  // CHANGED: some JS runtimes lack full timezone (ICU) data and throw on valid zones.
+  // Fall back to local time instead of crashing the whole app.
+  try{return new Date(new Date().toLocaleString("en-US",{timeZone:USER_TIMEZONE}));}
+  catch(e){return new Date();}
+}
 function getPT(){return getNow();}
 function fmtTime(d){var h=d.getHours(),m=d.getMinutes().toString().padStart(2,"0");return (h%12||12)+":"+m+" "+(h>=12?"PM":"AM");}
 
@@ -119,7 +124,7 @@ function getSessions(settings){
   return defaultSessionsForTz((settings&&settings.timezone)||USER_TIMEZONE||"America/Los_Angeles");
 }
 
-function getCurrentMinutesET(){var et=new Date(new Date().toLocaleString("en-US",{timeZone:"America/New_York"}));return et.getHours()*60+et.getMinutes();}
+function getCurrentMinutesET(){try{var et=new Date(new Date().toLocaleString("en-US",{timeZone:"America/New_York"}));return et.getHours()*60+et.getMinutes();}catch(e){var n=new Date();return n.getHours()*60+n.getMinutes();}}
 function getCurrentMinutesLocal(){var n=getNow();return n.getHours()*60+n.getMinutes();}
 function fmtMinutes(m){m=((m%1440)+1440)%1440;var h=Math.floor(m/60),mm=m%60;return (h%12||12)+":"+(mm<10?"0"+mm:mm)+" "+(h>=12?"PM":"AM");}
 // CHANGED: Helpers for <input type="time"> which uses 24-hour HH:MM strings.
@@ -177,7 +182,7 @@ function formatSessionTimeRange(s){
   function fmt(etMins){var refDate=new Date();var etOffset=getTZOffsetMinutes("America/New_York",refDate);var userOffset=getTZOffsetMinutes(USER_TIMEZONE,refDate);var localMins=etMins+(userOffset-etOffset);while(localMins<0)localMins+=1440;while(localMins>=1440)localMins-=1440;return fmtMinutes(localMins);}
   return fmt(s.etStart)+" – "+fmt(s.etEnd);
 }
-function getTZOffsetMinutes(tz,date){var d=date||new Date();var utc=new Date(d.toLocaleString("en-US",{timeZone:"UTC"}));var tzd=new Date(d.toLocaleString("en-US",{timeZone:tz}));return Math.round((tzd-utc)/60000);}
+function getTZOffsetMinutes(tz,date){try{var d=date||new Date();var utc=new Date(d.toLocaleString("en-US",{timeZone:"UTC"}));var tzd=new Date(d.toLocaleString("en-US",{timeZone:tz}));return Math.round((tzd-utc)/60000);}catch(e){return 0;}}
 function getPhaseLabel(phase){
   var dateKey=todayStr();
   if(phase==="closed"){if(MARKET_HOLIDAYS[dateKey])return "Market Closed · "+MARKET_HOLIDAYS[dateKey];var day=getNow().getDay();if(day===0||day===6)return "Market Closed · Weekend";return "No Active Session";}
@@ -6218,12 +6223,16 @@ function SettingsTab(props){
     reader.onload=function(e){
       try{var data=JSON.parse(e.target.result);if(!data||typeof data!=="object")throw new Error("Invalid backup");
         if(!confirm("This will overwrite all your data. Continue?"))return;
-        Object.keys(data).forEach(function(k){localStorage.setItem(k,data[k]);});
-        // CHANGED: if signed in, push the restored data up to the cloud and WAIT before reloading,
-        // otherwise the debounced sync is lost and the reload pulls the (older) cloud copy back down.
-        if(typeof window!=="undefined"&&typeof window.__psychoSyncPushAll==="function"){
-          alert("Restore complete. Uploading to your account…");
-          window.__psychoSyncPushAll().then(function(){window.location.reload();},function(err){alert("Restored locally, but cloud upload failed: "+(err&&err.message?err.message:err)+". Reloading anyway.");window.location.reload();});
+        // CHANGED: write each key tolerantly. Large screenshot-heavy days may exceed the
+        // localStorage quota; we still want the rest to load, and (when signed in) the cloud
+        // push uploads images to Storage and rewrites local entries to small paths.
+        var quotaHit=false;
+        Object.keys(data).forEach(function(k){try{localStorage.setItem(k,data[k]);}catch(err){quotaHit=true;}});
+        if(typeof window!=="undefined"&&typeof window.__psychoSyncRestore==="function"){
+          alert("Restore complete. Uploading to your account (including screenshots)…");
+          window.__psychoSyncRestore(data).then(function(){window.location.reload();},function(err){alert("Restored, but cloud upload had an issue: "+(err&&err.message?err.message:err)+". Reloading anyway.");window.location.reload();});
+        }else if(quotaHit){
+          alert("Restored, but some screenshots were too large for offline storage. Sign in to store them in the cloud. Reloading...");window.location.reload();
         }else{
           alert("Restore complete. Reloading...");window.location.reload();
         }
@@ -6862,6 +6871,17 @@ function SettingsTab(props){
             </button>;
           })}
         </div>
+        {/* CHANGED: hide-$ control lives here too (sole location in mobile view, which has no sidebar). */}
+        <div style={{fontSize:13,color:"#94a3b8",margin:"18px 0 10px",lineHeight:1.5}}>P&amp;L display — show dollar amounts, or hide them and show % / R instead.</div>
+        <div style={{display:"flex",gap:8}}>
+          {[{v:false,label:"$ Amounts",d:"Show dollar values"},{v:true,label:"% / R only",d:"Hide dollar values"}].map(function(o){
+            var on=!!settings.hideDollarPnL===o.v;
+            return <button key={String(o.v)} onClick={function(){setSettings(function(s){return Object.assign({},s,{hideDollarPnL:o.v});});}} style={{flex:1,textAlign:"left",padding:"12px 14px",background:on?"#1e1b4b":"#0a0a0f",border:"1px solid "+(on?"#4338ca":"#334155"),borderRadius:8,cursor:"pointer",fontFamily:"inherit"}}>
+              <div style={{fontSize:14,fontWeight:700,color:on?"#a5b4fc":"#cbd5e1"}}>{o.label}</div>
+              <div style={{fontSize:11,color:"#64748b",marginTop:2}}>{o.d}</div>
+            </button>;
+          })}
+        </div>
       </SettingsSection>
 
       <SettingsSection title="Timezone">
@@ -7151,8 +7171,12 @@ function App(){
     <div style={{minHeight:"100vh",background:"#0a0a0f",color:"#e2e8f0",fontFamily:"-apple-system,BlinkMacSystemFont,system-ui,sans-serif",display:"flex"}}>
       {/* CHANGED: Collapsible laptop left sidebar navigation — hidden in mobile view. */}
       {!mobile&&<div style={{width:sidebarCollapsed?64:220,flexShrink:0,background:"#111118",borderRight:"1px solid #1e293b",height:"100vh",position:"sticky",top:0,display:"flex",flexDirection:"column",padding:sidebarCollapsed?"22px 8px":"22px 14px",boxSizing:"border-box",transition:"width 0.18s ease"}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:sidebarCollapsed?"center":"space-between",marginBottom:18,minHeight:24}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:sidebarCollapsed?"center":"space-between",marginBottom:18,minHeight:24,gap:8}}>
           {!sidebarCollapsed&&<div style={{padding:"0 4px"}}><div style={{fontSize:17,fontWeight:800,color:"#e2e8f0",letterSpacing:-0.5,lineHeight:1.1}}>Psycho</div><div style={{fontSize:17,fontWeight:800,color:"#a5b4fc",letterSpacing:-0.5,lineHeight:1.1}}>Trader</div></div>}
+          {!sidebarCollapsed&&<div style={{display:"flex",gap:6,alignItems:"center"}}>
+            <button onClick={toggleViewMode} aria-label="Switch to mobile view" title="Switch to mobile view" style={{width:30,height:30,flexShrink:0,background:"#0a0a0f",border:"1px solid #334155",borderRadius:8,fontSize:14,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center"}}>📱</button>
+            <button onClick={function(){setSettings(function(s){return Object.assign({},s,{hideDollarPnL:!s.hideDollarPnL});});}} aria-label={settings.hideDollarPnL?"Show $ amounts":"Hide $ amounts"} title={settings.hideDollarPnL?"Showing %. Tap to show $.":"Showing $. Tap to hide."} style={{width:30,height:30,flexShrink:0,background:settings.hideDollarPnL?"#1e1b4b":"#0a0a0f",border:"1px solid "+(settings.hideDollarPnL?"#4338ca":"#334155"),borderRadius:8,color:settings.hideDollarPnL?"#a5b4fc":"#94a3b8",fontSize:15,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center"}}>{settings.hideDollarPnL?"%":"$"}</button>
+          </div>}
           <button onClick={function(){setSidebarCollapsed(function(c){return !c;});}} aria-label={sidebarCollapsed?"Expand sidebar":"Collapse sidebar"} title={sidebarCollapsed?"Expand":"Collapse"} style={{width:32,height:32,flexShrink:0,background:"#0a0a0f",border:"1px solid #334155",borderRadius:8,color:"#94a3b8",fontSize:16,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center"}}>{sidebarCollapsed?"»":"«"}</button>
         </div>
         {[{id:"dashboard",label:"Home",icon:"⌂"},{id:"trades",label:"Journal",icon:"≡"},{id:"goals",label:"Goals",icon:"◎"},{id:"performance",label:"Performance",icon:"📈"},{id:"settings",label:"Settings",icon:"⚙"}].map(function(t){
@@ -7166,19 +7190,18 @@ function App(){
       <div style={{flex:1,minWidth:0}}>
       <div style={{maxWidth:mobile?560:1320,margin:"0 auto",padding:mobile?"0 12px 84px":"0 28px 60px"}}>
         <div style={{padding:"16px 0 12px",position:"sticky",top:0,background:"#0a0a0f",zIndex:50,borderBottom:"1px solid #1e293b"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8,gap:12}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,gap:12}}>
             <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:21,fontWeight:800,color:"#e2e8f0",letterSpacing:-0.5}}>Psycho Trader</div>
-              <div style={{fontSize:12,color:"#64748b",marginTop:1}}>{todayDisplay()} · {getPhaseLabel(phase)}</div>
+              {/* CHANGED: brand only shows in mobile (no sidebar there); laptop shows date/session prominently. */}
+              {mobile&&<div style={{fontSize:13,fontWeight:800,color:"#a5b4fc",letterSpacing:-0.2,marginBottom:2}}>Psycho Trader</div>}
+              <div style={{fontSize:18,fontWeight:700,color:"#e2e8f0",letterSpacing:-0.3}}>{todayDisplay()}</div>
+              <div style={{fontSize:13,color:"#94a3b8",marginTop:2,fontWeight:500}}>{getPhaseLabel(phase)}</div>
             </div>
-            {/* CHANGED: Replaced P&L display with current time + Hide-$ toggle. */}
             <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
               <div style={{textAlign:"right"}}>
                 <div style={{fontSize:11,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>{(TIMEZONES.find(function(z){return z.value===(settings.timezone||USER_TIMEZONE);})||{label:""}).label.replace(/.*\((.+)\).*/,"$1")||""}</div>
-                <div style={{fontSize:16,fontWeight:700,color:"#e2e8f0",marginTop:1,fontVariantNumeric:"tabular-nums"}}>{fmtClock(headerNow)}</div>
+                <div style={{fontSize:18,fontWeight:700,color:"#e2e8f0",marginTop:1,fontVariantNumeric:"tabular-nums"}}>{fmtClock(headerNow)}</div>
               </div>
-              <button onClick={toggleViewMode} aria-label={mobile?"Switch to laptop view":"Switch to mobile view"} title={mobile?"Mobile view. Tap for laptop view.":"Laptop view. Tap for mobile view."} style={{padding:0,background:"#0a0a0f",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:15,fontWeight:700,cursor:"pointer",fontFamily:"inherit",lineHeight:1,width:32,height:32,display:"flex",alignItems:"center",justifyContent:"center"}}>{mobile?"💻":"📱"}</button>
-              <button onClick={function(){setSettings(function(s){return Object.assign({},s,{hideDollarPnL:!s.hideDollarPnL});});}} aria-label={settings.hideDollarPnL?"Show $ amounts":"Show % only"} title={settings.hideDollarPnL?"Showing %. Tap to show $ amounts.":"Showing $. Tap to show % only."} style={{padding:0,background:settings.hideDollarPnL?"#1e1b4b":"#0a0a0f",border:"1px solid "+(settings.hideDollarPnL?"#4338ca":"#334155"),borderRadius:6,color:settings.hideDollarPnL?"#a5b4fc":"#94a3b8",fontSize:16,fontWeight:700,cursor:"pointer",fontFamily:"inherit",lineHeight:1,width:32,height:32,display:"flex",alignItems:"center",justifyContent:"center"}}>{settings.hideDollarPnL?"%":"$"}</button>
             </div>
           </div>
         </div>
