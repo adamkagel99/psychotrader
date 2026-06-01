@@ -1,5 +1,54 @@
 import { supabase } from "./supabaseClient";
 
+const BUCKET = "screenshots";
+
+// Convert a base64 data URL to a Blob for upload.
+function dataUrlToBlob(dataUrl) {
+  const [head, b64] = dataUrl.split(",");
+  const mime = (head.match(/data:([^;]+)/) || [])[1] || "image/jpeg";
+  const bin = atob(b64);
+  const len = bin.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
+// Upload a data-URL screenshot; returns the storage path "userId/uuid.ext" or null.
+async function uploadDataUrl(userId, dataUrl) {
+  try {
+    const blob = dataUrlToBlob(dataUrl);
+    const ext = (blob.type.split("/")[1] || "jpg").replace("jpeg", "jpg");
+    const name = `${userId}/${cryptoId()}.${ext}`;
+    const { error } = await supabase.storage.from(BUCKET).upload(name, blob, {
+      contentType: blob.type,
+      upsert: false,
+    });
+    if (error) { console.error("Screenshot upload failed:", error); return null; }
+    return name; // store the path; we sign it on read
+  } catch (e) {
+    console.error("uploadDataUrl error:", e);
+    return null;
+  }
+}
+
+function cryptoId() {
+  if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+  return "img-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+}
+
+// Turn a stored screenshot value into something <img src> can use.
+// Storage paths -> short-lived signed URL. Already-URLs/data URLs pass through.
+async function signScreenshot(value) {
+  if (typeof value !== "string") return value;
+  if (value.startsWith("http") || value.startsWith("data:")) return value;
+  const { data, error } = await supabase.storage
+    .from(BUCKET)
+    .createSignedUrl(value, 60 * 60 * 24 * 7); // 7-day URL
+  if (error) { console.error("sign url failed:", error); return value; }
+  return data.signedUrl;
+}
+
+
 // ============================================================
 // Local-first sync for Psycho Trader.
 //
@@ -96,6 +145,17 @@ export async function pullFromCloud(userId) {
       tradeRowToApp(t)
     );
   });
+
+  // CHANGED: convert stored screenshot paths into signed URLs the app can render.
+  for (const dayArr of Object.values(tradesByDay)) {
+    for (const t of dayArr) {
+      if (Array.isArray(t.screenshots) && t.screenshots.length) {
+        const signed = [];
+        for (const s of t.screenshots) signed.push(await signScreenshot(s));
+        t.screenshots = signed;
+      }
+    }
+  }
 
   (days || []).forEach((d) => {
     const entry = Object.assign({}, d.raw || {}, {
@@ -211,6 +271,32 @@ async function handleSet(key) {
     const date = key.slice("journal:".length);
     let entry;
     try { entry = JSON.parse(rawVal); } catch { return; }
+
+    // CHANGED: upload any base64 screenshots to Storage and replace them with
+    // storage paths BEFORE saving — keeps localStorage small and avoids quota.
+    let mutated = false;
+    if (Array.isArray(entry.trades)) {
+      for (const t of entry.trades) {
+        if (Array.isArray(t.screenshots) && t.screenshots.length) {
+          const out = [];
+          for (const s of t.screenshots) {
+            if (typeof s === "string" && s.startsWith("data:")) {
+              const path = await uploadDataUrl(uid, s);
+              out.push(path || s); // fall back to keeping inline if upload failed
+              if (path) mutated = true;
+            } else {
+              out.push(s);
+            }
+          }
+          t.screenshots = out;
+        }
+      }
+    }
+    // Persist the rewritten (path-based) entry locally so the heavy base64 is gone.
+    if (mutated) {
+      try { rawSetItem(key, JSON.stringify(entry)); } catch (e) { /* ignore */ }
+    }
+
     const known = new Set([
       "date","pnl","riskMax","disciplineScore","noTradeDay","noTradeReason","commitment","trades",
     ]);
@@ -353,19 +439,86 @@ export function clearLocalAppData() {
 // Exposed globally so the app's Restore button can push the imported data to the
 // cloud and WAIT before reloading (otherwise the debounced push is lost on reload).
 if (typeof window !== "undefined") {
-  window.__psychoSyncPushAll = async function () {
-    if (!currentUserId) return; // not signed in: nothing to do, local restore is enough
+  // Restore: clear this user's cloud data, then push every key from the backup
+  // OBJECT directly (not localStorage, which may have dropped oversized image keys).
+  window.__psychoSyncRestore = async function (backup) {
+    if (!currentUserId) return;
     const uid = currentUserId;
-    // Clean replace: wipe this user's cloud rows, then push the restored local data,
-    // so the cloud becomes an exact copy of the backup (no leftover stale days/trades).
     try {
       await supabase.from("trades").delete().eq("user_id", uid);
       await supabase.from("journal_days").delete().eq("user_id", uid);
       await supabase.from("transfers").delete().eq("user_id", uid);
       await supabase.from("user_kv").delete().eq("user_id", uid);
-    } catch (e) {
-      console.error("Cloud clear before restore failed:", e);
+    } catch (e) { console.error("Cloud clear before restore failed:", e); }
+
+    for (const key of Object.keys(backup || {})) {
+      if (!(isJournalKey(key) || key === "tf-transfers" || isSyncableKv(key))) continue;
+      // Ensure localStorage has the value for handleSet to read; if it was dropped
+      // due to quota, write the rewritten (image-stripped) version after upload.
+      try { rawSetItem(key, backup[key]); } catch (e) { /* quota: handled below */ }
+      try {
+        await handleSetFromValue(key, backup[key], uid);
+      } catch (e) {
+        console.error("Restore push failed for", key, e);
+      }
     }
-    await pushAllLocal(uid);
   };
+
+  // Back-compat alias used by older builds.
+  window.__psychoSyncPushAll = async function () {
+    if (!currentUserId) return;
+    await pushAllLocal(currentUserId);
+  };
+}
+
+// Like handleSet but takes the raw value explicitly (used by restore so it works
+// even when the value couldn't be stored in localStorage due to quota).
+async function handleSetFromValue(key, rawVal, uid) {
+  const prevUser = currentUserId;
+  currentUserId = uid;
+  // Temporarily stash into a module var the handlers read from localStorage; to keep
+  // things simple we write to localStorage if possible, else parse inline for journals.
+  if (isJournalKey(key)) {
+    let entry;
+    try { entry = JSON.parse(rawVal); } catch { currentUserId = prevUser; return; }
+    const date = key.slice("journal:".length);
+    // upload images
+    if (Array.isArray(entry.trades)) {
+      for (const t of entry.trades) {
+        if (Array.isArray(t.screenshots) && t.screenshots.length) {
+          const out = [];
+          for (const s of t.screenshots) {
+            if (typeof s === "string" && s.startsWith("data:")) {
+              const path = await uploadDataUrl(uid, s);
+              out.push(path || s);
+            } else out.push(s);
+          }
+          t.screenshots = out;
+        }
+      }
+    }
+    const known = new Set(["date","pnl","riskMax","disciplineScore","noTradeDay","noTradeReason","commitment","trades"]);
+    const raw = {};
+    Object.keys(entry || {}).forEach((k) => { if (!known.has(k)) raw[k] = entry[k]; });
+    await supabase.from("journal_days").upsert({
+      user_id: uid, date,
+      pnl: numOrNull(entry.pnl) || 0,
+      risk_max: numOrNull(entry.riskMax),
+      discipline_score: numOrNull(entry.disciplineScore),
+      no_trade_day: !!entry.noTradeDay,
+      no_trade_reason: entry.noTradeReason || null,
+      commitment: entry.commitment || null,
+      raw,
+    }, { onConflict: "user_id,date" });
+    await supabase.from("trades").delete().eq("user_id", uid).eq("day_date", date);
+    const rows = (entry.trades || []).map((t) => Object.assign({ user_id: uid }, appTradeToRow(t, date)));
+    if (rows.length) await supabase.from("trades").upsert(rows, { onConflict: "user_id,client_id" });
+    // write the small, path-based version back to localStorage now that images are uploaded
+    try { rawSetItem(key, JSON.stringify(entry)); } catch (e) { /* ignore */ }
+    currentUserId = prevUser;
+    return;
+  }
+  // transfers + kv have no images: defer to the normal handler (reads localStorage)
+  await handleSet(key);
+  currentUserId = prevUser;
 }
