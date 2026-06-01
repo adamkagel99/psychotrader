@@ -2,6 +2,21 @@ import { supabase } from "./supabaseClient";
 
 const BUCKET = "screenshots";
 
+// CHANGED: the app stores journal dates as US "M-D-YYYY"; Postgres date columns want ISO
+// "YYYY-MM-DD". Normalize on the way up so inserts never silently fail on ambiguous dates.
+function appToIsoDate(d) {
+  if (!d) return d;
+  const s = String(d);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s; // already ISO
+  const m = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/); // M-D-YYYY or M/D/YYYY
+  if (m) {
+    const mm = String(parseInt(m[1], 10)).padStart(2, "0");
+    const dd = String(parseInt(m[2], 10)).padStart(2, "0");
+    return m[3] + "-" + mm + "-" + dd;
+  }
+  return s;
+}
+
 // Convert a base64 data URL to a Blob for upload.
 function dataUrlToBlob(dataUrl) {
   const [head, b64] = dataUrl.split(",");
@@ -157,9 +172,23 @@ export async function pullFromCloud(userId) {
     }
   }
 
+  // CHANGED: Postgres returns dates as ISO "YYYY-MM-DD". The app uses TWO formats:
+  //   - the localStorage KEY is "journal:M-D-YYYY" (dashes)
+  //   - the entry's internal `date` field is "M/D/YYYY" (slashes), which the calendar matches on.
+  // We must rebuild BOTH correctly or days vanish after a sync.
+  function isoParts(iso) {
+    const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return null;
+    return { y: m[1], mo: parseInt(m[2], 10), d: parseInt(m[3], 10) };
+  }
+  function isoToKeyDate(iso) { const p = isoParts(iso); return p ? (p.mo + "-" + p.d + "-" + p.y) : iso; }
+  function isoToInternalDate(iso) { const p = isoParts(iso); return p ? (p.mo + "/" + p.d + "/" + p.y) : iso; }
+
   (days || []).forEach((d) => {
+    const keyDate = isoToKeyDate(d.date);
+    const internalDate = isoToInternalDate(d.date);
     const entry = Object.assign({}, d.raw || {}, {
-      date: d.date,
+      date: internalDate,
       pnl: Number(d.pnl) || 0,
       riskMax: d.risk_max != null ? Number(d.risk_max) : 100,
       disciplineScore: d.discipline_score,
@@ -168,7 +197,7 @@ export async function pullFromCloud(userId) {
       commitment: d.commitment || undefined,
       trades: tradesByDay[d.date] || [],
     });
-    rawSetItem("journal:" + String(d.date), JSON.stringify(entry));
+    rawSetItem("journal:" + keyDate, JSON.stringify(entry));
   });
 }
 
@@ -303,10 +332,11 @@ async function handleSet(key) {
     const raw = {};
     Object.keys(entry || {}).forEach((k) => { if (!known.has(k)) raw[k] = entry[k]; });
 
+    const isoDate = appToIsoDate(date);
     await supabase.from("journal_days").upsert(
       {
         user_id: uid,
-        date,
+        date: isoDate,
         pnl: numOrNull(entry.pnl) || 0,
         risk_max: numOrNull(entry.riskMax),
         discipline_score: numOrNull(entry.disciplineScore),
@@ -319,9 +349,9 @@ async function handleSet(key) {
     );
 
     // Replace this day's trades.
-    await supabase.from("trades").delete().eq("user_id", uid).eq("day_date", date);
+    await supabase.from("trades").delete().eq("user_id", uid).eq("day_date", isoDate);
     const rows = (entry.trades || []).map((t) =>
-      Object.assign({ user_id: uid }, appTradeToRow(t, date))
+      Object.assign({ user_id: uid }, appTradeToRow(t, isoDate))
     );
     if (rows.length) {
       await supabase.from("trades").upsert(rows, { onConflict: "user_id,client_id" });
@@ -500,8 +530,9 @@ async function handleSetFromValue(key, rawVal, uid) {
     const known = new Set(["date","pnl","riskMax","disciplineScore","noTradeDay","noTradeReason","commitment","trades"]);
     const raw = {};
     Object.keys(entry || {}).forEach((k) => { if (!known.has(k)) raw[k] = entry[k]; });
+    const isoDate = appToIsoDate(date);
     await supabase.from("journal_days").upsert({
-      user_id: uid, date,
+      user_id: uid, date: isoDate,
       pnl: numOrNull(entry.pnl) || 0,
       risk_max: numOrNull(entry.riskMax),
       discipline_score: numOrNull(entry.disciplineScore),
@@ -510,8 +541,8 @@ async function handleSetFromValue(key, rawVal, uid) {
       commitment: entry.commitment || null,
       raw,
     }, { onConflict: "user_id,date" });
-    await supabase.from("trades").delete().eq("user_id", uid).eq("day_date", date);
-    const rows = (entry.trades || []).map((t) => Object.assign({ user_id: uid }, appTradeToRow(t, date)));
+    await supabase.from("trades").delete().eq("user_id", uid).eq("day_date", isoDate);
+    const rows = (entry.trades || []).map((t) => Object.assign({ user_id: uid }, appTradeToRow(t, isoDate)));
     if (rows.length) await supabase.from("trades").upsert(rows, { onConflict: "user_id,client_id" });
     // write the small, path-based version back to localStorage now that images are uploaded
     try { rawSetItem(key, JSON.stringify(entry)); } catch (e) { /* ignore */ }
