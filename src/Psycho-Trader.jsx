@@ -4864,29 +4864,17 @@ function GoalsTab(props){
 // CHANGED: StatSec now accepts an optional `sparkline` (array of numbers) — renders a tiny inline
 // trend chart next to the preview on collapsed headers. Color = green if last value ≥ first.
 function StatSec(props){
-  var [open,setOpen]=useState(props.defaultOpen!==false);
-  var spark=props.sparkline;
-  function renderSpark(){
-    if(!Array.isArray(spark)||spark.length<2)return null;
-    var W=46,H=14;
-    var mn=Math.min.apply(null,spark),mx=Math.max.apply(null,spark);
-    if(mn===mx){mn-=1;mx+=1;}
-    var pts=spark.map(function(v,i){var x=(i/(spark.length-1))*(W-2)+1;var y=H-1-((v-mn)/(mx-mn))*(H-2);return x.toFixed(1)+","+y.toFixed(1);}).join(" ");
-    var color=spark[spark.length-1]>=spark[0]?"#22c55e":"#ef4444";
-    return <svg width={W} height={H} viewBox={"0 0 "+W+" "+H} style={{display:"inline-block",verticalAlign:"middle",marginLeft:6,flexShrink:0}}><polyline points={pts} fill="none" stroke={color} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
-  }
+  // CHANGED: No more expand/collapse. Clean panel with a label header and content below.
+  // Sized to be placed inside a CSS-columns masonry container or grid container.
+  var span=props.colSpan;
+  var outer={background:"#111118",border:"1px solid #1e293b",borderRadius:10,overflow:"hidden",display:"flex",flexDirection:"column",breakInside:"avoid",WebkitColumnBreakInside:"avoid",pageBreakInside:"avoid",marginBottom:16,width:"100%"};
+  if(span)outer.gridColumn="span "+span;
   return (
-    <div style={Object.assign({background:"#111118",border:"1px solid #1e293b",borderRadius:10,marginBottom:10,overflow:"hidden"})}>
-      <button onClick={function(){setOpen(function(o){return !o;});}} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",padding:"12px 16px",textAlign:"left"}}>
-        <span style={{fontSize:12,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>{props.title}</span>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
-          {/* CHANGED: Show metric preview in header when collapsed. */}
-          {!open&&props.preview&&<span style={{fontSize:11,color:"#64748b",fontWeight:400}}>{props.preview}</span>}
-          {!open&&renderSpark()}
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{display:"inline-block",verticalAlign:"middle",transition:"transform 0.2s",transform:open?"rotate(180deg)":"rotate(0deg)"}}><path d="M2 4l4 4 4-4" stroke="#64748b" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-        </div>
-      </button>
-      {open&&<div style={{padding:"4px 16px 12px",borderTop:"1px solid #1e293b"}}>{props.children}</div>}
+    <div style={outer}>
+      <div style={{padding:"11px 16px",borderBottom:"1px solid #1e293b",background:"#0d0d14"}}>
+        <span style={{fontSize:11,color:"#94a3b8",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700}}>{props.title}</span>
+      </div>
+      <div style={{padding:"12px 16px",flex:1,minWidth:0}}>{props.children}</div>
     </div>
   );
 }
@@ -5220,7 +5208,7 @@ function RMultipleHistogram(props){
   var hoverCount=hoverI!=null?counts[hoverI]:null;
   var hoverPct=hoverI!=null&&Rs.length>0?Math.round((counts[hoverI]/Rs.length)*100):null;
   return (
-    <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid #1e293b",borderRadius:10,display:"flex",flexDirection:"column",height:"100%",boxSizing:"border-box"}}>
+    <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid #1e293b",borderRadius:10,display:"flex",flexDirection:"column",boxSizing:"border-box"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10,gap:8}}>
         <div>
           <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{hoverI!=null?labels[hoverI]:"R-Multiple Distribution"}</div>
@@ -5236,7 +5224,7 @@ function RMultipleHistogram(props){
           <div>n = {Rs.length}</div>
         </div>
       </div>
-      <div ref={barsRef} onMouseMove={moveBars} onMouseLeave={leaveBars} onTouchStart={moveBars} onTouchMove={moveBars} onTouchEnd={leaveBars} style={{display:"flex",alignItems:"flex-end",gap:3,flex:1,minHeight:64,marginBottom:6,cursor:"crosshair",touchAction:"none"}}>
+      <div ref={barsRef} onMouseMove={moveBars} onMouseLeave={leaveBars} onTouchStart={moveBars} onTouchMove={moveBars} onTouchEnd={leaveBars} style={{display:"flex",alignItems:"flex-end",gap:3,height:120,marginBottom:6,cursor:"crosshair",touchAction:"none"}}>
         {counts.map(function(c,i){
           var h=maxCount>0?(c/maxCount)*100:0;
           var isNeg=bounds[i+1]<=0;
@@ -5397,9 +5385,9 @@ function StreakTracker(props){
     </div>
   );}
   return (
-    <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid #1e293b",borderRadius:10,display:"flex",flexDirection:"column",height:"100%",boxSizing:"border-box"}}>
+    <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid #1e293b",borderRadius:10,display:"flex",flexDirection:"column",boxSizing:"border-box",alignSelf:"start"}}>
       <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600,marginBottom:8}}>Streaks</div>
-      <div style={{display:"flex",gap:6,flex:1,alignItems:"stretch"}}>
+      <div style={{display:"flex",gap:6,alignItems:"stretch"}}>
         <Card label="Current" value={curN} unit={curKind==="win"?"green":curKind==="lose"?"red":"—"} color={curKind==="win"?"#22c55e":curKind==="lose"?"#ef4444":"#94a3b8"} bd={curKind==="win"?"#16653466":curKind==="lose"?"#7f1d1d66":"#334155"}/>
         <Card label="Best Win" value={bestWin} unit="days" color="#22c55e" bd="#16653466"/>
         <Card label="Worst Loss" value={bestLose} unit="days" color="#ef4444" bd="#7f1d1d66"/>
@@ -5633,12 +5621,11 @@ function PerformanceTab(props){
           ].map(function(opt){
             var on=range===opt.v;
             return (
-              <button key={opt.v} onClick={function(){setRange(opt.v);}} style={{padding:props.mobile?"5px 8px":"6px 12px",background:on?"#4338ca":"#0a0a0f",border:"1px solid "+(on?"#6366f1":"#334155"),borderRadius:999,color:on?"#fff":"#94a3b8",fontSize:props.mobile?11:12,fontWeight:on?700:500,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>{opt.l}</button>
+              <button key={opt.v} onClick={function(){var prevY=window.scrollY;setRange(opt.v);requestAnimationFrame(function(){window.scrollTo(0,prevY);});}} style={{padding:props.mobile?"5px 8px":"6px 12px",background:on?"#4338ca":"#0a0a0f",border:"1px solid "+(on?"#6366f1":"#334155"),borderRadius:999,color:on?"#fff":"#94a3b8",fontSize:props.mobile?11:12,fontWeight:on?700:500,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>{opt.l}</button>
             );
           })}
         </div>
       </div>
-      <AchievementsPanel/>
       {filtered.length>0&&(function(){
         // CHANGED: Gather summary stats for AI Coach.
         function bw(fieldKey,isArr){
@@ -5716,30 +5703,18 @@ function PerformanceTab(props){
         };
         return <AICoach stats={stats}/>;
       })()}
+      {filtered.length>0&&<AchievementsPanel/>}
       {filtered.length===0&&<div style={{textAlign:"center",padding:"40px 20px",borderTop:"1px dashed #1e293b",marginTop:8}}><div style={{fontSize:14,color:"#475569"}}>No data for this range yet</div></div>}
       {filtered.length>0&&(
         <div>
-          {/* CHANGED: Charts grid — equal heights per row (stretch) so cards line up. */}
-          <div style={{display:"grid",gridTemplateColumns:props.mobile?"1fr":"repeat(auto-fit,minmax(380px,1fr))",gap:16,alignItems:"stretch",marginBottom:16}}>
-          <EquityCurve entries={filtered}/>
-          <WhatsWorkingPanel trades={allTrades}/>
-          <RMultipleHistogram rows={filtered} fallbackRiskMax={parseFloat(settings.riskMax)||0}/>
-          <DisciplineScatter rows={filtered} settings={settings}/>
-          <StreakTracker rows={filtered} settings={settings}/>
-          <SessionDayHeatmap rows={filtered} settings={settings}/>
-          </div>
-          {/* CHANGED: Collapsible breakdowns grid — uniform collapsed-header height. */}
-          <div style={{display:"grid",gridTemplateColumns:props.mobile?"1fr":"repeat(auto-fit,minmax(380px,1fr))",gap:16,alignItems:"start"}}>
-          {/* Daily P&L now collapsible. */}
-          <StatSec title="Daily P&L" defaultOpen={false}>
-            <DailyPnLBar entries={filtered}/>
-          </StatSec>
+          {/* CHANGED: CSS columns for true masonry packing — items flow vertically, balancing column heights. No empty gaps. */}
+          <div style={{columnCount:props.mobile?1:3,columnGap:16}}>
           {(function(){
             // Equity sparkline: running cumulative P&L by day.
             var eq=[],c=0;filtered.forEach(function(r){c+=parseFloat(r.pnl)||0;eq.push(c);});
             var pfn=parseFloat(pf);
             var pfColor=pf==="∞"||pfn>1?"#22c55e":pfn<1?"#ef4444":"#94a3b8";
-            return <StatSec title="Overview" defaultOpen={false} preview={winRate+"%  WR · "+breakevenRate+"% BE · PF "+pf} sparkline={eq}>
+            return <StatSec title="Overview" colSpan={props.mobile?1:6}>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,padding:"4px 0"}}>
                 <StatTile label="Total P&L" value={HIDE_DOLLAR_PNL?(totalPnl>=0?"+$•••":"-$•••"):((totalPnl>=0?"+":"-")+"$"+Math.abs(totalPnl).toFixed(2))} color={totalPnl>=0?"#22c55e":"#ef4444"}/>
                 <StatTile label="Trades" value={allTrades.length} sub={tradingDays>0?(Math.ceil(avgTradesPerDay)+"/day · "+tradingDays+"d"):""}/>
@@ -5753,7 +5728,12 @@ function PerformanceTab(props){
               </div>
             </StatSec>;
           })()}
-          {/* CHANGED: Best/Worst Combo — top and bottom performer for setup, candle pattern, and indicator (by avg %). */}
+          <div style={{breakInside:"avoid",WebkitColumnBreakInside:"avoid",marginBottom:16}}><EquityCurve entries={filtered}/></div>
+          <StatSec title="Daily P&L">
+            <DailyPnLBar entries={filtered}/>
+          </StatSec>
+          <div style={{breakInside:"avoid",WebkitColumnBreakInside:"avoid",marginBottom:16}}><StreakTracker rows={filtered} settings={settings}/></div>
+          <div style={{breakInside:"avoid",WebkitColumnBreakInside:"avoid",marginBottom:16}}><RMultipleHistogram rows={filtered} fallbackRiskMax={parseFloat(settings.riskMax)||0}/></div>
           {(function(){
             if(allTrades.length===0)return null;
             function bestWorst(fieldKey,isArr){
@@ -5815,15 +5795,13 @@ function PerformanceTab(props){
             if(cpBW)rows.push(["Candle Pattern",cpBW]);
             if(indBW)rows.push(["Indicator",indBW]);
             return (
-              <StatSec title="Best / Worst Combo" defaultOpen={false}>
+              <StatSec title="Best / Worst Combo" colSpan={props.mobile?1:6}>
                 {rows.map(function(r,i){return <div key={r[0]}>{row(r[0],r[1],i===rows.length-1)}</div>;})}
                 <div style={{fontSize:10,color:"#64748b",fontStyle:"italic",marginTop:6,paddingTop:6,borderTop:"1px solid #1e293b"}}>Ranked by average %. Minimum 2 trades to qualify.</div>
               </StatSec>
             );
           })()}
-          {/* CHANGED: Setups / Candle Patterns / Indicators — refactored to ranked horizontal bar
-              charts sorted by expectancy (highest → lowest), so winning and losing tags are
-              instantly visible. Bar length is proportional to absolute avg-P&L vs the strongest tag. */}
+          <div style={{breakInside:"avoid",WebkitColumnBreakInside:"avoid",marginBottom:16}}><DisciplineScatter rows={filtered} settings={settings}/></div>
           {(function(){
             function renderBreakdown(title,groups,sparkBase){
               var rows=Object.keys(groups).map(function(k){
@@ -5840,7 +5818,7 @@ function PerformanceTab(props){
               var positive=rows.filter(function(r){return r.exp>0;}).length;
               var preview=totalN>0?(rows.length+" tags · "+positive+" green"):"";
               return (
-                <StatSec key={title} title={title} defaultOpen={false} preview={preview}>
+                <StatSec key={title} title={title} colSpan={props.mobile?1:6}>
                   {rows.length===0&&<div style={{fontSize:13,color:"#64748b",fontStyle:"italic",padding:"4px 0"}}>No data yet.</div>}
                   {rows.map(function(r,i){
                     var val=HIDE_DOLLAR_PNL?r.avgPct:r.exp;
@@ -5862,8 +5840,7 @@ function PerformanceTab(props){
             });
             return <>{renderBreakdown("Setups",setupG)}{renderBreakdown("Candle Patterns",cpG)}{renderBreakdown("Indicators",indG)}</>;
           })()}
-          {/* CHANGED: Breakdown by Rule Violation. A trade may carry multiple violations, so it can
-              appear in multiple buckets. Shows count, win rate, and avg P&L per violation type. */}
+          <div style={{breakInside:"avoid",WebkitColumnBreakInside:"avoid",marginBottom:16}}><SessionDayHeatmap rows={filtered} settings={settings}/></div>
           {(function(){
             var groups={};
             var cleanN=0,violN=0;
@@ -5900,7 +5877,7 @@ function PerformanceTab(props){
             // CHANGED: Sparkline = per-day violation count across the filtered range (so user sees the trend at a glance).
             var violSpark=filtered.map(function(r){return (r.trades||[]).reduce(function(s,t){return s+((t&&t.status!=="open"&&t.violations)?t.violations.length:0);},0);});
             return (
-              <StatSec title="Rule Violations" defaultOpen={false} preview={total>0?(cleanRate+"% clean · "+violN+" flagged"+(lockedDays.length>0?" · "+lockedDays.length+" lock"+(lockedDays.length===1?"":"s"):"")):""} sparkline={violSpark}>
+              <StatSec title="Rule Violations" colSpan={props.mobile?1:6}>
                 {keys.length===0&&<div style={{fontSize:13,color:"#64748b",fontStyle:"italic",padding:"4px 0"}}>No rule violations in this range. Clean record!</div>}
                 {keys.length>0&&(
                   <div style={{fontSize:11,color:"#64748b",padding:"2px 0 8px",borderBottom:"1px solid #1e293b",marginBottom:6}}>{violN} of {total} trade{total===1?"":"s"} flagged · <span style={{color:wrColor(cleanRate)}}>{cleanRate}% clean</span>{lockedDays.length>0?" · "+lockedDays.length+" discipline lock"+(lockedDays.length===1?"":"s"):""}</div>
@@ -5933,6 +5910,7 @@ function PerformanceTab(props){
               </StatSec>
             );
           })()}
+          <div style={{breakInside:"avoid",WebkitColumnBreakInside:"avoid",marginBottom:16}}><WhatsWorkingPanel trades={allTrades}/></div>
           {(function(){
             function summarize(filterFn){
               var n=0,w=0,pnl=0,pcts=[];
@@ -5953,7 +5931,7 @@ function PerformanceTab(props){
             ].filter(function(c){return c.stat.n>0;});
             if(cats.length===0)return null;
             return (
-              <StatSec title="Untagged Trades" defaultOpen={false} preview={cats.length+" categor"+(cats.length===1?"y":"ies")}>
+              <StatSec title="Untagged Trades" colSpan={props.mobile?1:6}>
                 {cats.map(function(c,i){
                   var g=c.stat;
                   var pnlStr=HIDE_DOLLAR_PNL?((g.avgPct>=0?"+":"")+g.avgPct.toFixed(2)+"%"):((g.expectancy>=0?"+":"-")+"$"+Math.abs(g.expectancy).toFixed(2)+" exp");
@@ -5972,16 +5950,14 @@ function PerformanceTab(props){
               </StatSec>
             );
           })()}
-          {/* NEW: Breakeven Analysis Section */}
           {(function(){
-            // CHANGED: Sparkline = per-day breakeven rate trend across the filtered range.
             var beSpark=filtered.map(function(r){
               var ct=(r.trades||[]).filter(function(t){return t&&t.status!=="open";});
               if(ct.length===0)return 0;
               var be=ct.filter(function(t){return Math.abs(parseFloat(t.pnl)||0)<0.01;}).length;
               return Math.round((be/ct.length)*100);
             });
-            return <StatSec title="Breakeven Analysis" defaultOpen={false} preview={breakevens.length+" trades · "+breakevenRate+"%"+(noTradeDays.length>0?" · "+noTradeDays.length+" NT":"")} sparkline={beSpark}>
+            return <StatSec title="Breakeven Analysis">
             <StatRow label="Total Breakevens" value={breakevens.length+" ("+breakevenRate+"%)"} color="#94a3b8"/>
             <StatRow label="Win/Loss/BE Split" value={wins.length+"/"+(losses.length)+"/"+breakevens.length} color="#64748b"/>
             {breakevens.length>0&&(
@@ -6881,18 +6857,8 @@ function SettingsTab(props){
       </SettingsSection>
 
       <SettingsSection title="Display">
-        <div style={{fontSize:13,color:"#94a3b8",marginBottom:10,lineHeight:1.5}}>Choose how the app is laid out. Laptop uses a sidebar and multi-column views; Mobile uses a bottom tab bar and single-column views.</div>
-        <div style={{display:"flex",gap:8}}>
-          {[{v:"laptop",label:"💻 Laptop",d:"Sidebar · multi-column"},{v:"mobile",label:"📱 Mobile",d:"Bottom tabs · single column"}].map(function(o){
-            var on=(settings.viewMode||"laptop")===o.v;
-            return <button key={o.v} onClick={function(){setSettings(function(s){return Object.assign({},s,{viewMode:o.v});});}} style={{flex:1,textAlign:"left",padding:"12px 14px",background:on?"#1e1b4b":"#0a0a0f",border:"1px solid "+(on?"#4338ca":"#334155"),borderRadius:8,cursor:"pointer",fontFamily:"inherit"}}>
-              <div style={{fontSize:14,fontWeight:700,color:on?"#a5b4fc":"#cbd5e1"}}>{o.label}</div>
-              <div style={{fontSize:11,color:"#64748b",marginTop:2}}>{o.d}</div>
-            </button>;
-          })}
-        </div>
-        {/* CHANGED: hide-$ control lives here too (sole location in mobile view, which has no sidebar). */}
-        <div style={{fontSize:13,color:"#94a3b8",margin:"18px 0 10px",lineHeight:1.5}}>P&amp;L display — show dollar amounts, or hide them and show % / R instead.</div>
+        {/* CHANGED: hide-$ control. Layout (laptop/mobile) is now auto-detected by viewport width. */}
+        <div style={{fontSize:13,color:"#94a3b8",margin:"0 0 10px",lineHeight:1.5}}>P&amp;L display — show dollar amounts, or hide them and show % / R instead.</div>
         <div style={{display:"flex",gap:8}}>
           {[{v:false,label:"$ Amounts",d:"Show dollar values"},{v:true,label:"% / R only",d:"Hide dollar values"}].map(function(o){
             var on=!!settings.hideDollarPnL===o.v;
@@ -7200,18 +7166,15 @@ function App(){
     return function(){window.removeEventListener("resize",r);window.removeEventListener("orientationchange",r);};
   },[]);
   // CHANGED: view-mode — explicit user choice wins; otherwise auto-detect from viewport width (<768px = mobile).
-  var mobile=settings.viewMode?settings.viewMode==="mobile":winW<768;
-  function toggleViewMode(){setSettings(function(s){return Object.assign({},s,{viewMode:mobile?"laptop":"mobile"});});}
+  // CHANGED: Auto-detect only. Toggle removed; viewport width decides layout. 640px = phone-landscape cutoff so laptop windows don't trigger mobile.
+  var mobile=winW<640;
   return (
     <div style={{minHeight:"100vh",background:"#0a0a0f",color:"#e2e8f0",fontFamily:"-apple-system,BlinkMacSystemFont,system-ui,sans-serif",display:"flex"}}>
       {/* CHANGED: Collapsible laptop left sidebar navigation — hidden in mobile view. */}
       {!mobile&&<div style={{width:sidebarCollapsed?64:220,flexShrink:0,background:"#111118",borderRight:"1px solid #1e293b",height:"100vh",position:"sticky",top:0,display:"flex",flexDirection:"column",padding:sidebarCollapsed?"22px 8px":"22px 14px",boxSizing:"border-box",transition:"width 0.18s ease"}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:sidebarCollapsed?"center":"space-between",marginBottom:18,minHeight:24,gap:8}}>
           {!sidebarCollapsed&&<div style={{padding:"0 4px"}}><div style={{fontSize:17,fontWeight:800,color:"#e2e8f0",letterSpacing:-0.5,lineHeight:1.1}}>Psycho</div><div style={{fontSize:17,fontWeight:800,color:"#a5b4fc",letterSpacing:-0.5,lineHeight:1.1}}>Trader</div></div>}
-          {!sidebarCollapsed&&<div style={{display:"flex",gap:6,alignItems:"center"}}>
-            <button onClick={toggleViewMode} aria-label="Switch to mobile view" title="Switch to mobile view" style={{width:30,height:30,flexShrink:0,background:"#0a0a0f",border:"1px solid #334155",borderRadius:8,fontSize:14,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center"}}>📱</button>
-            <button onClick={function(){setSettings(function(s){return Object.assign({},s,{hideDollarPnL:!s.hideDollarPnL});});}} aria-label={settings.hideDollarPnL?"Show $ amounts":"Hide $ amounts"} title={settings.hideDollarPnL?"Showing %. Tap to show $.":"Showing $. Tap to hide."} style={{width:30,height:30,flexShrink:0,background:settings.hideDollarPnL?"#1e1b4b":"#0a0a0f",border:"1px solid "+(settings.hideDollarPnL?"#4338ca":"#334155"),borderRadius:8,color:settings.hideDollarPnL?"#a5b4fc":"#94a3b8",fontSize:15,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center"}}>{settings.hideDollarPnL?"%":"$"}</button>
-          </div>}
+          {!sidebarCollapsed&&<button onClick={function(){setSettings(function(s){return Object.assign({},s,{hideDollarPnL:!s.hideDollarPnL});});}} aria-label={settings.hideDollarPnL?"Show $ amounts":"Hide $ amounts"} title={settings.hideDollarPnL?"Showing %. Tap to show $.":"Showing $. Tap to hide."} style={{width:30,height:30,flexShrink:0,background:settings.hideDollarPnL?"#1e1b4b":"#0a0a0f",border:"1px solid "+(settings.hideDollarPnL?"#4338ca":"#334155"),borderRadius:8,color:settings.hideDollarPnL?"#a5b4fc":"#94a3b8",fontSize:15,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center"}}>{settings.hideDollarPnL?"%":"$"}</button>}
           <button onClick={function(){setSidebarCollapsed(function(c){return !c;});}} aria-label={sidebarCollapsed?"Expand sidebar":"Collapse sidebar"} title={sidebarCollapsed?"Expand":"Collapse"} style={{width:32,height:32,flexShrink:0,background:"#0a0a0f",border:"1px solid #334155",borderRadius:8,color:"#94a3b8",fontSize:16,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center"}}>{sidebarCollapsed?"»":"«"}</button>
         </div>
         {[{id:"dashboard",label:"Home",icon:"⌂"},{id:"trades",label:"Journal",icon:"≡"},{id:"goals",label:"Goals",icon:"◎"},{id:"performance",label:"Performance",icon:"📈"},{id:"settings",label:"Settings",icon:"⚙"}].map(function(t){
