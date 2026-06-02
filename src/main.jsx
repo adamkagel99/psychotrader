@@ -5,7 +5,7 @@ import AuthGate from "./AuthGate";
 import TradingApp from "./TradingApp";
 import {
   pullFromCloud, pushAllLocal, startSync, stopSync,
-  cloudHasData, clearLocalAppData,
+  cloudHasData, clearLocalAppData, localHasData, backgroundPull,
 } from "./sync";
 
 function Splash({ text }) {
@@ -35,16 +35,27 @@ function SignOutButton() {
 function Root() {
   const [phase, setPhase] = useState("loading"); // loading | auth | syncing | ready
   const [session, setSession] = useState(null);
+  const [syncTick, setSyncTick] = useState(0);
 
   const hydrate = useCallback(async (userId) => {
+    // CHANGED: load-instantly model. If this device already has local data, render the app
+    // immediately and refresh from the cloud in the background (no blocking "Syncing…" splash).
+    // Only the genuine first sign-in on an empty device blocks while we set up.
+    if (localHasData()) {
+      startSync(userId);
+      setPhase("ready");
+      // background refresh; bump a key so the app re-reads localStorage when it lands
+      backgroundPull(userId).then(function (ok) {
+        if (ok) setSyncTick(function (t) { return t + 1; });
+      });
+      return;
+    }
+    // First-time device: decide source of truth, then render.
     setPhase("syncing");
-    // First sign-in on a device that already has local data, and the cloud
-    // is empty? Treat local as the source of truth and push it up.
     const hasCloud = await cloudHasData(userId).catch(() => true);
     if (!hasCloud) {
       await pushAllLocal(userId).catch((e) => console.error(e));
     } else {
-      // Cloud wins: clear stale local app data, then pull the cloud copy down.
       clearLocalAppData();
       await pullFromCloud(userId).catch((e) => console.error(e));
     }
@@ -82,8 +93,8 @@ function Root() {
   return (
     <>
       <SignOutButton />
-      {/* key forces a fresh mount after hydration so the app reads the synced localStorage */}
-      <TradingApp key={session.user.id} />
+      {/* key includes syncTick so a completed background pull re-mounts the app to show fresh data */}
+      <TradingApp key={session.user.id + ":" + syncTick} />
     </>
   );
 }

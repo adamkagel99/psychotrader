@@ -466,6 +466,25 @@ export function clearLocalAppData() {
   keys.forEach((k) => rawRemove.call(window.localStorage, k));
 }
 
+// Does this device already have the user's app data locally? Used to decide whether the
+// page can render instantly (and sync in the background) vs. must block on a first pull.
+export function localHasData() {
+  for (let i = 0; i < window.localStorage.length; i++) {
+    const k = window.localStorage.key(i);
+    if (isJournalKey(k)) return true;
+  }
+  // settings present also counts as "has local data"
+  try { if (window.localStorage.getItem("tf-settings")) return true; } catch (e) {}
+  return false;
+}
+
+// Background pull: refresh local from cloud without clearing first, so the UI never blanks.
+// Returns true if it completed (caller can trigger a re-render to reflect any new data).
+export async function backgroundPull(userId) {
+  try { await pullFromCloud(userId); return true; }
+  catch (e) { console.error("Background sync failed:", e); return false; }
+}
+
 // Exposed globally so the app's Restore button can push the imported data to the
 // cloud and WAIT before reloading (otherwise the debounced push is lost on reload).
 if (typeof window !== "undefined") {
