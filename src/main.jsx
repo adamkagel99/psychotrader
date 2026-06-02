@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { createRoot } from "react-dom/client";
 import { supabase, supabaseReady } from "./supabaseClient";
 import AuthGate from "./AuthGate";
-import TradingApp from "./TradingApp";
+import TradingApp from "./Psycho-Trader";
 import {
   pullFromCloud, pushAllLocal, startSync, stopSync,
   cloudHasData, clearLocalAppData, localHasData, backgroundPull,
