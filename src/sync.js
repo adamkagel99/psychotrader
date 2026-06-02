@@ -461,6 +461,10 @@ export function clearLocalAppData() {
   const keys = [];
   for (let i = 0; i < window.localStorage.length; i++) {
     const k = window.localStorage.key(i);
+    // CHANGED: never clear SKIP_KEYS — these are local-only caches (e.g. the economic-events
+    // cache) that are intentionally not synced to the cloud. Wiping them here would delete the
+    // events list on first sign-in, since the cloud never stored a copy to pull back.
+    if (typeof k === "string" && SKIP_KEYS.has(k)) continue;
     if (isJournalKey(k) || (typeof k === "string" && k.startsWith("tf-"))) keys.push(k);
   }
   keys.forEach((k) => rawRemove.call(window.localStorage, k));
