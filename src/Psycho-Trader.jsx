@@ -6951,9 +6951,9 @@ function ManageTradeView(props){
 }
 
 function App(){
-  // CHANGED: Persist active tab so returning to the app (after sync/reload) stays on the user's last tab.
-  var [tab,setTab]=useState(function(){try{var t=localStorage.getItem("tf-active-tab");return t&&["dashboard","trades","goals","performance","settings"].indexOf(t)>=0?t:"dashboard";}catch(e){return "dashboard";}});
-  useEffect(function(){try{localStorage.setItem("tf-active-tab",tab);}catch(e){}},[tab]);
+  // CHANGED: Persist active tab in sessionStorage so it survives reloads but isn't wiped by cloud-sync (which rewrites localStorage).
+  var [tab,setTab]=useState(function(){try{var t=sessionStorage.getItem("tf-active-tab");return t&&["dashboard","trades","goals","performance","settings"].indexOf(t)>=0?t:"dashboard";}catch(e){return "dashboard";}});
+  useEffect(function(){try{sessionStorage.setItem("tf-active-tab",tab);}catch(e){}},[tab]);
   // CHANGED: Collapsible sidebar state for laptop layout.
   var [sidebarCollapsed,setSidebarCollapsed]=useState(true);
   var [pendingWithdrawAmount,setPendingWithdrawAmount]=useState(null);
