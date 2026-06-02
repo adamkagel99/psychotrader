@@ -2986,14 +2986,14 @@ function PerfProgressCard(props){
         <svg width="13" height="13" viewBox="0 0 12 12" fill="none" style={{transition:"transform 0.2s",transform:open?"rotate(180deg)":"rotate(0deg)"}}><path d="M2 4l4 4 4-4" stroke="#a5b4fc" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
       </button>
       {/* CHANGED: KPI tiles (the first line of data) always show, even collapsed. Shrink to fit in mobile. */}
-      <div style={{display:"grid",gridTemplateColumns:props.mobile?"repeat(auto-fit,minmax(96px,1fr))":"repeat(auto-fit,minmax(132px,1fr))",gap:1,background:"#1e293b"}}>
+      <div style={{display:"grid",gridTemplateColumns:props.mobile?"repeat(5,1fr)":"repeat(auto-fit,minmax(132px,1fr))",gap:1,background:"#1e293b"}}>
         {kpis.map(function(k){return (
-          <div key={k.label} style={{padding:props.mobile?"10px 8px":"14px 14px 13px",background:"#111118",display:"flex",flexDirection:"column",gap:props.mobile?3:6,minWidth:0}}>
+          <div key={k.label} style={{padding:props.mobile?"9px 5px":"14px 14px 13px",background:"#111118",display:"flex",flexDirection:"column",gap:props.mobile?3:6,minWidth:0}}>
             <div style={{display:"flex",alignItems:"center",gap:props.mobile?3:6,minWidth:0}}>
-              <span style={{fontSize:props.mobile?11:13,flexShrink:0}}>{k.icon}</span>
+              <span style={{fontSize:props.mobile?10:13,flexShrink:0}}>{k.icon}</span>
               <span style={{fontSize:props.mobile?8:10,color:"#64748b",letterSpacing:props.mobile?0.2:0.6,textTransform:"uppercase",fontWeight:700,lineHeight:1.1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{k.label}</span>
             </div>
-            <div style={{fontSize:props.mobile?16:24,fontWeight:800,color:k.color,fontVariantNumeric:"tabular-nums",lineHeight:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.value}{k.suffix&&<span style={{fontSize:props.mobile?9:12,color:"#64748b",fontWeight:500}}>{k.suffix}</span>}</div>
+            <div style={{fontSize:props.mobile?14:24,fontWeight:800,color:k.color,fontVariantNumeric:"tabular-nums",lineHeight:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.value}{k.suffix&&<span style={{fontSize:props.mobile?8:12,color:"#64748b",fontWeight:500}}>{k.suffix}</span>}</div>
           </div>
         );})}
       </div>
@@ -3217,7 +3217,10 @@ function TradesTab(props){
     try{
       var k="journal:"+todayStr().replace(/\//g,"-");
       var s=localStorage.getItem(k);
-      var entry=s?JSON.parse(s):null;
+      // CHANGED: if storage read returns null, do NOT overwrite an entry we just saved in memory.
+      // Previously this clobbered todayJournalEntry to null right after save, making the Save panel reappear.
+      if(!s)return;
+      var entry=JSON.parse(s);
       // CHANGED: Back-fill noTradeLoggedAt on legacy no-trade entries that were saved before the
       // timestamp field existed, so the "Why no trades" banner can always show when it was logged.
       if(entry&&entry.noTradeDay&&!entry.noTradeLoggedAt){
@@ -3225,7 +3228,7 @@ function TradesTab(props){
         try{localStorage.setItem(k,JSON.stringify(entry));}catch(e){}
       }
       setTodayJournalEntry(entry);
-    }catch(e){setTodayJournalEntry(null);}
+    }catch(e){}
   },[props.reloadKey]);
   // CHANGED: Multi-level sort. sortChain is an ordered list of sort ids (priority: primary first).
   // Empty chain = default timestamp sort. Each id breaks ties of the ones before it.
@@ -3531,10 +3534,10 @@ function TradesTab(props){
         <div style={{display:"flex",gap:8}}>
           {/* CHANGED: Show disabled button with reason rather than hiding it, so user knows why they can't trade. */}
           {isToday&&(tradeStatus.ok
-            ?<button onClick={function(){var t=mkTrade();t.sessionId=phase!=="closed"?phase:null;setTrade(t);setShowForm(true);}} style={{padding:"8px 16px",background:"#4f46e5",color:"#fff",border:"none",borderRadius:6,fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ New Trade</button>
-            :<button disabled title={tradeStatus.reason||"Not available"} style={{padding:"8px 16px",background:"#1e293b",color:"#475569",border:"1px solid #334155",borderRadius:6,fontSize:14,fontWeight:600,cursor:"not-allowed",fontFamily:"inherit"}}>{tradeStatus.reason||"Unavailable"}</button>
+            ?<button onClick={function(){var t=mkTrade();t.sessionId=phase!=="closed"?phase:null;setTrade(t);setShowForm(true);}} style={{padding:props.mobile?"6px 10px":"8px 16px",background:"#4f46e5",color:"#fff",border:"none",borderRadius:6,fontSize:props.mobile?12:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>+ {props.mobile?"Trade":"New Trade"}</button>
+            :<button disabled title={tradeStatus.reason||"Not available"} style={{padding:props.mobile?"6px 10px":"8px 16px",background:"#1e293b",color:"#475569",border:"1px solid #334155",borderRadius:6,fontSize:props.mobile?12:14,fontWeight:600,cursor:"not-allowed",fontFamily:"inherit",whiteSpace:"nowrap"}}>{tradeStatus.reason||"Unavailable"}</button>
           )}
-          {!isToday&&<button onClick={function(){var t=mkTrade();setPastNewTrade(Object.assign({},t,{time:new Date().toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"})}));}} style={{padding:"8px 16px",background:"#4f46e5",color:"#fff",border:"none",borderRadius:6,fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ Add Trade</button>}
+          {!isToday&&<button onClick={function(){var t=mkTrade();setPastNewTrade(Object.assign({},t,{time:new Date().toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"})}));}} style={{padding:props.mobile?"6px 10px":"8px 16px",background:"#4f46e5",color:"#fff",border:"none",borderRadius:6,fontSize:props.mobile?12:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>+ {props.mobile?"Trade":"Add Trade"}</button>}
         </div>
         {pickerOpen&&<CalendarPicker selectedDate={selectedDate} onSelect={function(d){setSelectedDate(d);setPickerOpen(false);}} onClose={function(){setPickerOpen(false);}} todayPnL={totalPnL} riskMax={parseFloat(settings.riskMax)||0} settings={settings} todayTrades={state.trades}/>}
       </div>
@@ -3699,11 +3702,12 @@ function TradesTab(props){
         </div>
         );
       })()}
+      <div style={{display:"grid",gridTemplateColumns:props.mobile?"1fr":"1fr 1fr",gap:12,alignItems:"start"}}>
       {displayTrades.map(function(t,i){
         var isEditing=editingId===t.id;
         if(!isToday){
           return (
-            <div key={t.id||i}>
+            <div key={t.id||i} style={isEditing?{gridColumn:"1 / -1"}:null}>
               {isEditing
                 ?<TradeForm trade={editDraft||t} setTrade={function(updater){setEditDraft(function(prev){var base=prev||t;return typeof updater==="function"?updater(base):updater;});}} onSave={function(updated){savePastTrade(updated);setEditDraft(null);}} onCancel={cancelEdit} settings={settings} tradeOptions={props.tradeOptions}/>
                 :<TradeTile t={t} i={i} posMax={settings.positionMax} onDelete={function(){deletePastTrade(t.id);}} onEdit={function(){startEdit(t);}}/>
@@ -3712,7 +3716,7 @@ function TradesTab(props){
           );
         }
         return (
-          <div key={t.id}>
+          <div key={t.id} style={isEditing?{gridColumn:"1 / -1"}:null}>
             {isEditing
               ?<TradeForm trade={editDraft||t} setTrade={function(updater){setEditDraft(function(prev){var base=prev||t;return typeof updater==="function"?updater(base):updater;});}} onSave={function(updated){savePastTrade(updated);setEditDraft(null);}} onCancel={cancelEdit} settings={settings} tradeOptions={props.tradeOptions}/>
               :<TradeTile t={t} i={i} posMax={settings.positionMax} onDelete={function(){deleteTrade(t.id);}} onEdit={function(){startEdit(t);}}/>
@@ -3720,6 +3724,7 @@ function TradesTab(props){
           </div>
         );
       })}
+      </div>
       {/* CHANGED: Day summary + note editor. Shows for past dates always, and today after save-to-journal. */}
       {((!isToday&&pastSession)||(isToday&&todayJournalEntry))&&(function(){
         var entry=isToday?todayJournalEntry:pastSession;
@@ -3837,26 +3842,41 @@ function TradesTab(props){
           <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>End-of-day write-up. Add a note about what happened, then save the day's trades to your journal.</div>
           <textarea value={state.dailyNote||""} onChange={function(e){var v=e.target.value;props.setState(function(s){return Object.assign({},s,{dailyNote:v});});}} placeholder="What worked? What didn't? Any rules to remember tomorrow?" style={Object.assign({},fld,{minHeight:90,resize:"vertical",fontFamily:"inherit",lineHeight:1.5,marginBottom:10})}/>
           <button onClick={function(){
-            var key="journal:"+todayStr().replace(/\//g,"-");
-            var closedT=(state.trades||[]).filter(function(t){return t.status!=="open";});
-            var entry={
-              date:todayStr(),
-              pnl:closedT.reduce(function(s,t){return s+(parseFloat(t.pnl)||0);},0),
-              trades:closedT,
-              note:state.dailyNote||"",
-              ruleViolations:state.ruleViolations||[],
-              commitment:state.commitment||null,
-              wins:closedT.filter(function(t){return parseFloat(t.pnl)>0;}).length,
-              losses:closedT.filter(function(t){return parseFloat(t.pnl)<0;}).length,
-              riskMax:parseFloat(settings.riskMax)||0,
-              disciplineScore:calcDiscipline(closedT,parseFloat(settings.riskMax)||0,{commitment:state.commitment||null})
-            };
             try{
-              localStorage.setItem(key,JSON.stringify(entry));
+              var key="journal:"+todayStr().replace(/\//g,"-");
+              var closedT=(state.trades||[]).filter(function(t){return t.status!=="open";});
+              var riskMaxN=parseFloat(settings.riskMax)||0;
+              var discScore=0;
+              try{discScore=calcDiscipline(closedT,riskMaxN,{commitment:state.commitment||null});}catch(de){console.error("calcDiscipline failed:",de);discScore=0;}
+              var entry={
+                date:todayStr(),
+                pnl:closedT.reduce(function(s,t){return s+(parseFloat(t.pnl)||0);},0),
+                trades:closedT,
+                note:state.dailyNote||"",
+                ruleViolations:state.ruleViolations||[],
+                commitment:state.commitment||null,
+                wins:closedT.filter(function(t){return parseFloat(t.pnl)>0;}).length,
+                losses:closedT.filter(function(t){return parseFloat(t.pnl)<0;}).length,
+                riskMax:riskMaxN,
+                disciplineScore:discScore
+              };
+              // CHANGED: localStorage has ~5MB quota; base64 screenshots can exceed it.
+              // Try full save; on quota error, retry with screenshots stripped and warn the user.
+              function tryWrite(payload){localStorage.setItem(key,JSON.stringify(payload));}
+              try{
+                tryWrite(entry);
+              }catch(qe){
+                var isQuota=qe&&(qe.name==="QuotaExceededError"||/quota/i.test(qe.message||""));
+                if(!isQuota)throw qe;
+                var stripped=Object.assign({},entry,{trades:closedT.map(function(t){var c=Object.assign({},t);c.screenshots=[];return c;}),screenshotsStripped:true});
+                tryWrite(stripped);
+                entry=stripped;
+                alert("Storage full — saved the day without screenshots. To keep screenshots, delete some older trades' screenshots or clear old journal data in Settings.");
+              }
               setTodayJournalEntry(entry);
               if(props.bumpReloadKey)props.bumpReloadKey();
               if(props.refreshHistory)props.refreshHistory();
-            }catch(e){alert("Failed to save: "+e.message);}
+            }catch(e){console.error("Save Day to Journal failed:",e);alert("Failed to save: "+(e&&e.message?e.message:String(e)));}
           }} style={{width:"100%",padding:"11px",background:"linear-gradient(135deg,#4f46e5,#6366f1)",color:"#fff",border:"none",borderRadius:8,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Save Day to Journal</button>
         </div>
       )}
@@ -4638,7 +4658,7 @@ function GoalsTab(props){
         var hasPerf=(!hidden.winRate&&winRateTarget>0)||(!hidden.discipline&&disciplineTarget>0);
         var hasPnL=(!hidden.daily&&dailyTarget>0)||(!hidden.weekly&&weeklyTarget>0)||(!hidden.monthly&&monthlyTarget>0);
         function SectionHead(p){return <div style={{display:"flex",alignItems:"center",gap:8,margin:"4px 0 10px"}}><span style={{fontSize:13}}>{p.icon}</span><span style={{fontSize:12,color:"#cbd5e1",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700}}>{p.title}</span><div style={{flex:1,height:1,background:"#1e293b"}}/></div>;}
-        var gridStyle={display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(190px,1fr))",gap:12,alignItems:"stretch"};
+        var gridStyle={display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax("+(props.mobile?"140px":"190px")+",1fr))",gap:props.mobile?8:12,alignItems:"stretch"};
         return (
           <div>
             {hasAccount&&(
@@ -5604,16 +5624,16 @@ function PerformanceTab(props){
         <div style={{fontSize:18,fontWeight:700,color:"#e2e8f0",marginBottom:8,lineHeight:1.2}}>Performance</div>
         <div style={{display:"flex",gap:6,overflowX:"auto",WebkitOverflowScrolling:"touch",paddingBottom:2,marginLeft:-2,marginRight:-2,paddingLeft:2,paddingRight:2}}>
           {[
-            {v:"thisweek",l:"This Week"},
-            {v:"week",l:"Last Week"},
+            {v:"thisweek",l:props.mobile?"This Wk":"This Week"},
+            {v:"week",l:props.mobile?"Last Wk":"Last Week"},
             {v:"month",l:"30d"},
             {v:"3month",l:"3mo"},
             {v:"year",l:"1yr"},
-            {v:"all",l:"All Time"}
+            {v:"all",l:props.mobile?"All":"All Time"}
           ].map(function(opt){
             var on=range===opt.v;
             return (
-              <button key={opt.v} onClick={function(){setRange(opt.v);}} style={{padding:"6px 12px",background:on?"#4338ca":"#0a0a0f",border:"1px solid "+(on?"#6366f1":"#334155"),borderRadius:999,color:on?"#fff":"#94a3b8",fontSize:12,fontWeight:on?700:500,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>{opt.l}</button>
+              <button key={opt.v} onClick={function(){setRange(opt.v);}} style={{padding:props.mobile?"5px 8px":"6px 12px",background:on?"#4338ca":"#0a0a0f",border:"1px solid "+(on?"#6366f1":"#334155"),borderRadius:999,color:on?"#fff":"#94a3b8",fontSize:props.mobile?11:12,fontWeight:on?700:500,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>{opt.l}</button>
             );
           })}
         </div>
@@ -6931,7 +6951,9 @@ function ManageTradeView(props){
 }
 
 function App(){
-  var [tab,setTab]=useState("dashboard");
+  // CHANGED: Persist active tab so returning to the app (after sync/reload) stays on the user's last tab.
+  var [tab,setTab]=useState(function(){try{var t=localStorage.getItem("tf-active-tab");return t&&["dashboard","trades","goals","performance","settings"].indexOf(t)>=0?t:"dashboard";}catch(e){return "dashboard";}});
+  useEffect(function(){try{localStorage.setItem("tf-active-tab",tab);}catch(e){}},[tab]);
   // CHANGED: Collapsible sidebar state for laptop layout.
   var [sidebarCollapsed,setSidebarCollapsed]=useState(true);
   var [pendingWithdrawAmount,setPendingWithdrawAmount]=useState(null);
@@ -7234,7 +7256,7 @@ function App(){
             {tab==="trades"&&<TradesTab mobile={mobile} state={state} setState={setState} showForm={showForm} setShowForm={setShowForm} trade={trade} setTrade={setTrade} saveTrade={saveTrade} deleteTrade={deleteTrade} tradeStatus={tradeStatus} phase={phase} settings={settings} preCheckComplete={preCheckComplete} totalPnL={totalPnL} initialDate={tradesInitialDate} reloadKey={reloadKey} bumpReloadKey={bumpReloadKey} timezone={settings.timezone} liveTrades={liveTrades} openLiveTrade={function(lt){setLiveTradeManaging(lt);}} displayPosMin={dPosMin} displayPosMax={dPosMax} displayRiskMin={dRiskMin} displayRiskMax={dRiskMax} tradeOptions={tradeOptions} autoAddViolations={autoAddViolations} refreshHistory={bumpReloadKey} checklistVersion={checklistVersion}/>}
           </>);
         })()}
-        {tab==="goals"&&<GoalsTab settings={settings} reloadKey={reloadKey} liveTotalPnL={totalPnL} tradeOptions={tradeOptions} state={state}/>}
+        {tab==="goals"&&<GoalsTab mobile={mobile} settings={settings} reloadKey={reloadKey} liveTotalPnL={totalPnL} tradeOptions={tradeOptions} state={state}/>}
         {tab==="performance"&&<PerformanceTab mobile={mobile} settings={settings} reloadKey={reloadKey} totalPnL={totalPnL} state={state}/>}
         {tab==="settings"&&<SettingsTab settings={settings} setSettings={setSettings} tradeOptions={tradeOptions} setTradeOptions={setTradeOptions} liveTotalPnL={totalPnL} initialTransferAmount={pendingWithdrawAmount} focusSection={settingsFocus} bumpReloadKey={bumpReloadKey} onChecklistChange={function(){setChecklistVersion(function(v){return v+1;});setState(function(s){var c=Object.assign({},s.preChecklist||{});var items=loadChecklistItems();items.forEach(function(it){if(c[it.key]==null)c[it.key]=false;});return Object.assign({},s,{preChecklist:c});});}}/>}
         {liveTradeManaging&&<ManageTradeView trade={liveTradeManaging} onClose={function(){setLiveTradeManaging(null);}} onSave={function(updated){saveTrade(updated);}} onDelete={function(){deleteTrade(liveTradeManaging.id);setLiveTradeManaging(null);}} settings={settings} tradeOptions={tradeOptions}/>}
