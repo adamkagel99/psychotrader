@@ -1719,40 +1719,50 @@ function TradeTile(props){
   return (
     <div style={{background:"#111118",border:"1px solid #1e293b",borderLeft:"3px solid "+borderColor,borderRadius:10,padding:"14px 16px",marginBottom:10,height:"100%",boxSizing:"border-box",display:"flex",flexDirection:"column"}}>
 
-      {/* HERO ROW: index · instrument · direction · GRADE (left) | P&L (right) */}
+      {/* HEADER ROW: identifier cluster (left) | edit/delete (right) */}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10}}>
         <div style={{flex:1,minWidth:0,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
           <span style={{fontSize:11,color:"#475569",fontWeight:600,fontVariantNumeric:"tabular-nums"}}>#{i+1}</span>
-          {/* CHANGED: Grade badge now lives in the top-left cluster. */}
           {t.grade&&<span style={{fontSize:11,padding:"2px 8px",borderRadius:4,border:"1px solid "+gradeColor,color:gradeColor,fontWeight:700,letterSpacing:0.5,background:gradeColor+"11"}}>{t.grade}</span>}
           {t.instrument&&<span style={{fontSize:18,fontWeight:800,color:"#f1f5f9",letterSpacing:-0.2,lineHeight:1}}>{t.instrument}</span>}
           {t.direction&&<span style={{fontSize:11,padding:"3px 9px",borderRadius:4,background:dirBg,color:dirText,fontWeight:700,letterSpacing:0.5}}>{t.direction}{(t.strike!=null&&t.strike!==""&&!isNaN(parseFloat(t.strike)))?(" $"+(function(){var n=parseFloat(t.strike);return n%1===0?n.toFixed(0):n.toString();})()):""}</span>}
           {isOpen&&<span style={{fontSize:10,padding:"2px 7px",background:"#7c2d1244",border:"1px solid #ea580c",borderRadius:3,color:"#fb923c",fontWeight:700,letterSpacing:0.5}}>OPEN</span>}
         </div>
-        {hasPnl&&(
-          <div style={{textAlign:"right",flexShrink:0}}>
-            <div style={{fontSize:20,fontWeight:800,color:pnlColor,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>{HIDE_DOLLAR_PNL?(pnl>=0?"+$•••":"-$•••"):((pnl>=0?"+":"-")+"$"+Math.abs(pnl).toFixed(2))}</div>
-            {hasPct&&<div style={{fontSize:12,color:pctPnl>=0?"#86efac":"#fca5a5",marginTop:3,fontWeight:600,fontVariantNumeric:"tabular-nums"}}>{pctPnl>=0?"+":""}{pctPnl.toFixed(2)}%</div>}
+        {showButtons&&(
+          <div style={{display:"flex",gap:5,flexShrink:0}}>
+            {onEdit&&<button onClick={onEdit} style={{padding:"4px 10px",background:"transparent",border:"1px solid #334155",borderRadius:4,color:"#94a3b8",fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:600,letterSpacing:0.4}}>Edit</button>}
+            {onDelete&&<button onClick={onDelete} aria-label="Delete" style={{padding:"4px 9px",background:"transparent",border:"1px solid #334155",borderRadius:4,color:"#64748b",fontSize:13,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>}
           </div>
         )}
       </div>
 
-      {/* PRICE BANNER: Entry → Exit, with contracts label below the arrow */}
+      {/* P&L ROW: when $ is hidden, show % in the large slot; otherwise show $ + smaller %. */}
+      {hasPnl&&(
+        <div style={{display:"flex",alignItems:"baseline",gap:10,marginTop:8}}>
+          {HIDE_DOLLAR_PNL
+            ? (hasPct&&<div style={{fontSize:18,fontWeight:800,color:pnlColor,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>{pctPnl>=0?"+":""}{pctPnl.toFixed(2)}%</div>)
+            : (<>
+                <div style={{fontSize:18,fontWeight:800,color:pnlColor,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>{(pnl>=0?"+":"-")+"$"+Math.abs(pnl).toFixed(2)}</div>
+                {hasPct&&<div style={{fontSize:13,color:pctPnl>=0?"#86efac":"#fca5a5",fontWeight:600,fontVariantNumeric:"tabular-nums"}}>({pctPnl>=0?"+":""}{pctPnl.toFixed(2)}%)</div>}
+              </>)}
+        </div>
+      )}
+
+      {/* PRICE BANNER: Entry → Exit, with position size in the middle */}
       {hasPriceInfo&&(
-        <div style={{marginTop:11,padding:"9px 12px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:7,display:"flex",alignItems:"center",justifyContent:"space-around",gap:8}}>
+        <div style={{marginTop:10,padding:"9px 12px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:7,display:"flex",alignItems:"center",justifyContent:"space-around",gap:8}}>
           {!isNaN(avgEntry)&&(
             <div style={{textAlign:"center",flex:1,minWidth:0}}>
               <div style={{fontSize:9,color:"#64748b",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:2}}>Entry{entries.length>1?" (avg)":""}</div>
               <div style={{fontSize:16,fontWeight:700,color:"#e2e8f0",fontVariantNumeric:"tabular-nums",lineHeight:1}}>${avgEntry.toFixed(2)}</div>
             </div>
           )}
-          {/* CHANGED: Center column shows position size ($) in place of the arrow, with contracts below. */}
           {!isNaN(avgEntry)&&!isNaN(avgExit)&&(
             <div style={{display:"flex",flexDirection:"column",alignItems:"center",flexShrink:0,gap:1}}>
               {pos>0
-                ?<div style={{fontSize:13,fontWeight:700,color:(posMax>0&&pos>posMax)?"#fb923c":"#94a3b8",lineHeight:1,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{fmtPositionDisplay(pos)}</div>
+                ?<div style={{fontSize:16,fontWeight:700,color:(posMax>0&&pos>posMax)?"#fb923c":"#94a3b8",lineHeight:1,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{fmtPositionDisplay(pos)}</div>
                 :<div style={{color:"#475569",fontSize:18,fontWeight:600,lineHeight:1}}>→</div>}
-              {contractsText&&<div style={{fontSize:9,color:"#64748b",fontWeight:600,letterSpacing:0.4,whiteSpace:"nowrap"}}>{contractsText}</div>}
+              {contractsText&&<div style={{fontSize:13,color:"#64748b",fontWeight:600,letterSpacing:0.2,whiteSpace:"nowrap"}}>{contractsText}</div>}
             </div>
           )}
           {!isNaN(avgExit)&&(
@@ -1767,40 +1777,39 @@ function TradeTile(props){
               <div style={{fontSize:13,color:"#94a3b8",lineHeight:1}}>—</div>
             </div>
           )}
-          {/* When only entry OR exit exists alongside an arrow gap, show contracts standalone next to it */}
           {((!isNaN(avgEntry)&&!isNaN(avgExit))===false&&!isNaN(avgEntry)===false&&contractsText)&&(
             <div style={{fontSize:10,color:"#64748b",fontWeight:600,letterSpacing:0.4,marginLeft:6}}>{contractsText}</div>
           )}
         </div>
       )}
 
-      {/* META: time · duration only (grade and contracts moved elsewhere) */}
+      {/* META: time · duration · (contracts inline when price banner is hidden) */}
       {timeText&&(
-        <div style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"#64748b",marginTop:10,fontVariantNumeric:"tabular-nums"}}>
+        <div style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"#64748b",marginTop:8,fontVariantNumeric:"tabular-nums"}}>
           <span>{timeText}</span>
-          {/* If price banner is hidden but we still have contracts (e.g. no entries logged), show inline */}
           {!hasPriceInfo&&contractsText&&<span><span style={{color:"#334155",margin:"0 6px"}}>·</span>{contractsText}</span>}
         </div>
       )}
 
-      {/* SETUP CHAIN */}
-      {hasSetupInfo&&(
-        <div style={{marginTop:10,fontSize:13,color:"#cbd5e1",fontWeight:500}}>
-          {setupChain.map(function(s,idx){return <span key={idx}>{idx>0&&<span style={{color:"#334155",margin:"0 7px"}}>›</span>}{s}</span>;})}
-        </div>
-      )}
-
-      {/* CHANGED: Indicators row (separate from setup chain since they can be multi-select). */}
-      {(t.indicators||[]).length>0&&(
-        <div style={{display:"flex",alignItems:"center",gap:5,flexWrap:"wrap",marginTop:8}}>
-          <span style={{fontSize:9,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600,marginRight:2}}>Ind</span>
-          {t.indicators.map(function(ind){return <span key={ind} style={{fontSize:11,padding:"2px 7px",borderRadius:3,background:"#1e293b",color:"#a5b4fc",fontWeight:600}}>{ind}</span>;})}
+      {/* STRATEGY GROUP: setup chain + indicators together, separated from header by a subtle divider */}
+      {(hasSetupInfo||(t.indicators||[]).length>0)&&(
+        <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid #1e293b"}}>
+          {hasSetupInfo&&(
+            <div style={{fontSize:13,color:"#cbd5e1",fontWeight:500}}>
+              {setupChain.map(function(s,idx){return <span key={idx}>{idx>0&&<span style={{color:"#334155",margin:"0 7px"}}>›</span>}{s}</span>;})}
+            </div>
+          )}
+          {(t.indicators||[]).length>0&&(
+            <div style={{display:"flex",alignItems:"center",gap:5,flexWrap:"wrap",marginTop:hasSetupInfo?6:0}}>
+              {t.indicators.map(function(ind){return <span key={ind} style={{fontSize:11,padding:"2px 7px",borderRadius:3,background:"#1e293b",color:"#a5b4fc",fontWeight:600}}>{ind}</span>;})}
+            </div>
+          )}
         </div>
       )}
 
       {/* TAGS: emotions + violations */}
       {hasTags&&(
-        <div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:9}}>
+        <div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:8}}>
           {emos.map(function(e){return <Tag key={e} label={e} color={emotionTagColor(e)}/>;})}
           {effViolations.map(function(v){return <Tag key={v} label={"⚠ "+v} color="#f87171"/>;})}
         </div>
@@ -1808,21 +1817,13 @@ function TradeTile(props){
 
       {/* NOTES */}
       {t.notes&&(
-        <div style={{marginTop:10,padding:"7px 11px",background:"#0a0a0f",borderLeft:"3px solid #334155",borderRadius:"0 5px 5px 0",fontSize:13,color:"#cbd5e1",fontStyle:"italic",lineHeight:1.5}}>{t.notes}</div>
+        <div style={{marginTop:8,padding:"7px 11px",background:"#0a0a0f",borderLeft:"3px solid #334155",borderRadius:"0 5px 5px 0",fontSize:13,color:"#cbd5e1",fontStyle:"italic",lineHeight:1.5}}>{t.notes}</div>
       )}
 
       {/* SCREENSHOTS */}
       {shots.length>0&&(
-        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:10}}>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
           {shots.map(function(src,si){return <img key={si} src={src} alt={"Screenshot "+(si+1)} onClick={function(){setTileViewer(src);}} style={{width:58,height:58,objectFit:"cover",borderRadius:5,border:"1px solid #334155",cursor:"pointer"}}/>;})}
-        </div>
-      )}
-
-      {/* ACTIONS — subtle, right-aligned */}
-      {showButtons&&(
-        <div style={{display:"flex",justifyContent:"flex-end",gap:5,marginTop:10}}>
-          {onEdit&&<button onClick={onEdit} style={{padding:"4px 11px",background:"transparent",border:"1px solid #334155",borderRadius:4,color:"#94a3b8",fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:600,letterSpacing:0.4}}>Edit</button>}
-          {onDelete&&<button onClick={onDelete} aria-label="Delete" style={{padding:"4px 10px",background:"transparent",border:"1px solid #334155",borderRadius:4,color:"#64748b",fontSize:13,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>}
         </div>
       )}
 
@@ -3159,10 +3160,11 @@ function CommitmentPanel(props){
       return {parts:parts,total:total};
     }catch(e){return {parts:[],total:0};}
   })();
-  var [maxT,setMaxT]=useState(c.maxTrades!=null?String(c.maxTrades):(sessionCapBreakdown.total>0?String(sessionCapBreakdown.total):""));
+  // CHANGED: max-trades is now derived from session strategy, not user-entered.
+  var derivedMax=sessionCapBreakdown.total>0?String(sessionCapBreakdown.total):"";
   var [setups,setSetups]=useState(c.setups||"");
   function commit(){
-    setState(function(s){return Object.assign({},s,{commitment:{committed:true,committedAt:Date.now(),maxTrades:maxT,setups:setups,reviewed:false,setupsReviewAffirmed:null}});});
+    setState(function(s){return Object.assign({},s,{commitment:{committed:true,committedAt:Date.now(),maxTrades:derivedMax,setups:setups,reviewed:false,setupsReviewAffirmed:null}});});
     setOpen(false);
   }
   var lbl={fontSize:12,color:"#94a3b8",fontWeight:600,marginBottom:4,display:"block"};
@@ -3187,10 +3189,10 @@ function CommitmentPanel(props){
       <div style={{fontSize:12,color:"#64748b",marginBottom:12,lineHeight:1.5}}>State it before you trade. At day's end you're scored against your own plan — not a generic rule.</div>
       <div style={{marginBottom:10}}>
         <label style={lbl}>Max trades today</label>
-        <input type="number" value={maxT} onChange={function(e){setMaxT(e.target.value);}} placeholder="e.g. 3" style={fld}/>
+        <div style={{padding:"10px 12px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8,fontSize:14,color:"#e2e8f0",fontFamily:"inherit"}}>{derivedMax?(derivedMax+" trade"+(parseInt(derivedMax)===1?"":"s")):"No cap from session strategy"}</div>
         {sessionCapBreakdown.parts.length>0&&(
           <div style={{fontSize:11,color:"#64748b",marginTop:5,lineHeight:1.5}}>
-            Session strategy allows up to <span style={{color:"#a5b4fc",fontWeight:600}}>{sessionCapBreakdown.total}</span> today: {sessionCapBreakdown.parts.map(function(p,i){return p.label+" "+p.cap+(i<sessionCapBreakdown.parts.length-1?" + ":"");}).join("")}
+            From session strategy: {sessionCapBreakdown.parts.map(function(p,i){return p.label+" "+p.cap+(i<sessionCapBreakdown.parts.length-1?" + ":"");}).join("")}. Edit in Settings → Session Strategy.
           </div>
         )}
       </div>
