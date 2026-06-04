@@ -7029,6 +7029,11 @@ function SettingsTab(props){
           </div>
         </div>
       )}
+      {props.onSignOut&&(
+        <div style={{marginTop:24,paddingTop:18,borderTop:"1px solid #1e293b",display:"flex",justifyContent:"center"}}>
+          <button onClick={props.onSignOut} style={{padding:"10px 22px",background:"#1c0a0a",border:"1px solid #ef4444",borderRadius:8,color:"#fca5a5",fontSize:13,fontWeight:700,letterSpacing:0.3,cursor:"pointer",fontFamily:"inherit"}}>Sign out</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -7039,7 +7044,8 @@ function ManageTradeView(props){
   return <TradeForm trade={draft} setTrade={setDraft} onSave={function(updated){onSave(updated);}} onCancel={onClose} settings={settings} tradeOptions={tradeOptions}/>;
 }
 
-function App(){
+function App(props){
+  props=props||{};
   // CHANGED: Persist active tab in sessionStorage so it survives reloads but isn't wiped by cloud-sync (which rewrites localStorage).
   var [tab,setTab]=useState(function(){try{var t=sessionStorage.getItem("tf-active-tab");return t&&["dashboard","trades","goals","performance","settings"].indexOf(t)>=0?t:"dashboard";}catch(e){return "dashboard";}});
   useEffect(function(){try{sessionStorage.setItem("tf-active-tab",tab);}catch(e){}},[tab]);
@@ -7376,7 +7382,7 @@ function App(){
         </div>
         {[{id:"dashboard",label:"Home",icon:"⌂"},{id:"trades",label:"Journal",icon:"≡"},{id:"goals",label:"Goals",icon:"◎"},{id:"performance",label:"Performance",icon:"📈"},{id:"settings",label:"Settings",icon:"⚙"}].map(function(t){
           var active=tab===t.id;
-          return <button key={t.id} onClick={function(){if(t.id!=="trades")setTradesInitialDate(null);setPendingWithdrawAmount(null);setSettingsFocus(null);setTab(t.id);}} title={sidebarCollapsed?t.label:""} style={{textAlign:"left",padding:sidebarCollapsed?"11px 0":"11px 12px",marginBottom:4,background:active?"#1e1b4b":"none",border:"none",borderRadius:8,color:active?"#a5b4fc":"#94a3b8",fontSize:14,fontWeight:active?700:500,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:sidebarCollapsed?"center":"flex-start",gap:10}}>
+          return <button key={t.id} onClick={function(){if(t.id!=="trades")setTradesInitialDate(null);setPendingWithdrawAmount(null);setSettingsFocus(null);setTab(t.id);setSidebarCollapsed(true);}} title={sidebarCollapsed?t.label:""} style={{textAlign:"left",padding:sidebarCollapsed?"11px 0":"11px 12px",marginBottom:4,background:active?"#1e1b4b":"none",border:"none",borderRadius:8,color:active?"#a5b4fc":"#94a3b8",fontSize:14,fontWeight:active?700:500,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:sidebarCollapsed?"center":"flex-start",gap:10}}>
             <span style={{fontSize:16,width:20,textAlign:"center",flexShrink:0}}>{t.icon}</span>
             {!sidebarCollapsed&&t.label}
           </button>;
@@ -7418,7 +7424,7 @@ function App(){
         })()}
         {tab==="goals"&&<GoalsTab mobile={mobile} settings={settings} reloadKey={reloadKey} liveTotalPnL={totalPnL} tradeOptions={tradeOptions} state={state}/>}
         {tab==="performance"&&<PerformanceTab mobile={mobile} settings={settings} reloadKey={reloadKey} totalPnL={totalPnL} state={state}/>}
-        {tab==="settings"&&<SettingsTab settings={settings} setSettings={setSettings} tradeOptions={tradeOptions} setTradeOptions={setTradeOptions} liveTotalPnL={totalPnL} initialTransferAmount={pendingWithdrawAmount} focusSection={settingsFocus} bumpReloadKey={bumpReloadKey} onChecklistChange={function(){setChecklistVersion(function(v){return v+1;});setState(function(s){var c=Object.assign({},s.preChecklist||{});var items=loadChecklistItems();items.forEach(function(it){if(c[it.key]==null)c[it.key]=false;});return Object.assign({},s,{preChecklist:c});});}}/>}
+        {tab==="settings"&&<SettingsTab onSignOut={props.onSignOut} settings={settings} setSettings={setSettings} tradeOptions={tradeOptions} setTradeOptions={setTradeOptions} liveTotalPnL={totalPnL} initialTransferAmount={pendingWithdrawAmount} focusSection={settingsFocus} bumpReloadKey={bumpReloadKey} onChecklistChange={function(){setChecklistVersion(function(v){return v+1;});setState(function(s){var c=Object.assign({},s.preChecklist||{});var items=loadChecklistItems();items.forEach(function(it){if(c[it.key]==null)c[it.key]=false;});return Object.assign({},s,{preChecklist:c});});}}/>}
         {liveTradeManaging&&<ManageTradeView trade={liveTradeManaging} onClose={function(){setLiveTradeManaging(null);}} onSave={function(updated){saveTrade(updated);}} onDelete={function(){deleteTrade(liveTradeManaging.id);setLiveTradeManaging(null);}} settings={settings} tradeOptions={tradeOptions}/>}
       </div>
       </div>
