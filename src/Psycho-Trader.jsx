@@ -7069,8 +7069,21 @@ function App(props){
     return defaultSettings();
   });
   var [tradeOptions,setTradeOptions]=useState(loadOptions());
-  var [showForm,setShowForm]=useState(false);
-  var [trade,setTrade]=useState(null);
+  // CHANGED: Persist in-progress new-trade form so a sync-triggered remount doesn't lose what the user typed.
+  // Survives the remount via sessionStorage (cloud sync only touches localStorage).
+  var [showForm,setShowForm]=useState(function(){try{return sessionStorage.getItem("tf-trade-draft-open")==="1";}catch(e){return false;}});
+  var [trade,setTrade]=useState(function(){try{var raw=sessionStorage.getItem("tf-trade-draft");if(raw){var t=JSON.parse(raw);if(t&&typeof t==="object")return t;}}catch(e){}return null;});
+  useEffect(function(){
+    try{
+      if(showForm&&trade){
+        sessionStorage.setItem("tf-trade-draft-open","1");
+        sessionStorage.setItem("tf-trade-draft",JSON.stringify(trade));
+      }else{
+        sessionStorage.removeItem("tf-trade-draft-open");
+        sessionStorage.removeItem("tf-trade-draft");
+      }
+    }catch(e){}
+  },[showForm,trade]);
   var [reloadKey,setReloadKey]=useState(0);
   var [eventsReloadKey,setEventsReloadKey]=useState(0);
   // CHANGED: Persist event filters across page refreshes via EVENT_FILTERS_KEY.
@@ -7169,13 +7182,36 @@ function App(props){
     function checkRollover(){
       var today=todayStr();
       if(state.date&&state.date!==today){
-        // Save yesterday's session as journal entry
+        // CHANGED: Never blindly overwrite an existing journal entry. Read the current entry for
+        // yesterday and merge: if it already has trades, keep them; if both have trades, union by id.
+        // This prevents catastrophic loss when state.trades is stale/partial relative to the saved
+        // journal (e.g., after cloud-pull, migration, or app reopened past midnight).
         if(state.trades&&state.trades.length>0){
-          var pnl=state.trades.reduce(function(s,t){return s+(parseFloat(t.pnl)||0);},0);
-          var wins=state.trades.filter(function(t){return parseFloat(t.pnl)>0;}).length;
-          var losses=state.trades.filter(function(t){return parseFloat(t.pnl)<0;}).length;
-          var rolloverRiskMax=parseFloat(settings.riskMax)||0;
-          try{localStorage.setItem("journal:"+state.date.replace(/\//g,"-"),JSON.stringify({date:state.date,pnl:pnl,trades:state.trades,wins:wins,losses:losses,disciplineScore:calcDiscipline(state.trades,rolloverRiskMax,{commitment:state.commitment||null}),note:state.dailyNote||"",riskMax:rolloverRiskMax,commitment:state.commitment||null}));}catch(e){}
+          var key="journal:"+state.date.replace(/\//g,"-");
+          var existing=null;
+          try{var raw=localStorage.getItem(key);if(raw)existing=JSON.parse(raw);}catch(e){}
+          var mergedTrades=state.trades.slice();
+          if(existing&&Array.isArray(existing.trades)&&existing.trades.length>0){
+            var seen={};
+            mergedTrades.forEach(function(t){if(t&&t.id!=null)seen[t.id]=true;});
+            existing.trades.forEach(function(t){if(t&&t.id!=null&&!seen[t.id])mergedTrades.push(t);});
+          }
+          var pnl=mergedTrades.reduce(function(s,t){return s+(parseFloat(t.pnl)||0);},0);
+          var wins=mergedTrades.filter(function(t){return parseFloat(t.pnl)>0;}).length;
+          var losses=mergedTrades.filter(function(t){return parseFloat(t.pnl)<0;}).length;
+          var rolloverRiskMax=parseFloat(settings.riskMax)||(existing&&existing.riskMax)||0;
+          var entry=Object.assign({},existing||{},{
+            date:state.date,
+            pnl:pnl,
+            trades:mergedTrades,
+            wins:wins,
+            losses:losses,
+            disciplineScore:calcDiscipline(mergedTrades,rolloverRiskMax,{commitment:state.commitment||(existing&&existing.commitment)||null}),
+            note:state.dailyNote||(existing&&existing.note)||"",
+            riskMax:rolloverRiskMax,
+            commitment:state.commitment||(existing&&existing.commitment)||null
+          });
+          safeWriteJournalEntry(key,entry);
         }
         setState(defaultState());
       }
@@ -7301,6 +7337,12 @@ function App(props){
   var preCheckComplete=isPreCheckComplete(state.preChecklist);
   var totalPnL=state.trades.filter(function(t){return t.status!=="open";}).reduce(function(s,t){return s+(parseFloat(t.pnl)||0);},0);
   var liveTrades=state.trades.filter(function(t){return t.status==="open";});
+  // CHANGED: Compute effective size-fraction (session sizeFraction × 0.5 when discipline-locked)
+  // up here so both tradeStatus and the display values below share the same scaling.
+  var sessForSf=getSessions(settings).find(function(s){return s.id===phase;});
+  var effSF=sessForSf&&sessForSf.sizeFraction!=null?parseFloat(sessForSf.sizeFraction)||1:1;
+  var liveLockForSF=checkDisciplineLock(state.trades,state.commitment);
+  if(liveLockForSF.locked)effSF=effSF*0.5;
   var tradeStatus=(function(){
     // CHANGED: Market-closed no longer blocks new trades — users may log fills from extended hours
     // or trades placed elsewhere right after the bell. All other gates (pre-market checklist,
@@ -7322,14 +7364,15 @@ function App(props){
       var sessionTrades=(state.trades||[]).filter(function(t){return t.sessionId===phase;}).length;
       if(sessionTrades>=rule.maxTrades)return {ok:false,reason:"Max "+rule.maxTrades+" trade"+(rule.maxTrades===1?"":"s")+" reached for this session"};
     }
-    // CHANGED: Daily R hard stops — use flat settings.riskMax (auto-sizing parameters).
+    // CHANGED: Daily R stops now use the session-/lock-scaled riskMax so a half-size day hits
+    // its hard stops at half the dollar movement (1R loss = half the dollars).
     if(rule){
-      var riskMaxNum=parseFloat(settings.riskMax)||0;
+      var riskMaxNum=(parseFloat(settings.riskMax)||0)*effSF;
       if(riskMaxNum>0){
         var rStops=getSessionRStops(rule);
         var dayR=totalPnL/riskMaxNum;
-        if(dayR<=rStops.lossR)return {ok:false,reason:"Daily loss stop hit ("+rStops.lossR.toFixed(1)+"R)"};
-        if(dayR>=rStops.gainR)return {ok:false,reason:"Daily gain stop hit (+"+rStops.gainR.toFixed(1)+"R)"};
+        if(dayR<=rStops.lossR)return {ok:false,reason:"Daily loss stop hit ("+rStops.lossR.toFixed(1)+"R)"+(liveLockForSF.locked?" — half-size":"")};
+        if(dayR>=rStops.gainR)return {ok:false,reason:"Daily gain stop hit (+"+rStops.gainR.toFixed(1)+"R)"+(liveLockForSF.locked?" — half-size":"")};
       }
     }
     return {ok:true};
@@ -7407,12 +7450,8 @@ function App(props){
           </div>
         </div>
         {(function(){
-          // CHANGED: Apply active session's sizeFraction to displayed Position/Risk so it reflects current session sizing.
-          var sess=getSessions(settings).find(function(s){return s.id===phase;});
-          var sf=sess&&sess.sizeFraction!=null?parseFloat(sess.sizeFraction)||1:1;
-          // CHANGED: Discipline-lock auto-halves position/risk instead of blocking trading.
-          var lock=checkDisciplineLock(state.trades,state.commitment);
-          if(lock.locked)sf=sf*0.5;
+          // CHANGED: Reuse effSF computed above (session sizeFraction × discipline-lock half) so display + hard-stops agree.
+          var sf=effSF;
           var dPosMin=Math.round((settings.positionMin||0)*sf);
           var dPosMax=Math.round((settings.positionMax||0)*sf);
           var dRiskMin=Math.round((settings.riskMin||0)*sf);
