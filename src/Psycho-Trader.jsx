@@ -1937,7 +1937,11 @@ function TradeForm(props){
   var remaining=totalEntryC>0?totalEntryC-totalExitC:null;
   var dollarPnl=parseFloat(trade.pnl)||0,pctPnlVal=parseFloat(trade.pctPnl)||0;
   var showPnL=trade.pnl!==""&&exits.some(function(ex){return ex.contracts&&ex.price;});
-  var posExceedsMax=trade.positionSize&&parseFloat(trade.positionSize)>settings.positionMax;
+  // CHANGED: Use the session-/lock-scaled cap from props (matches the banner shown above) so the
+  // form flags oversized entries during half-size trading too. Fall back to settings only if not provided.
+  var effPosMaxForForm=parseFloat(props.displayPosMax);
+  if(!(effPosMaxForForm>0))effPosMaxForForm=parseFloat(settings.positionMax)||0;
+  var posExceedsMax=trade.positionSize&&effPosMaxForForm>0&&parseFloat(trade.positionSize)>effPosMaxForForm;
   var legCount=entries.length+exits.length;
   var hasEvaluation=!!(trade.grade||(trade.emotions&&trade.emotions.length)||(trade.violations&&trade.violations.length)||trade.notes);
   var density=0;
@@ -2151,13 +2155,18 @@ function TradeForm(props){
               );
             })}
             {totalEntryC>0&&!isNaN(avgEntry)&&(
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:rowGap,marginTop:fldHeader}}>
+              <div style={{display:"grid",gridTemplateColumns:!props.mobile&&trade.stopLoss?"1fr 1fr 1fr 1fr":"1fr 1fr 1fr",gap:rowGap,marginTop:fldHeader}}>
                 <div style={{background:"#1e293b",borderRadius:6,padding:density>=2?"4px 8px":"6px 10px"}}><div style={{fontSize:9,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>{unitLabel}</div><div style={{fontSize:density>=2?12:14,fontWeight:700,color:"#38bdf8",marginTop:1}}>{totalEntryC}</div></div>
                 <div style={{background:"#1e293b",borderRadius:6,padding:density>=2?"4px 8px":"6px 10px"}}><div style={{fontSize:9,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>Avg Entry</div><div style={{fontSize:density>=2?12:14,fontWeight:700,color:"#f59e0b",marginTop:1}}>${avgEntry.toFixed(2)}</div></div>
                 <div style={{background:"#1e293b",border:posExceedsMax?"1px solid #ef4444":"none",borderRadius:6,padding:density>=2?"4px 8px":"6px 10px"}}><div style={{fontSize:9,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>Position</div><div style={{fontSize:density>=2?12:14,fontWeight:700,color:posExceedsMax?"#ef4444":"#94a3b8",marginTop:1}}>{trade.positionSize?(HIDE_DOLLAR_PNL?pctOfAccount(parseFloat(trade.positionSize)):("$"+parseFloat(trade.positionSize).toFixed(2))):"--"}</div></div>
+                {/* CHANGED: Stop Loss MAX now sits inline as a 4th tile on laptop (matches the styling of the others). On mobile it falls back to the dedicated banner below. */}
+                {!props.mobile&&trade.stopLoss&&(
+                  <div style={{background:"#2a0f0f",border:"1px solid #7f1d1d",borderRadius:6,padding:density>=2?"4px 8px":"6px 10px"}}><div style={{fontSize:9,color:"#fca5a5",letterSpacing:1,textTransform:"uppercase",opacity:0.85}}>Stop Loss MAX</div><div style={{fontSize:density>=2?12:14,fontWeight:700,color:"#fca5a5",marginTop:1}}>${parseFloat(trade.stopLoss).toFixed(2)}</div></div>
+                )}
               </div>
             )}
-            {trade.stopLoss&&<div style={{marginTop:fldHeader,padding:"5px 10px",background:"#2a0f0f",border:"1px solid #7f1d1d",borderRadius:6,fontSize:density>=2?11:12,color:"#fca5a5"}}>Stop Loss MAX: ${parseFloat(trade.stopLoss).toFixed(2)}</div>}
+            {/* On mobile, or when there are no entries yet, keep the dedicated banner. */}
+            {trade.stopLoss&&(props.mobile||!(totalEntryC>0&&!isNaN(avgEntry)))&&<div style={{marginTop:fldHeader,padding:"5px 10px",background:"#2a0f0f",border:"1px solid #7f1d1d",borderRadius:6,fontSize:density>=2?11:12,color:"#fca5a5"}}>Stop Loss MAX: ${parseFloat(trade.stopLoss).toFixed(2)}</div>}
           </div>
           {/* CHANGED: Exit Plan banner — between entry and exit legs as a reminder before exiting. Shown whenever a session with an exit plan is active. */}
           {(function(){
