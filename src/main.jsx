@@ -20,15 +20,7 @@ function Splash({ text }) {
 
 function SignOutButton() {
   return (
-    <button
-      onClick={async () => { stopSync(); await supabase.auth.signOut(); }}
-      title="Sign out"
-      style={{ position: "fixed", top: 10, right: 12, zIndex: 9999,
-        background: "#111118", border: "1px solid #334155", borderRadius: 8,
-        color: "#94a3b8", fontSize: 12, fontWeight: 600, padding: "6px 10px",
-        cursor: "pointer", fontFamily: "inherit" }}>
-      Sign out
-    </button>
+      <App onSignOut={() => supabase.auth.signOut() /* or whatever you use */} />
   );
 }
 
