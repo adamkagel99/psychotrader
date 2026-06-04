@@ -742,10 +742,11 @@ function safeWriteJournalEntry(key,entry){
     try{
       var stripped=Object.assign({},entry,{trades:(entry.trades||[]).map(function(x){var c=Object.assign({},x);c.screenshots=[];return c;}),screenshotsStripped:true});
       localStorage.setItem(key,JSON.stringify(stripped));
-      try{alert("Storage full — saved without screenshots. Day totals updated.");}catch(e){}
+      // CHANGED: non-blocking warning so save isn't paused waiting for the user to dismiss.
+      try{console.warn("Storage full — saved without screenshots for "+key);}catch(e){}
       return stripped;
     }catch(e2){
-      try{alert("Failed to save: "+(e2&&e2.message?e2.message:String(e2)));}catch(e){}
+      try{console.error("Journal save failed for "+key+":",e2);}catch(e){}
       return null;
     }
   }
