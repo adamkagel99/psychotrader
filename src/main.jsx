@@ -18,19 +18,13 @@ function Splash({ text }) {
   );
 }
 
-function SignOutButton() {
-  return (
-      <App onSignOut={() => supabase.auth.signOut() /* or whatever you use */} />
-  );
-}
-
 function Root() {
   const [phase, setPhase] = useState("loading"); // loading | auth | syncing | ready
   const [session, setSession] = useState(null);
   const [syncTick, setSyncTick] = useState(0);
 
   const hydrate = useCallback(async (userId) => {
-    // CHANGED: load-instantly model. If this device already has local data, render the app
+    // load-instantly model. If this device already has local data, render the app
     // immediately and refresh from the cloud in the background (no blocking "Syncing…" splash).
     // Only the genuine first sign-in on an empty device blocks while we set up.
     if (localHasData()) {
@@ -57,14 +51,12 @@ function Root() {
 
   useEffect(() => {
     if (!supabaseReady) { setPhase("auth"); return; }
-
     supabase.auth.getSession().then(({ data }) => {
       const s = data.session;
       setSession(s);
       if (s) hydrate(s.user.id);
       else setPhase("auth");
     });
-
     const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
       setSession(s);
       if (s) hydrate(s.user.id);
@@ -72,6 +64,12 @@ function Root() {
     });
     return () => sub.subscription.unsubscribe();
   }, [hydrate]);
+
+  // CHANGED: handler now passed into the app and rendered inside Settings, no floating header button.
+  const handleSignOut = useCallback(async () => {
+    stopSync();
+    await supabase.auth.signOut();
+  }, []);
 
   if (!supabaseReady) {
     return (
@@ -81,13 +79,12 @@ function Root() {
   if (phase === "loading") return <Splash text="Loading…" />;
   if (phase === "auth" || !session) return <AuthGate />;
   if (phase === "syncing") return <Splash text="Syncing your data…" />;
-
   return (
-    <>
-      <SignOutButton />
-      {/* key includes syncTick so a completed background pull re-mounts the app to show fresh data */}
-      <TradingApp key={session.user.id + ":" + syncTick} />
-    </>
+    /* key includes syncTick so a completed background pull re-mounts the app to show fresh data */
+    <TradingApp
+      key={session.user.id + ":" + syncTick}
+      onSignOut={handleSignOut}
+    />
   );
 }
 
