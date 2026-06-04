@@ -731,6 +731,25 @@ function getJournalEntryField(date,field){
     return entry?entry[field]:null;
   }catch(e){return null;}
 }
+// CHANGED: Helper used by every journal-entry writer. On quota error, retries with all trade
+// screenshots stripped so the day's totals still persist (otherwise edits silently fail to save).
+// Returns the entry that was actually written (may be a screenshot-stripped variant) or null on failure.
+function safeWriteJournalEntry(key,entry){
+  try{localStorage.setItem(key,JSON.stringify(entry));return entry;}
+  catch(qe){
+    var isQuota=qe&&(qe.name==="QuotaExceededError"||/quota/i.test(qe.message||""));
+    if(!isQuota)return null;
+    try{
+      var stripped=Object.assign({},entry,{trades:(entry.trades||[]).map(function(x){var c=Object.assign({},x);c.screenshots=[];return c;}),screenshotsStripped:true});
+      localStorage.setItem(key,JSON.stringify(stripped));
+      try{alert("Storage full — saved without screenshots. Day totals updated.");}catch(e){}
+      return stripped;
+    }catch(e2){
+      try{alert("Failed to save: "+(e2&&e2.message?e2.message:String(e2)));}catch(e){}
+      return null;
+    }
+  }
+}
 function loadJournalRows(){
   var rows=[];
   for(var i=0;i<localStorage.length;i++){
@@ -3342,7 +3361,8 @@ function TradesTab(props){
     var entryRiskMax=isToday?(parseFloat(settings.riskMax)||0):((sourceEntry.riskMax!=null&&parseFloat(sourceEntry.riskMax)>0)?parseFloat(sourceEntry.riskMax):(parseFloat(settings.riskMax)||0));
     var newEntry=Object.assign({},sourceEntry,{trades:ut,wins:ut.filter(function(x){return parseFloat(x.pnl)>0;}).length,losses:ut.filter(function(x){return parseFloat(x.pnl)<0;}).length,pnl:ut.reduce(function(s,x){return s+(parseFloat(x.pnl)||0);},0),disciplineScore:calcDiscipline(ut,entryRiskMax,{commitment:(sourceEntry&&sourceEntry.commitment)||state.commitment||null}),riskMax:entryRiskMax,noTradeDay:ut.length>0?false:!!sourceEntry.noTradeDay});
     var dateKey=isToday?todayStr():selectedDate;
-    try{localStorage.setItem("journal:"+dateKey.replace(/\//g,"-"),JSON.stringify(newEntry));}catch(e){}
+    var written=safeWriteJournalEntry("journal:"+dateKey.replace(/\//g,"-"),newEntry);
+    if(written)newEntry=written;
     if(isToday){
       setTodayJournalEntry(newEntry);
       // CHANGED: Also update state.trades so live P&L stays consistent (with recomputed pnl).
@@ -3363,7 +3383,8 @@ function TradesTab(props){
     var entryRiskMax=isToday?(parseFloat(settings.riskMax)||0):((sourceEntry.riskMax!=null&&parseFloat(sourceEntry.riskMax)>0)?parseFloat(sourceEntry.riskMax):(parseFloat(settings.riskMax)||0));
     var newEntry=Object.assign({},sourceEntry,{trades:ut,wins:ut.filter(function(x){return parseFloat(x.pnl)>0;}).length,losses:ut.filter(function(x){return parseFloat(x.pnl)<0;}).length,pnl:ut.reduce(function(s,x){return s+(parseFloat(x.pnl)||0);},0),disciplineScore:calcDiscipline(ut,entryRiskMax,{commitment:(sourceEntry&&sourceEntry.commitment)||state.commitment||null}),riskMax:entryRiskMax,noTradeDay:ut.length>0?false:!!sourceEntry.noTradeDay});
     var dateKey=isToday?todayStr():selectedDate;
-    try{localStorage.setItem("journal:"+dateKey.replace(/\//g,"-"),JSON.stringify(newEntry));}catch(e){}
+    var written=safeWriteJournalEntry("journal:"+dateKey.replace(/\//g,"-"),newEntry);
+    if(written)newEntry=written;
     if(isToday){
       setTodayJournalEntry(newEntry);
       props.setState(function(s){return Object.assign({},s,{trades:(s.trades||[]).filter(function(x){return x.id!==tradeId;})});});
