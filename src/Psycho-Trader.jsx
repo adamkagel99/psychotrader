@@ -7226,25 +7226,24 @@ function App(props){
   function autoAddViolations(t,posMax){
     var v=(t.violations||[]).slice();
     var pos=parseFloat(t.positionSize)||0;
-    // CHANGED: "Max risk exceeded" auto-triggers on a LOSING trade whose price-move loss is
-    // worse than the session-scaled risk cap (riskMaxPct × sizeFraction). Mirrors the oversized rule:
-    // stamp the threshold used so the judgment stays stable if settings change later.
     var pnlNum=parseFloat(t.pnl);
     var pctNum=parseFloat(t.pctPnl);
     var riskMaxPct=(settings&&settings.riskMaxPct!=null)?parseFloat(settings.riskMaxPct):33;
-    // Resolve the session size fraction: prefer the value stored on the trade, else look it up by sessionId.
+    // Session size fraction (prefer trade-stamped, else look up).
     var sf=null;
     if(t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))sf=parseFloat(t.sizeFraction);
     if(sf==null&&t.sessionId){try{var sess=getSessions(settings).find(function(s){return s.id===t.sessionId;});if(sess&&sess.sizeFraction!=null)sf=parseFloat(sess.sizeFraction);}catch(e){}}
     if(sf==null)sf=1;
-    // CHANGED: Oversized entry now checks against the SESSION-SCALED cap (matches the cap shown in the UI).
+    // CHANGED: Apply discipline-lock half-size on top of session sizeFraction. This is what makes
+    // the live trade check match the cap displayed in the UI when half-size trading is active.
+    try{var lk=checkDisciplineLock(state.trades,state.commitment);if(lk&&lk.locked)sf=sf*0.5;}catch(e){}
     var effPosMax=posMax>0?posMax*sf:0;
     if(effPosMax>0&&pos>effPosMax&&v.indexOf("Oversized entry")<0)v.push("Oversized entry");
     var stopThreshPct=(riskMaxPct>0)?riskMaxPct*sf:0;
     if(!isNaN(pnlNum)&&pnlNum<0&&!isNaN(pctNum)&&stopThreshPct>0&&pctNum<-stopThreshPct&&v.indexOf("Max risk exceeded")<0){
       v.push("Max risk exceeded");
     }
-    var patch={violations:v};
+    var patch={violations:v,sizeFraction:sf};
     if(effPosMax>0)patch.posMaxAtEntry=effPosMax;
     if(stopThreshPct>0)patch.stopThreshPctAtEntry=stopThreshPct;
     return Object.assign({},t,patch);
