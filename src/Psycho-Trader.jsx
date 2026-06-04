@@ -5838,7 +5838,7 @@ function PerformanceTab(props){
             var pfn=parseFloat(pf);
             var pfColor=pf==="∞"||pfn>1?"#22c55e":pfn<1?"#ef4444":"#94a3b8";
             return <StatSec title="Overview" colSpan={props.mobile?1:6}>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,padding:"4px 0"}}>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:6,padding:"4px 0"}}>
                 <StatTile label="Total P&L" value={HIDE_DOLLAR_PNL?(totalPnl>=0?"+$•••":"-$•••"):((totalPnl>=0?"+":"-")+"$"+Math.abs(totalPnl).toFixed(2))} color={totalPnl>=0?"#22c55e":"#ef4444"}/>
                 <StatTile label="Trades" value={allTrades.length} sub={tradingDays>0?(Math.ceil(avgTradesPerDay)+"/day · "+tradingDays+"d"):""}/>
                 <StatTile label="Profit Factor" value={pf} color={pfColor}/>
@@ -6497,13 +6497,13 @@ function SettingsTab(props){
           })}
         </div>
         {(settings.sizingMode||"pct")==="pct"?(
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:8}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8,marginBottom:8}}>
             <div><label style={lbl}>Slippage %</label><input type="number" step="0.1" value={settings.slippagePct!=null?settings.slippagePct:20} onChange={function(e){setSettings(function(s){return Object.assign({},s,{slippagePct:parseFloat(e.target.value)||0});});}} style={fld}/></div>
             <div><label style={lbl}>Position Max %</label><input type="number" step="0.1" value={settings.positionMaxPct!=null?settings.positionMaxPct:7.5} onChange={function(e){setSettings(function(s){return Object.assign({},s,{positionMaxPct:parseFloat(e.target.value)||0});});}} style={fld}/></div>
             <div><label style={lbl}>Risk Max % of Pos</label><input type="number" step="0.1" value={settings.riskMaxPct!=null?settings.riskMaxPct:33} onChange={function(e){setSettings(function(s){return Object.assign({},s,{riskMaxPct:parseFloat(e.target.value)||0});});}} style={fld}/></div>
           </div>
         ):(
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:8}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8,marginBottom:8}}>
             <div><label style={lbl}>Slippage %</label><input type="number" step="0.1" value={settings.slippagePct!=null?settings.slippagePct:20} onChange={function(e){setSettings(function(s){return Object.assign({},s,{slippagePct:parseFloat(e.target.value)||0});});}} style={fld}/></div>
             <div><label style={lbl}>Position Max ($)</label><input type="number" step="1" value={settings.positionMaxDollar!=null?settings.positionMaxDollar:500} onChange={function(e){setSettings(function(s){return Object.assign({},s,{positionMaxDollar:parseFloat(e.target.value)||0});});}} style={fld}/></div>
             <div><label style={lbl}>Risk Max ($)</label><input type="number" step="1" value={settings.riskMaxDollar!=null?settings.riskMaxDollar:165} onChange={function(e){setSettings(function(s){return Object.assign({},s,{riskMaxDollar:parseFloat(e.target.value)||0});});}} style={fld}/></div>
@@ -6576,7 +6576,7 @@ function SettingsTab(props){
 
       <SettingsSection title="Discipline Scoring">
         <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Customize how points are awarded or deducted from your daily discipline score (starts at 100).</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:8}}>
           <div><label style={lbl}>Violation Penalty</label><input type="number" value={discScoring.violationPenalty} onChange={function(e){persistDiscScoring(Object.assign({},discScoring,{violationPenalty:parseFloat(e.target.value)||0}));}} style={fld}/></div>
           <div><label style={lbl}>Negative Emotion Penalty</label><input type="number" value={discScoring.negEmotionPenalty} onChange={function(e){persistDiscScoring(Object.assign({},discScoring,{negEmotionPenalty:parseFloat(e.target.value)||0}));}} style={fld}/></div>
           <div><label style={lbl}>Positive Emotion Bonus</label><input type="number" value={discScoring.posEmotionBonus} onChange={function(e){persistDiscScoring(Object.assign({},discScoring,{posEmotionBonus:parseFloat(e.target.value)||0}));}} style={fld}/></div>
@@ -6821,7 +6821,7 @@ function SettingsTab(props){
                 <div><label style={lbl}>Max Trades</label><input disabled={disabled} type="number" value={s.maxTrades!=null?s.maxTrades:99} onChange={function(e){updateSession(idx,{maxTrades:parseInt(e.target.value)||0});}} style={Object.assign({},fld,{padding:"5px 8px",fontSize:12,colorScheme:"dark",color:"#e2e8f0"},dFld)}/></div>
               </div>
               {/* CHANGED: Daily R hard stops. 1R = session-scaled risk (settings.riskMax × sizeFraction), so a 1R stop scales with session size automatically. */}
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:8}}>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:6,marginBottom:8}}>
                 <div>
                   <label style={lbl}>Loss Stop (R)</label>
                   <input disabled={disabled} type="number" step="0.1" value={s.lossStopR!=null?s.lossStopR:-1} onChange={function(e){var v=parseFloat(e.target.value);updateSession(idx,{lossStopR:isNaN(v)?null:v});}} style={Object.assign({},fld,{padding:"5px 8px",fontSize:12,colorScheme:"dark",color:"#ef4444",fontWeight:600},dFld)}/>
@@ -6866,7 +6866,7 @@ function SettingsTab(props){
 
       <SettingsSection title="Pre-Trade Checklist">
         <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Per-asset-class checklist shown in the trade form. Assign a Setup to make an item appear only for that setup; leave blank to show for all setups. The form is locked until every visible item is satisfied.</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:8,marginBottom:10}}>
           <div>
             <label style={lbl}>Asset class</label>
             <select value={pretradeEditClass} onChange={function(e){setPretradeEditClass(e.target.value);}} style={fld}>
@@ -7383,7 +7383,7 @@ function App(){
         })}
       </div>}
       <div style={{flex:1,minWidth:0}}>
-      <div style={{maxWidth:mobile?560:1320,margin:"0 auto",padding:mobile?"0 12px 84px":"0 28px 60px"}}>
+      <div style={{maxWidth:mobile?560:"min(1800px, 96vw)",margin:"0 auto",padding:mobile?"0 12px 84px":"0 28px 60px"}}>
         <div style={{padding:"16px 0 12px",position:"sticky",top:0,background:"#0a0a0f",zIndex:50,borderBottom:"1px solid #1e293b"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,gap:12}}>
             <div style={{flex:1,minWidth:0}}>
