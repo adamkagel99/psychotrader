@@ -137,6 +137,39 @@ function getTradingWindows(settings){if(settings&&Array.isArray(settings.trading
 function isWithinTradingWindow(localMins,settings){var ws=getTradingWindows(settings);for(var i=0;i<ws.length;i++){var w=ws[i];if(localMins>=w.start&&localMins<w.end)return true;}return false;}
 
 var CACHED_SESSIONS=[];
+// CHANGED: Parse "h:mm AM/PM" or "HH:mm" (24h) into minutes-of-day. Returns null if unparseable.
+function parseTimeToMinsOfDay(str){
+  if(!str||typeof str!=="string")return null;
+  var m=str.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+  if(!m)return null;
+  var h=parseInt(m[1],10);var mm=parseInt(m[2],10);
+  if(isNaN(h)||isNaN(mm))return null;
+  var ap=(m[3]||"").toUpperCase();
+  if(ap==="PM"&&h<12)h+=12;
+  else if(ap==="AM"&&h===12)h=0;
+  return h*60+mm;
+}
+// CHANGED: Derive sessionId from a trade's actual start time (first entry time, falling back to t.time, then openedAt).
+// Day-of-week comes from openedAt so a back-entered trade gets the right weekday.
+function getSessionForTrade(t){
+  if(!t)return null;
+  var timeStr=(t.entries&&t.entries[0]&&t.entries[0].time)||t.time||null;
+  var mins=parseTimeToMinsOfDay(timeStr);
+  var date=null;
+  if(t.openedAt){try{date=new Date(t.openedAt);}catch(e){}}
+  if(mins==null&&date){mins=date.getHours()*60+date.getMinutes();}
+  if(mins==null)return null;
+  var day=(date?date.getDay():getNow().getDay());
+  for(var i=0;i<CACHED_SESSIONS.length;i++){
+    var s=CACHED_SESSIONS[i];
+    if(s.enabled===false)continue;
+    if(mins<s.startMin||mins>=s.endMin)continue;
+    var days=s.days||[1,2,3,4,5];
+    if(days.indexOf(day)<0)continue;
+    return s.id;
+  }
+  return null;
+}
 function getSessionAt(minutesLocal){
   var dayOfWeek=getNow().getDay();
   for(var i=0;i<CACHED_SESSIONS.length;i++){
@@ -330,13 +363,14 @@ function daysBetween(aStr,bStr){
   var b=new Date(bStr);b.setHours(0,0,0,0);
   return Math.round((b.getTime()-a.getTime())/86400000);
 }
-function checkDisciplineLock(todayTrades){
+function checkDisciplineLock(todayTrades,commitment){
   try{
     var threshold=loadDisciplineLockThreshold();
     // 1) Same-day: today's live trades drop below threshold -> locked today (no unlock).
     var tToday=(todayTrades||[]).filter(function(t){return t.status!=="open";});
     if(tToday.length>0){
-      var todayScore=calcDiscipline(tToday,0,{processOnly:true});
+      // CHANGED: Include commitment penalties so the lock score matches journal/performance.
+      var todayScore=calcDiscipline(tToday,0,{processOnly:true,commitment:commitment||null});
       if(todayScore<threshold){
         return {locked:true,fromDate:todayStr(),score:Math.round(todayScore),sameDay:true};
       }
@@ -350,10 +384,9 @@ function checkDisciplineLock(todayTrades){
     rows.forEach(function(r){var d=new Date(r.date);d.setHours(0,0,0,0);if(d.getTime()<todayD.getTime())prior=r;});
     if(!prior)return {locked:false};
     // CHANGED: Judge the lock on the PROCESS-ONLY score so the R-outcome bonus can never
-    // affect lock state. Recompute from the row's trades when present; else fall back to the
-    // stored score (older rows predate the R-term, so their stored score == process score).
+    // affect lock state. Use the row's own saved commitment for past days.
     var score=(prior.trades&&prior.trades.length>0)
-      ? calcDiscipline(prior.trades,0,{processOnly:true})
+      ? calcDiscipline(prior.trades,0,{processOnly:true,commitment:prior.commitment||null})
       : (prior.disciplineScore!=null?parseFloat(prior.disciplineScore):100);
     if(score>=threshold)return {locked:false};
     // Auto-clear once 2+ calendar days have passed (one full day served as cooldown).
@@ -1041,7 +1074,7 @@ function syncChallengeCompletions(rows){
 }
 
 var CS=function(x){return Object.assign({background:"#111118",border:"1px solid #1e293b",borderRadius:10,padding:"14px 16px"},x||{});};
-var fld={width:"100%",padding:"10px 12px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:6,color:"#e2e8f0",fontSize:15,fontFamily:"inherit"};
+var fld={width:"100%",padding:"10px 12px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:6,color:"#e2e8f0",fontSize:15,fontFamily:"inherit",boxSizing:"border-box"};
 var lbl={fontSize:12,color:"#64748b",letterSpacing:1,textTransform:"uppercase",marginBottom:4,display:"block"};
 function roFld(x){return Object.assign({},fld,{background:"#1e293b",color:"#94a3b8",display:"flex",alignItems:"center"},x||{});}
 
@@ -1372,6 +1405,12 @@ function CalendarGrid(props){
   var [calMonth,setCalMonth]=useState(now.getMonth());
   var [showPicker,setShowPicker]=useState(false);
   function moveMonth(delta){var m=calMonth+delta;var y=calYear;if(m<0){m=11;y--;}if(m>11){m=0;y++;}setCalMonth(m);setCalYear(y);}
+  // CHANGED: Drag-to-swipe months — mouse or touch. Threshold 60px; right drag = prev month, left = next.
+  var dragRef=React.useRef({startX:null,dragging:false,suppressClick:false});
+  function dragStart(x){dragRef.current.startX=x;dragRef.current.dragging=true;dragRef.current.suppressClick=false;}
+  function dragMove(x){if(!dragRef.current.dragging||dragRef.current.startX==null)return;var d=x-dragRef.current.startX;if(Math.abs(d)>4)dragRef.current.suppressClick=true;}
+  function dragEnd(x){if(!dragRef.current.dragging)return;var d=(x!=null?x-dragRef.current.startX:0);dragRef.current.dragging=false;dragRef.current.startX=null;if(Math.abs(d)>60)moveMonth(d>0?-1:1);}
+  function onCellClickCapture(e){if(dragRef.current.suppressClick){e.preventDefault();e.stopPropagation();dragRef.current.suppressClick=false;}}
   var firstDay=new Date(calYear,calMonth,1).getDay();
   var daysInMonth=new Date(calYear,calMonth+1,0).getDate();
   var weeks=[];var cur=[];
@@ -1389,7 +1428,7 @@ function CalendarGrid(props){
       <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3,marginBottom:6}}>
         {["S","M","T","W","T","F","S"].map(function(c,i){return <div key={i} style={{textAlign:"center",fontSize:11,color:"#475569",fontWeight:700}}>{c}</div>;})}
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3}}>
+      <div onMouseDown={function(e){dragStart(e.clientX);}} onMouseMove={function(e){dragMove(e.clientX);}} onMouseUp={function(e){dragEnd(e.clientX);}} onMouseLeave={function(){dragEnd(null);}} onTouchStart={function(e){if(e.touches[0])dragStart(e.touches[0].clientX);}} onTouchMove={function(e){if(e.touches[0])dragMove(e.touches[0].clientX);}} onTouchEnd={function(e){var tx=e.changedTouches&&e.changedTouches[0]?e.changedTouches[0].clientX:null;dragEnd(tx);}} onClickCapture={onCellClickCapture} style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3,cursor:"grab",userSelect:"none"}}>
         {weeks.flat().map(function(d,i){
           if(!d)return <div key={i} style={{height:34}}/>;
           var ds=(calMonth+1)+"/"+d+"/"+calYear;
@@ -1678,7 +1717,7 @@ function TradeTile(props){
   // CHANGED: Grade moved to hero row (top-left). Contracts moved to price banner. Meta line is now just time/duration.
 
   return (
-    <div style={{background:"#111118",border:"1px solid #1e293b",borderLeft:"3px solid "+borderColor,borderRadius:10,padding:"14px 16px",marginBottom:10}}>
+    <div style={{background:"#111118",border:"1px solid #1e293b",borderLeft:"3px solid "+borderColor,borderRadius:10,padding:"14px 16px",marginBottom:10,height:"100%",boxSizing:"border-box",display:"flex",flexDirection:"column"}}>
 
       {/* HERO ROW: index · instrument · direction · GRADE (left) | P&L (right) */}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10}}>
@@ -2840,9 +2879,33 @@ function TodayStrip(props){
   var todayTrades=(props.todayTrades||[]).filter(function(t){return t&&t.status!=="open";});
   var pnl=props.totalPnL||0;
   var rVal=riskMax>0?pnl/riskMax:0;
-  var disc=calcDiscipline(todayTrades,riskMax);
+  // CHANGED: Single source of truth for today's discipline. If today is already saved to journal,
+  // use the stored disciplineScore (kept in sync by the migration + commitment-edit handlers) so
+  // the Today strip cannot disagree with the Journal / Performance displays.
+  var storedTodayScore=null;
+  try{
+    var jk="journal:"+todayStr().replace(/\//g,"-");
+    var js=typeof localStorage!=="undefined"?localStorage.getItem(jk):null;
+    if(js){var je=JSON.parse(js);if(je&&je.disciplineScore!=null&&!isNaN(parseFloat(je.disciplineScore)))storedTodayScore=parseFloat(je.disciplineScore);}
+  }catch(e){}
+  var disc=storedTodayScore!=null
+    ? storedTodayScore
+    : calcDiscipline(todayTrades,riskMax,{commitment:(props.state&&props.state.commitment)||null});
   var cap=(props.state&&props.state.commitment&&props.state.commitment.maxTrades!=null&&props.state.commitment.maxTrades!=="")?parseInt(props.state.commitment.maxTrades):null;
   var pnlColor=pnl>0?"#22c55e":pnl<0?"#ef4444":"#94a3b8";
+  // CHANGED: Intraday drawdown — sort today's closed trades chronologically, track peak cumulative P&L,
+  // and record the largest dip below peak. Replaces the redundant Session tile (also shown in the header).
+  var ddVal=0;
+  (function(){
+    var sorted=todayTrades.slice().sort(function(a,b){var ma=parseTimeToMinsOfDay(a.time)||0;var mb=parseTimeToMinsOfDay(b.time)||0;return ma-mb;});
+    var c=0,p=0,worst=0;
+    sorted.forEach(function(t){c+=parseFloat(t.pnl)||0;if(c>p)p=c;var dd=c-p;if(dd<worst)worst=dd;});
+    ddVal=worst;
+  })();
+  var ddR=riskMax>0?ddVal/riskMax:0;
+  var ddText=HIDE_DOLLAR_PNL
+    ?(ddR<=-0.05?ddR.toFixed(1)+"R":"0R")
+    :(ddVal<0?"-$"+Math.abs(ddVal).toFixed(0):"$0");
   var startBal=(props.currentAccount||0)-pnl;
   var pnlText=HIDE_DOLLAR_PNL
     ?((pnl>=0?"+":"")+(startBal>0?(pnl/startBal*100):0).toFixed(2)+"%")
@@ -2851,7 +2914,7 @@ function TodayStrip(props){
     {label:"Today P&L",value:pnlText,color:pnlColor},
     {label:"R Multiple",value:(rVal>=0?"+":"")+rVal.toFixed(1)+"R",color:rVal>=0?"#22c55e":"#ef4444"},
     {label:"Trades",value:cap!=null?(todayTrades.length+" / "+cap):String(todayTrades.length),color:cap!=null&&todayTrades.length>cap?"#ef4444":"#e2e8f0"},
-    {label:"Session",value:getPhaseLabel(props.phase),color:props.phase!=="closed"?"#a5b4fc":"#94a3b8",small:true},
+    {label:"Intraday DD",value:ddText,color:ddVal<0?"#ef4444":"#94a3b8"},
     {label:"Discipline",value:Math.round(disc),color:discColor(disc)}
   ];
   return (
@@ -3377,7 +3440,7 @@ function TradesTab(props){
           (if any). When viewing a past day that had a lock event saved on its journal row, shows
           the historical lock summary. Otherwise hidden. */}
       {(function(){
-        var liveLock=checkDisciplineLock(state.trades);
+        var liveLock=checkDisciplineLock(state.trades,state.commitment);
         var isViewingToday=selectedDate===todayStr();
         // Determine what to show based on selected date.
         var mode=null,lock=null,entryNote="";
@@ -3702,7 +3765,7 @@ function TradesTab(props){
         </div>
         );
       })()}
-      <div style={{display:"grid",gridTemplateColumns:props.mobile?"1fr":"1fr 1fr",gap:12,alignItems:"start"}}>
+      <div style={{display:"grid",gridTemplateColumns:props.mobile?"1fr":"1fr 1fr 1fr",gap:12,alignItems:"stretch"}}>
       {displayTrades.map(function(t,i){
         var isEditing=editingId===t.id;
         if(!isToday){
@@ -3733,12 +3796,12 @@ function TradesTab(props){
         var wins=sTrades.filter(function(t){return parseFloat(t.pnl)>0;}).length;
         var losses=sTrades.filter(function(t){return parseFloat(t.pnl)<0;}).length;
         var bes=sTrades.filter(function(t){return Math.abs(parseFloat(t.pnl)||0)<0.01;}).length;
-        // CHANGED: For TODAY, always recompute live with the current commitment (the Commitment Review
-        // affirmation updates state.commitment in real time, so a stored score would be stale). Past
-        // days use their stored score.
-        var disc=isToday
-          ? calcDiscipline(sTrades,entry.riskMax,{commitment:(props.state&&props.state.commitment)||entry.commitment||null})
-          : (entry.disciplineScore!=null?entry.disciplineScore:calcDiscipline(sTrades,entry.riskMax,{commitment:entry.commitment||null}));
+        // CHANGED: Use the stored disciplineScore (kept in sync by the commitment-edit handler + the
+        // one-time migration). Recomputing live here can disagree with the journal/performance
+        // displays when commitment context differs.
+        var disc=(entry.disciplineScore!=null
+          ? parseFloat(entry.disciplineScore)
+          : calcDiscipline(sTrades,entry.riskMax,{commitment:entry.commitment||(isToday?(props.state&&props.state.commitment):null)||null}));
         return (
           <div style={CS({marginTop:18,border:"1px solid "+(isToday?"#16653444":"#1e293b")})}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -5034,18 +5097,41 @@ function EquityCurve(props){
   // CHANGED: starting balance before the first entry, for % change / % drawdown when $ is hidden.
   var startBal=0;
   try{startBal=getAccountBalanceAtDate(entries[0].date);}catch(e){}
+  // CHANGED: When the range is this-week or last-week, plot one point per closed trade (chronologically) instead of per day.
+  var granular=props.range==="thisweek"||props.range==="week";
   var pts=[];var cum=0,peak=0,maxDD=0,maxDDPct=0;
-  entries.forEach(function(r){
-    cum+=parseFloat(r.pnl)||0;
-    if(cum>peak)peak=cum;
-    var dd=cum-peak;
-    if(dd<maxDD)maxDD=dd;
-    // drawdown % relative to peak equity (start balance + peak P&L)
-    var peakEq=startBal+peak;
-    var ddPct=peakEq>0?(dd/peakEq*100):0;
-    if(ddPct<maxDDPct)maxDDPct=ddPct;
-    pts.push({date:r.date,cum:cum,peak:peak});
-  });
+  if(granular){
+    var allT=[];
+    entries.forEach(function(r){(r.trades||[]).forEach(function(t){if(t&&t.status!=="open")allT.push({date:r.date,t:t});});});
+    allT.sort(function(a,b){
+      var da=new Date(a.date).getTime(),db=new Date(b.date).getTime();
+      if(da!==db)return da-db;
+      var ma=parseTimeToMinsOfDay(a.t.time)||0;
+      var mb=parseTimeToMinsOfDay(b.t.time)||0;
+      return ma-mb;
+    });
+    allT.forEach(function(x){
+      cum+=parseFloat(x.t.pnl)||0;
+      if(cum>peak)peak=cum;
+      var dd=cum-peak;if(dd<maxDD)maxDD=dd;
+      var peakEq=startBal+peak;var ddPct=peakEq>0?(dd/peakEq*100):0;
+      if(ddPct<maxDDPct)maxDDPct=ddPct;
+      pts.push({date:x.date,cum:cum,peak:peak});
+    });
+    if(pts.length===0)return null;
+  }else{
+    entries.forEach(function(r){
+      cum+=parseFloat(r.pnl)||0;
+      if(cum>peak)peak=cum;
+      var dd=cum-peak;
+      if(dd<maxDD)maxDD=dd;
+      // drawdown % relative to peak equity (start balance + peak P&L)
+      var peakEq=startBal+peak;
+      var ddPct=peakEq>0?(dd/peakEq*100):0;
+      if(ddPct<maxDDPct)maxDDPct=ddPct;
+      pts.push({date:r.date,cum:cum,peak:peak});
+    });
+  }
   var W=320,H=80,padX=4,padY=6;
   var maxV=Math.max.apply(null,pts.map(function(p){return p.peak;}).concat([0]));
   var minV=Math.min.apply(null,pts.map(function(p){return p.cum;}).concat([0]));
@@ -5091,7 +5177,7 @@ function EquityCurve(props){
       <svg ref={svgRef} viewBox={"0 0 "+W+" "+H} style={{display:"block",width:"100%",height:"100%",flex:1,minHeight:120,touchAction:"none",cursor:"crosshair"}} preserveAspectRatio="none" onMouseMove={handleMove} onMouseLeave={handleLeave} onTouchStart={handleMove} onTouchMove={handleMove} onTouchEnd={handleLeave}>
         <line x1={padX} x2={W-padX} y1={yFor(0)} y2={yFor(0)} stroke="#334155" strokeWidth="0.5" strokeDasharray="2,2"/>
         <path d={areaPath} fill={positive?"#22c55e22":"#ef444422"} stroke="none"/>
-        <path d={peakPath} fill="none" stroke="#64748b" strokeWidth="0.8" strokeDasharray="2,2"/>
+        {/* CHANGED: Peak line removed; the peak value is still shown in the readout text. */}
         <path d={linePath} fill="none" stroke={positive?"#22c55e":"#ef4444"} strokeWidth="1.5"/>
         {hoverIdx!=null&&(
           <g>
@@ -5542,9 +5628,22 @@ function PerformanceTab(props){
       var liveWins=liveTrades.filter(function(t){return parseFloat(t.pnl)>0;}).length;
       var liveLosses=liveTrades.filter(function(t){return parseFloat(t.pnl)<0;}).length;
       var liveRiskMax=parseFloat((props.settings&&props.settings.riskMax))||0;
-      allRows.push({date:todayDateStr,pnl:liveTotalPnL,trades:liveTrades,wins:liveWins,losses:liveLosses,riskMax:liveRiskMax,disciplineScore:calcDiscipline(liveTrades,liveRiskMax)});
+      allRows.push({date:todayDateStr,pnl:liveTotalPnL,trades:liveTrades,wins:liveWins,losses:liveLosses,riskMax:liveRiskMax,disciplineScore:calcDiscipline(liveTrades,liveRiskMax,{commitment:(props.state&&props.state.commitment)||null})});
     }
   }
+  // CHANGED: Retroactively assign correct sessionId based on each trade's actual start time.
+  // Existing trades saved when the market was closed (sessionId=null) get attributed properly here.
+  allRows=allRows.map(function(r){
+    if(!r||!r.trades||!r.trades.length)return r;
+    var changed=false;
+    var fixed=r.trades.map(function(t){
+      if(!t)return t;
+      var derived=getSessionForTrade(t);
+      if(derived&&derived!==t.sessionId){changed=true;return Object.assign({},t,{sessionId:derived});}
+      return t;
+    });
+    return changed?Object.assign({},r,{trades:fixed}):r;
+  });
   function inRange(d){
     if(range==="all")return true;
     var dd=new Date(d);if(isNaN(dd.getTime()))return false;
@@ -5728,7 +5827,7 @@ function PerformanceTab(props){
               </div>
             </StatSec>;
           })()}
-          <div style={{breakInside:"avoid",WebkitColumnBreakInside:"avoid",marginBottom:16}}><EquityCurve entries={filtered}/></div>
+          <div style={{breakInside:"avoid",WebkitColumnBreakInside:"avoid",marginBottom:16}}><EquityCurve entries={filtered} range={range}/></div>
           <StatSec title="Daily P&L">
             <DailyPnLBar entries={filtered}/>
           </StatSec>
@@ -6953,6 +7052,74 @@ function App(){
   var [checklistVersion,setChecklistVersion]=useState(0);
   // Update CACHED_SESSIONS for getSessionAt to use.
   useEffect(function(){CACHED_SESSIONS=getSessions(settings);},[settings]);
+  // CHANGED: One-time migration — re-evaluate "Oversized entry" against the session-scaled posMax,
+  // and restamp posMaxAtEntry on all historical trades. Skips silently on storage quota errors.
+  useEffect(function(){
+    try{
+      if(localStorage.getItem("tf-oversize-migrated-v4"))return;
+      var rawMax=parseFloat(settings.positionMax)||0;
+      if(rawMax<=0)return;
+      var sessions=getSessions(settings);
+      function sfFor(t){
+        if(t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))return parseFloat(t.sizeFraction);
+        if(t.sessionId){var s=sessions.find(function(x){return x.id===t.sessionId;});if(s&&s.sizeFraction!=null)return parseFloat(s.sizeFraction)||1;}
+        return 1;
+      }
+      function fixTrade(t){
+        if(!t)return {t:t,changed:false};
+        // CHANGED: Re-derive sessionId from start time so trades added off-hours get matched to their proper session.
+        var derivedSession=getSessionForTrade(t);
+        var sessionId=derivedSession||t.sessionId||null;
+        var working=sessionId===t.sessionId?t:Object.assign({},t,{sessionId:sessionId});
+        var sf=sfFor(working);
+        var eff=rawMax*sf;
+        var pos=parseFloat(working.positionSize)||0;
+        var v=(working.violations||[]).slice();
+        var hasV=v.indexOf("Oversized entry")>=0;
+        var shouldHaveV=eff>0&&pos>eff;
+        var changed=working!==t;
+        if(shouldHaveV&&!hasV){v.push("Oversized entry");changed=true;}
+        if(!shouldHaveV&&hasV){v=v.filter(function(x){return x!=="Oversized entry";});changed=true;}
+        if((working.posMaxAtEntry||0)!==eff){changed=true;}
+        if(!changed)return {t:t,changed:false};
+        return {t:Object.assign({},working,{violations:v,posMaxAtEntry:eff}),changed:true};
+      }
+      // 1) Journal entries.
+      var keys=[];
+      for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf("journal:")===0)keys.push(k);}
+      keys.forEach(function(k){
+        try{
+          var raw=localStorage.getItem(k);if(!raw)return;
+          var entry=JSON.parse(raw);if(!entry||!entry.trades)return;
+          var tradesChanged=false;
+          var nt=entry.trades.map(function(tr){var r=fixTrade(tr);if(r.changed)tradesChanged=true;return r.t;});
+          // CHANGED: Always recompute disciplineScore — even when trades didn't change this run, the
+          // stored score may be stale from a prior migration version that didn't recompute discipline.
+          var newScore=entry.disciplineScore;
+          try{
+            var closedT=nt.filter(function(x){return x&&x.status!=="open";});
+            var riskMaxN=parseFloat(entry.riskMax)||0;
+            newScore=calcDiscipline(closedT,riskMaxN,{commitment:entry.commitment||null});
+          }catch(de){}
+          var scoreChanged=(parseFloat(entry.disciplineScore)||0)!==(parseFloat(newScore)||0);
+          if(tradesChanged||scoreChanged){
+            entry.trades=nt;
+            entry.disciplineScore=newScore;
+            try{localStorage.setItem(k,JSON.stringify(entry));}catch(qe){/* quota or other — skip */}
+          }
+        }catch(e){}
+      });
+      // 2) Live state.trades.
+      if(state.trades&&state.trades.length){
+        var liveChanged=false;
+        var newLive=state.trades.map(function(tr){var r=fixTrade(tr);if(r.changed)liveChanged=true;return r.t;});
+        if(liveChanged)setState(function(prev){return Object.assign({},prev,{trades:newLive});});
+      }
+      try{localStorage.setItem("tf-oversize-migrated-v4","1");}catch(e){}
+      bumpReloadKey();
+    }catch(e){}
+  // eslint-disable-next-line
+  },[]);
   // Persist hide-dollar setting globally.
   useEffect(function(){setHideDollarPnL(!!settings.hideDollarPnL);},[settings.hideDollarPnL]);
   // CHANGED: Recalc derived position/risk from canonical account balance helper.
@@ -6993,7 +7160,6 @@ function App(){
   function autoAddViolations(t,posMax){
     var v=(t.violations||[]).slice();
     var pos=parseFloat(t.positionSize)||0;
-    if(posMax>0&&pos>posMax&&v.indexOf("Oversized entry")<0)v.push("Oversized entry");
     // CHANGED: "Max risk exceeded" auto-triggers on a LOSING trade whose price-move loss is
     // worse than the session-scaled risk cap (riskMaxPct × sizeFraction). Mirrors the oversized rule:
     // stamp the threshold used so the judgment stays stable if settings change later.
@@ -7005,12 +7171,15 @@ function App(){
     if(t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))sf=parseFloat(t.sizeFraction);
     if(sf==null&&t.sessionId){try{var sess=getSessions(settings).find(function(s){return s.id===t.sessionId;});if(sess&&sess.sizeFraction!=null)sf=parseFloat(sess.sizeFraction);}catch(e){}}
     if(sf==null)sf=1;
+    // CHANGED: Oversized entry now checks against the SESSION-SCALED cap (matches the cap shown in the UI).
+    var effPosMax=posMax>0?posMax*sf:0;
+    if(effPosMax>0&&pos>effPosMax&&v.indexOf("Oversized entry")<0)v.push("Oversized entry");
     var stopThreshPct=(riskMaxPct>0)?riskMaxPct*sf:0;
     if(!isNaN(pnlNum)&&pnlNum<0&&!isNaN(pctNum)&&stopThreshPct>0&&pctNum<-stopThreshPct&&v.indexOf("Max risk exceeded")<0){
       v.push("Max risk exceeded");
     }
     var patch={violations:v};
-    if(posMax>0)patch.posMaxAtEntry=posMax;
+    if(effPosMax>0)patch.posMaxAtEntry=effPosMax;
     if(stopThreshPct>0)patch.stopThreshPctAtEntry=stopThreshPct;
     return Object.assign({},t,patch);
   }
@@ -7021,8 +7190,10 @@ function App(){
     var status="closed";
     if(totalEntryC>0&&totalExitC<totalEntryC)status="open";
     // CHANGED: Tag the trade with the current session phase so per-session trade limits work.
-    // Only set on first save (when sessionId is still null/empty); preserve on edits.
-    var sessionId=t.sessionId||(phase!=="closed"?phase:null);
+    // CHANGED: Derive sessionId from the trade's actual start time instead of relying on the current phase.
+    // This way trades added after-hours, or with backdated entry times, get assigned to the correct session window.
+    var sessionId=getSessionForTrade(t);
+    if(sessionId==null)sessionId=t.sessionId||(phase!=="closed"?phase:null);
     // CHANGED: Derive trade length from leg times.
     //   openedAt = time of first entry leg (the moment the position was first opened).
     //   closedAt = time of last exit leg (when the trade fully closed).
@@ -7174,8 +7345,10 @@ function App(){
       {!mobile&&<div style={{width:sidebarCollapsed?64:220,flexShrink:0,background:"#111118",borderRight:"1px solid #1e293b",height:"100vh",position:"sticky",top:0,display:"flex",flexDirection:"column",padding:sidebarCollapsed?"22px 8px":"22px 14px",boxSizing:"border-box",transition:"width 0.18s ease"}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:sidebarCollapsed?"center":"space-between",marginBottom:18,minHeight:24,gap:8}}>
           {!sidebarCollapsed&&<div style={{padding:"0 4px"}}><div style={{fontSize:17,fontWeight:800,color:"#e2e8f0",letterSpacing:-0.5,lineHeight:1.1}}>Psycho</div><div style={{fontSize:17,fontWeight:800,color:"#a5b4fc",letterSpacing:-0.5,lineHeight:1.1}}>Trader</div></div>}
-          {!sidebarCollapsed&&<button onClick={function(){setSettings(function(s){return Object.assign({},s,{hideDollarPnL:!s.hideDollarPnL});});}} aria-label={settings.hideDollarPnL?"Show $ amounts":"Hide $ amounts"} title={settings.hideDollarPnL?"Showing %. Tap to show $.":"Showing $. Tap to hide."} style={{width:30,height:30,flexShrink:0,background:settings.hideDollarPnL?"#1e1b4b":"#0a0a0f",border:"1px solid "+(settings.hideDollarPnL?"#4338ca":"#334155"),borderRadius:8,color:settings.hideDollarPnL?"#a5b4fc":"#94a3b8",fontSize:15,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center"}}>{settings.hideDollarPnL?"%":"$"}</button>}
-          <button onClick={function(){setSidebarCollapsed(function(c){return !c;});}} aria-label={sidebarCollapsed?"Expand sidebar":"Collapse sidebar"} title={sidebarCollapsed?"Expand":"Collapse"} style={{width:32,height:32,flexShrink:0,background:"#0a0a0f",border:"1px solid #334155",borderRadius:8,color:"#94a3b8",fontSize:16,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center"}}>{sidebarCollapsed?"»":"«"}</button>
+          <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+            {!sidebarCollapsed&&<button onClick={function(){setSettings(function(s){return Object.assign({},s,{hideDollarPnL:!s.hideDollarPnL});});}} aria-label={settings.hideDollarPnL?"Show $ amounts":"Hide $ amounts"} title={settings.hideDollarPnL?"Showing %. Tap to show $.":"Showing $. Tap to hide."} style={{width:32,height:32,flexShrink:0,background:settings.hideDollarPnL?"#1e1b4b":"#0a0a0f",border:"1px solid "+(settings.hideDollarPnL?"#4338ca":"#334155"),borderRadius:8,color:settings.hideDollarPnL?"#a5b4fc":"#94a3b8",fontSize:16,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center"}}>{settings.hideDollarPnL?"%":"$"}</button>}
+            <button onClick={function(){setSidebarCollapsed(function(c){return !c;});}} aria-label={sidebarCollapsed?"Expand sidebar":"Collapse sidebar"} title={sidebarCollapsed?"Expand":"Collapse"} style={{width:32,height:32,flexShrink:0,background:"#0a0a0f",border:"1px solid #334155",borderRadius:8,color:"#94a3b8",fontSize:16,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center"}}>{sidebarCollapsed?"»":"«"}</button>
+          </div>
         </div>
         {[{id:"dashboard",label:"Home",icon:"⌂"},{id:"trades",label:"Journal",icon:"≡"},{id:"goals",label:"Goals",icon:"◎"},{id:"performance",label:"Performance",icon:"📈"},{id:"settings",label:"Settings",icon:"⚙"}].map(function(t){
           var active=tab===t.id;
@@ -7193,12 +7366,12 @@ function App(){
               {/* CHANGED: brand only shows in mobile (no sidebar there); laptop shows date/session prominently. */}
               {mobile&&<div style={{fontSize:13,fontWeight:800,color:"#a5b4fc",letterSpacing:-0.2,marginBottom:2}}>Psycho Trader</div>}
               <div style={{fontSize:18,fontWeight:700,color:"#e2e8f0",letterSpacing:-0.3}}>{todayDisplay()}</div>
-              <div style={{fontSize:13,color:"#94a3b8",marginTop:2,fontWeight:500}}>{getPhaseLabel(phase)}</div>
+              <div style={{fontSize:18,fontWeight:700,color:"#e2e8f0",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{fmtClock(headerNow)}</div>
             </div>
             <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
               <div style={{textAlign:"right"}}>
                 <div style={{fontSize:11,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>{(TIMEZONES.find(function(z){return z.value===(settings.timezone||USER_TIMEZONE);})||{label:""}).label.replace(/.*\((.+)\).*/,"$1")||""}</div>
-                <div style={{fontSize:18,fontWeight:700,color:"#e2e8f0",marginTop:1,fontVariantNumeric:"tabular-nums"}}>{fmtClock(headerNow)}</div>
+                <div style={{fontSize:18,fontWeight:700,color:"#e2e8f0",marginTop:2,letterSpacing:-0.3}}>{getPhaseLabel(phase)}</div>
               </div>
             </div>
           </div>
@@ -7208,7 +7381,7 @@ function App(){
           var sess=getSessions(settings).find(function(s){return s.id===phase;});
           var sf=sess&&sess.sizeFraction!=null?parseFloat(sess.sizeFraction)||1:1;
           // CHANGED: Discipline-lock auto-halves position/risk instead of blocking trading.
-          var lock=checkDisciplineLock(state.trades);
+          var lock=checkDisciplineLock(state.trades,state.commitment);
           if(lock.locked)sf=sf*0.5;
           var dPosMin=Math.round((settings.positionMin||0)*sf);
           var dPosMax=Math.round((settings.positionMax||0)*sf);
