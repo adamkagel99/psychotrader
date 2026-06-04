@@ -160,6 +160,7 @@ function getSessionForTrade(t){
   if(mins==null&&date){mins=date.getHours()*60+date.getMinutes();}
   if(mins==null)return null;
   var day=(date?date.getDay():getNow().getDay());
+  // Pass 1: exact match — time falls inside a session window and the day is enabled for it.
   for(var i=0;i<CACHED_SESSIONS.length;i++){
     var s=CACHED_SESSIONS[i];
     if(s.enabled===false)continue;
@@ -168,7 +169,22 @@ function getSessionForTrade(t){
     if(days.indexOf(day)<0)continue;
     return s.id;
   }
-  return null;
+  // CHANGED: Pass 2 — nearest enabled session by time distance. Ensures trades placed off-hours
+  // (after market close, before pre-market, etc.) still get attributed to a session so they show
+  // up in session breakdowns and the Session×Day heatmap.
+  var best=null,bestDist=Infinity;
+  for(var j=0;j<CACHED_SESSIONS.length;j++){
+    var s2=CACHED_SESSIONS[j];
+    if(s2.enabled===false)continue;
+    var d2=s2.days||[1,2,3,4,5];
+    if(d2.indexOf(day)<0)continue;
+    var dist;
+    if(mins<s2.startMin)dist=s2.startMin-mins;
+    else if(mins>=s2.endMin)dist=mins-s2.endMin;
+    else dist=0;
+    if(dist<bestDist){bestDist=dist;best=s2.id;}
+  }
+  return best;
 }
 function getSessionAt(minutesLocal){
   var dayOfWeek=getNow().getDay();
@@ -383,12 +399,16 @@ function checkDisciplineLock(todayTrades,commitment){
     var prior=null;
     rows.forEach(function(r){var d=new Date(r.date);d.setHours(0,0,0,0);if(d.getTime()<todayD.getTime())prior=r;});
     if(!prior)return {locked:false};
-    // CHANGED: Judge the lock on the PROCESS-ONLY score so the R-outcome bonus can never
-    // affect lock state. Use the row's own saved commitment for past days.
-    var score=(prior.trades&&prior.trades.length>0)
+    // CHANGED: A lock is an immutable historical event. If the prior day was marked wasLocked when
+    // it happened, honor that even if a later discipline recompute (different commitment context,
+    // settings change, etc.) would now score it above threshold. This prevents the lock from
+    // silently disappearing after a recompute.
+    var liveScore=(prior.trades&&prior.trades.length>0)
       ? calcDiscipline(prior.trades,0,{processOnly:true,commitment:prior.commitment||null})
       : (prior.disciplineScore!=null?parseFloat(prior.disciplineScore):100);
-    if(score>=threshold)return {locked:false};
+    var wasLocked=!!prior.wasLocked;
+    var score=wasLocked?(prior.lockScore!=null?parseFloat(prior.lockScore):liveScore):liveScore;
+    if(!wasLocked&&liveScore>=threshold)return {locked:false};
     // Auto-clear once 2+ calendar days have passed (one full day served as cooldown).
     var elapsed=daysBetween(prior.date,todayStr());
     if(elapsed>=2)return {locked:false,expired:true,fromDate:prior.date,score:Math.round(score)};
@@ -3497,7 +3517,11 @@ function TradesTab(props){
         var clearMsg=mode==="active"?(lock.sameDay
           ? "This lock stays in place tomorrow and clears the day after. A weekend serves the cooldown, so a Friday lock clears Monday."
           : (lock.clearsIn===1?"This lock clears automatically tomorrow.":"This lock clears automatically after one full day.")):null;
-        var headerLabel=mode==="active"?"⚠ Half-Size Trading Active":"⚠ Half-Size Event — "+lock.fromDate;
+        var headerLabel=mode==="active"
+          ? (lock.sameDay
+            ? "⚠ Half-Size Trading Active"
+            : (function(){var d=daysBetween(lock.fromDate,todayStr());return "⚠ Half-Size Active · triggered "+(d===1?"yesterday":d+" days ago")+" ("+lock.fromDate+")";})())
+          : "⚠ Half-Size Event — "+lock.fromDate;
         var bodyMsg=mode==="active"
           ? ((lock.sameDay?"Today's discipline score has dropped to ":"Your discipline score on "+lock.fromDate+" was ")+"")
           : ("Discipline score on this day was ");
@@ -4472,6 +4496,12 @@ function GoalsTab(props){
 
   function addCustom(){
     if(!canSaveCustom)return;
+    // CHANGED: Resolve section: "performance"/"pnl"/"account" go into the matching default section,
+    // "newCustom" creates a named custom section (needs a name), "existing:NAME" re-uses one, else "custom".
+    var section="custom",sectionName=null;
+    if(newGoal.section==="performance"||newGoal.section==="pnl"||newGoal.section==="account")section=newGoal.section;
+    else if(newGoal.section==="newCustom"&&(newGoal.sectionName||"").trim()){section="namedCustom";sectionName=newGoal.sectionName.trim();}
+    else if((newGoal.section||"").indexOf("existing:")===0){section="namedCustom";sectionName=newGoal.section.slice(9);}
     var g={
       id:Date.now(),
       title:newGoal.title.trim(),
@@ -4484,11 +4514,13 @@ function GoalsTab(props){
       customName:newGoal.metric==="custom"?newGoal.customName.trim():null,
       customValue:newGoal.metric==="custom"?"0":null,
       filterField:newGoal.filterField||"",
-      filterValue:newGoal.filterValue||""
+      filterValue:newGoal.filterValue||"",
+      section:section,
+      sectionName:sectionName
     };
     var updated=normalizeStored(Object.assign({},goals,{custom:[].concat(goals.custom||[],[g])}));
     persist(updated);
-    setNewGoal({title:"",target:"",metric:"pnl",period:"daily",prefix:defaultPrefixForMetric("pnl"),suffix:defaultSuffixForMetric("pnl"),customName:"",deadline:"",filterField:"",filterValue:""});
+    setNewGoal({title:"",target:"",metric:"pnl",period:"daily",prefix:defaultPrefixForMetric("pnl"),suffix:defaultSuffixForMetric("pnl"),customName:"",deadline:"",filterField:"",filterValue:"",section:"custom",sectionName:""});
     setShowAdd(false);
   }
   function delCustom(id){
@@ -4741,6 +4773,21 @@ function GoalsTab(props){
               <label style={lbl}>Deadline (optional)</label>
               <input type="date" value={newGoal.deadline||""} onChange={function(e){setNewGoal(function(g){return Object.assign({},g,{deadline:e.target.value});});}} style={Object.assign({},fld,{colorScheme:"dark",color:"#e2e8f0"})}/>
             </div>
+            {/* CHANGED: Section selector — file the goal under an existing section, the default Custom bucket, or a new named section. */}
+            <div style={{marginTop:8}}>
+              <label style={lbl}>Section</label>
+              <select value={newGoal.section||"custom"} onChange={function(e){var v=e.target.value;setNewGoal(function(g){return Object.assign({},g,{section:v,sectionName:v==="newCustom"?"":g.sectionName});});}} style={fld}>
+                <option value="custom">Custom Goals (default)</option>
+                <option value="performance">Performance</option>
+                <option value="pnl">P&amp;L</option>
+                <option value="account">Account</option>
+                {Array.from(new Set((goals.custom||[]).filter(function(g){return g.section==="namedCustom"&&g.sectionName;}).map(function(g){return g.sectionName;}))).map(function(name){return <option key={"sec-"+name} value={"existing:"+name}>{name}</option>;})}
+                <option value="newCustom">＋ Create new section…</option>
+              </select>
+              {newGoal.section==="newCustom"&&(
+                <input value={newGoal.sectionName||""} onChange={function(e){var v=e.target.value;setNewGoal(function(g){return Object.assign({},g,{sectionName:v});});}} placeholder="New section name" style={Object.assign({},fld,{marginTop:6})}/>
+              )}
+            </div>
           </div>
           {/* CHANGED: Save button gives feedback when fields incomplete */}
           {!canSaveCustom&&<div style={{fontSize:12,color:"#fdba74",marginTop:10,padding:"6px 10px",background:"#1c1108",border:"1px solid #713f12",borderRadius:6}}>Fill in title, target{newGoal.metric==="custom"?", and metric name":""} to save.</div>}
@@ -4798,11 +4845,14 @@ function GoalsTab(props){
         </div>
       )}
 
-      {/* Custom goals */}
-      {(goals.custom||[]).length>0&&(
-        <div style={{marginTop:8}}>
-          <div style={{fontSize:12,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600,marginBottom:8}}>Custom Goals</div>
-          {(goals.custom||[]).map(function(cg){
+      {/* CHANGED: Custom goals are now grouped by their assigned section. Default bucket is "Custom Goals";
+          others appear under "Performance · Custom", "P&L · Custom", "Account · Custom", or named custom sections. */}
+      {(function(){
+        var all=goals.custom||[];
+        if(all.length===0)return null;
+        // The per-goal renderer (was previously inlined here as a single map; extracted so it can be reused
+        // across multiple section buckets).
+        function renderCustomGoal(cg){
             var val=getCustomVal(cg);
             var tgtNum=parseFloat(cg.target)||0;
             var isEditing=editingCustomId===cg.id;
@@ -4949,9 +4999,37 @@ function GoalsTab(props){
                 )}
               </div>
             );
-          })}
-        </div>
-      )}
+        }
+        // Bucket by section.
+        var buckets={custom:[],performance:[],pnl:[],account:[]};
+        var named={};
+        all.forEach(function(cg){
+          if(cg.section==="performance")buckets.performance.push(cg);
+          else if(cg.section==="pnl")buckets.pnl.push(cg);
+          else if(cg.section==="account")buckets.account.push(cg);
+          else if(cg.section==="namedCustom"&&cg.sectionName){if(!named[cg.sectionName])named[cg.sectionName]=[];named[cg.sectionName].push(cg);}
+          else buckets.custom.push(cg);
+        });
+        var hdr={fontSize:12,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600,marginBottom:8};
+        function renderBucket(label,items,key){
+          if(!items||items.length===0)return null;
+          return (
+            <div key={key} style={{marginTop:8}}>
+              <div style={hdr}>{label}</div>
+              {items.map(renderCustomGoal)}
+            </div>
+          );
+        }
+        return (
+          <>
+            {renderBucket("Custom Goals",buckets.custom,"custom")}
+            {renderBucket("Performance · Custom",buckets.performance,"performance")}
+            {renderBucket("P&L · Custom",buckets.pnl,"pnl")}
+            {renderBucket("Account · Custom",buckets.account,"account")}
+            {Object.keys(named).map(function(name){return renderBucket(name,named[name],"named-"+name);})}
+          </>
+        );
+      })()}
     </div>
   );
 }
@@ -5370,17 +5448,36 @@ function RMultipleHistogram(props){
 // P&L in the readout.
 function DisciplineScatter(props){
   var rows=props.rows||[],settings=props.settings||{};
-  // Build day-level points from rows with at least one closed trade.
+  // CHANGED: When viewing this-week / last-week, plot one point per closed trade so individual
+  // trades can be inspected. Score for a trade is the day's process score taken AT that trade
+  // (cumulative through that trade in chronological order). P&L is the trade's own P&L.
+  var granular=props.range==="thisweek"||props.range==="week";
   var pts=[];
-  rows.forEach(function(r){
-    var trades=(r.trades||[]).filter(function(t){return t&&t.status!=="open";});
-    if(trades.length===0)return;
-    var score=parseFloat(r.disciplineScore);
-    if(isNaN(score))score=calcDiscipline(trades,parseFloat(r.riskMax)||0);
-    var dayPnl=parseFloat(r.pnl)||0;
-    var sb=0;try{sb=getAccountBalanceAtDate(r.date);}catch(e){}
-    pts.push({date:r.date,score:score,pnl:dayPnl,pct:sb>0?(dayPnl/sb*100):0,n:trades.length});
-  });
+  if(granular){
+    rows.forEach(function(r){
+      var trades=(r.trades||[]).filter(function(t){return t&&t.status!=="open";});
+      if(trades.length===0)return;
+      var sorted=trades.slice().sort(function(a,b){var ma=parseTimeToMinsOfDay(a.time)||0;var mb=parseTimeToMinsOfDay(b.time)||0;return ma-mb;});
+      var sb=0;try{sb=getAccountBalanceAtDate(r.date);}catch(e){}
+      sorted.forEach(function(t,i){
+        var slice=sorted.slice(0,i+1);
+        // Use process-only score so each trade's "discipline so far today" is reflected.
+        var score=calcDiscipline(slice,parseFloat(r.riskMax)||0,{processOnly:true,commitment:r.commitment||null});
+        var pnl=parseFloat(t.pnl)||0;
+        pts.push({date:r.date,score:score,pnl:pnl,pct:sb>0?(pnl/sb*100):0,n:1});
+      });
+    });
+  }else{
+    rows.forEach(function(r){
+      var trades=(r.trades||[]).filter(function(t){return t&&t.status!=="open";});
+      if(trades.length===0)return;
+      var score=parseFloat(r.disciplineScore);
+      if(isNaN(score))score=calcDiscipline(trades,parseFloat(r.riskMax)||0);
+      var dayPnl=parseFloat(r.pnl)||0;
+      var sb=0;try{sb=getAccountBalanceAtDate(r.date);}catch(e){}
+      pts.push({date:r.date,score:score,pnl:dayPnl,pct:sb>0?(dayPnl/sb*100):0,n:trades.length});
+    });
+  }
   if(pts.length<3)return null;
   var thr=loadDisciplineLockThreshold();
   var W=320,H=120,padL=24,padR=8,padT=10,padB=18;
@@ -5933,7 +6030,7 @@ function PerformanceTab(props){
               </StatSec>
             );
           })()}
-          <div style={{breakInside:"avoid",WebkitColumnBreakInside:"avoid",marginBottom:16}}><DisciplineScatter rows={filtered} settings={settings}/></div>
+          <div style={{breakInside:"avoid",WebkitColumnBreakInside:"avoid",marginBottom:16}}><DisciplineScatter rows={filtered} settings={settings} range={range}/></div>
           {(function(){
             function renderBreakdown(title,groups,sparkBase){
               var rows=Object.keys(groups).map(function(k){
