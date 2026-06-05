@@ -5526,6 +5526,9 @@ function DisciplineScatter(props){
     if(best!=null&&bestD<400)setHover(best);else setHover(null);
   }
   function onLeave(){setHover(null);}
+  // CHANGED: SVG-level click — navigate to the date of the currently hovered (nearest) point.
+  // This widens the click target far beyond the tiny circle (any click within ~20px of a point hits).
+  function onSvgClick(){if(hover!=null&&props.onNavigateToTrade){var p=pts[hover];if(p&&p.date)props.onNavigateToTrade(p.date);}}
   var hp=hover!=null?pts[hover]:null;
   return (
     <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid #1e293b",borderRadius:10,display:"flex",flexDirection:"column",height:"100%",boxSizing:"border-box"}}>
@@ -5543,7 +5546,7 @@ function DisciplineScatter(props){
           <div>At/above ({above.length}): <span style={{color:aboveAvg>=0?"#86efac":"#fca5a5",fontWeight:700}}>{fmtAvg(aboveAvg,aboveAvgPct)}</span></div>
         </div>
       </div>
-      <svg ref={svgRef} viewBox={"0 0 "+W+" "+H} style={{display:"block",width:"100%",height:"100%",flex:1,minHeight:120,cursor:"crosshair",touchAction:"none"}} preserveAspectRatio="none" onMouseMove={onMove} onMouseLeave={onLeave} onTouchStart={onMove} onTouchMove={onMove} onTouchEnd={onLeave}>
+      <svg ref={svgRef} viewBox={"0 0 "+W+" "+H} style={{display:"block",width:"100%",height:"100%",flex:1,minHeight:120,cursor:hover!=null&&props.onNavigateToTrade?"pointer":"crosshair",touchAction:"none"}} preserveAspectRatio="none" onMouseMove={onMove} onMouseLeave={onLeave} onTouchStart={onMove} onTouchMove={onMove} onTouchEnd={onLeave} onClick={onSvgClick}>
         {/* Y=0 line */}
         <line x1={padL} x2={W-padR} y1={yFor(0)} y2={yFor(0)} stroke="#334155" strokeWidth="0.5" strokeDasharray="2,2"/>
         {/* Threshold vertical line */}
@@ -5558,7 +5561,8 @@ function DisciplineScatter(props){
         {pts.map(function(p,i){
           var col=p.pnl>=0?"#22c55e":"#ef4444";
           var isH=hover===i;
-          return <circle key={i} cx={xFor(p.score)} cy={yFor(p.pnl)} r={isH?3:2} fill={col} opacity={hover==null||isH?0.95:0.5} stroke={isH?"#fff":"none"} strokeWidth="0.6"/>;
+          // CHANGED: Click a dot to jump to that date in the Journal.
+          return <circle key={i} cx={xFor(p.score)} cy={yFor(p.pnl)} r={isH?4:2.5} fill={col} opacity={hover==null||isH?0.95:0.5} stroke={isH?"#fff":"none"} strokeWidth="0.6" style={{cursor:props.onNavigateToTrade?"pointer":"default"}} onClick={function(){if(props.onNavigateToTrade&&p.date)props.onNavigateToTrade(p.date);}}/>;
         })}
       </svg>
     </div>
@@ -6030,7 +6034,7 @@ function PerformanceTab(props){
               </StatSec>
             );
           })()}
-          <div style={{breakInside:"avoid",WebkitColumnBreakInside:"avoid",marginBottom:16}}><DisciplineScatter rows={filtered} settings={settings} range={range}/></div>
+          <div style={{breakInside:"avoid",WebkitColumnBreakInside:"avoid",marginBottom:16}}><DisciplineScatter rows={filtered} settings={settings} range={range} onNavigateToTrade={props.onNavigateToTrade}/></div>
           {(function(){
             function renderBreakdown(title,groups,sparkBase){
               var rows=Object.keys(groups).map(function(k){
@@ -6524,11 +6528,27 @@ function SettingsTab(props){
         <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Your balance is calculated from transfers + lifetime P&L (including today's live trades). Deposits add to balance, withdrawals subtract.</div>
         {(function(){
           var balance=computeAccountBalance(props.liveTotalPnL);
+          // CHANGED: Lifetime deposit + withdrawal totals so the user can see flow at a glance.
+          var totalDep=0,totalWdr=0;
+          (transfers||[]).forEach(function(t){var a=parseFloat(t.amount)||0;if(a>=0)totalDep+=a;else totalWdr+=Math.abs(a);});
+          var fmtUSD=function(n){return "$"+Math.round(n).toLocaleString("en-US");};
           return (
-            <div style={{marginBottom:12,padding:"10px 12px",background:"#0a0a0f",border:"1px solid #4338ca",borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <span style={{fontSize:11,color:"#a5b4fc",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Current Balance</span>
-              <span style={{fontSize:20,fontWeight:800,color:balance>=0?"#e2e8f0":"#ef4444",fontVariantNumeric:"tabular-nums",letterSpacing:-0.3}}>${balance.toLocaleString("en-US",{maximumFractionDigits:0})}</span>
-            </div>
+            <>
+              <div style={{marginBottom:8,padding:"10px 12px",background:"#0a0a0f",border:"1px solid #4338ca",borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{fontSize:11,color:"#a5b4fc",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Current Balance</span>
+                <span style={{fontSize:20,fontWeight:800,color:balance>=0?"#e2e8f0":"#ef4444",fontVariantNumeric:"tabular-nums",letterSpacing:-0.3}}>${balance.toLocaleString("en-US",{maximumFractionDigits:0})}</span>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:8,marginBottom:12}}>
+                <div style={{padding:"8px 10px",background:"#0a0a0f",border:"1px solid #7f1d1d",borderRadius:8}}>
+                  <div style={{fontSize:10,color:"#fca5a5",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Total Deposits</div>
+                  <div style={{fontSize:16,fontWeight:700,color:"#e2e8f0",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{fmtUSD(totalDep)}</div>
+                </div>
+                <div style={{padding:"8px 10px",background:"#0a0a0f",border:"1px solid #166534",borderRadius:8}}>
+                  <div style={{fontSize:10,color:"#86efac",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Total Withdrawals</div>
+                  <div style={{fontSize:16,fontWeight:700,color:"#e2e8f0",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{fmtUSD(totalWdr)}</div>
+                </div>
+              </div>
+            </>
           );
         })()}
         {/* CHANGED: Withdrawals are growth-gated — allowance is 30% of profit since last withdrawal. Ranks/points are cosmetic and not referenced here. */}
@@ -7085,20 +7105,6 @@ function SettingsTab(props){
         )}
       </SettingsSection>
 
-      <SettingsSection title="Display">
-        {/* CHANGED: hide-$ control. Layout (laptop/mobile) is now auto-detected by viewport width. */}
-        <div style={{fontSize:13,color:"#94a3b8",margin:"0 0 10px",lineHeight:1.5}}>P&amp;L display — show dollar amounts, or hide them and show % / R instead.</div>
-        <div style={{display:"flex",gap:8}}>
-          {[{v:false,label:"$ Amounts",d:"Show dollar values"},{v:true,label:"% / R only",d:"Hide dollar values"}].map(function(o){
-            var on=!!settings.hideDollarPnL===o.v;
-            return <button key={String(o.v)} onClick={function(){setSettings(function(s){return Object.assign({},s,{hideDollarPnL:o.v});});}} style={{flex:1,textAlign:"left",padding:"12px 14px",background:on?"#1e1b4b":"#0a0a0f",border:"1px solid "+(on?"#4338ca":"#334155"),borderRadius:8,cursor:"pointer",fontFamily:"inherit"}}>
-              <div style={{fontSize:14,fontWeight:700,color:on?"#a5b4fc":"#cbd5e1"}}>{o.label}</div>
-              <div style={{fontSize:11,color:"#64748b",marginTop:2}}>{o.d}</div>
-            </button>;
-          })}
-        </div>
-      </SettingsSection>
-
       <SettingsSection title="Timezone">
         <select value={settings.timezone||USER_TIMEZONE} onChange={function(e){var tz=e.target.value;setUserTimezone(tz);setSettings(function(s){var ns=Object.assign({},s,{timezone:tz});if(!s.sessions||s.sessions.length===0)ns.sessions=defaultSessionsForTz(tz);return ns;});}} style={fld}>
           {TIMEZONES.map(function(tz){return <option key={tz.value} value={tz.value}>{tz.label}</option>;})}
@@ -7567,7 +7573,7 @@ function App(props){
           </>);
         })()}
         {tab==="goals"&&<GoalsTab mobile={mobile} settings={settings} reloadKey={reloadKey} liveTotalPnL={totalPnL} tradeOptions={tradeOptions} state={state}/>}
-        {tab==="performance"&&<PerformanceTab mobile={mobile} settings={settings} reloadKey={reloadKey} totalPnL={totalPnL} state={state}/>}
+        {tab==="performance"&&<PerformanceTab mobile={mobile} settings={settings} reloadKey={reloadKey} totalPnL={totalPnL} state={state} onNavigateToTrade={navigateToTrade}/>}
         {tab==="settings"&&<SettingsTab onSignOut={props.onSignOut} settings={settings} setSettings={setSettings} tradeOptions={tradeOptions} setTradeOptions={setTradeOptions} liveTotalPnL={totalPnL} initialTransferAmount={pendingWithdrawAmount} focusSection={settingsFocus} bumpReloadKey={bumpReloadKey} onChecklistChange={function(){setChecklistVersion(function(v){return v+1;});setState(function(s){var c=Object.assign({},s.preChecklist||{});var items=loadChecklistItems();items.forEach(function(it){if(c[it.key]==null)c[it.key]=false;});return Object.assign({},s,{preChecklist:c});});}}/>}
         {liveTradeManaging&&<ManageTradeView trade={liveTradeManaging} onClose={function(){setLiveTradeManaging(null);}} onSave={function(updated){saveTrade(updated);}} onDelete={function(){deleteTrade(liveTradeManaging.id);setLiveTradeManaging(null);}} settings={settings} tradeOptions={tradeOptions}/>}
       </div>
