@@ -5684,7 +5684,7 @@ function SessionDayHeatmap(props){
             var alpha=c.n===0?0:Math.max(0.15,Math.min(1,Math.abs(c.pnl)/maxAbs));
             var bg=c.n===0?"#0a0a0f":(c.pnl>=0?"rgba(34,197,94,"+alpha+")":"rgba(239,68,68,"+alpha+")");
             children.push(
-              <button key={si+"-"+di} onClick={function(){setHover(isHover?null:{s:si,d:di});}} style={{height:32,background:bg,border:isHover?"1.5px solid #fff":"1px solid "+(c.n===0?"#1e293b":"#334155"),borderRadius:4,cursor:c.n>0?"pointer":"default",fontFamily:"inherit",padding:0,display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}>
+              <button key={si+"-"+di} onClick={function(){setHover(isHover?null:{s:si,d:di});}} onMouseEnter={function(){if(c.n>0)setHover({s:si,d:di});}} onMouseLeave={function(){setHover(null);}} style={{height:32,background:bg,border:isHover?"1.5px solid #fff":"1px solid "+(c.n===0?"#1e293b":"#334155"),borderRadius:4,cursor:c.n>0?"pointer":"default",fontFamily:"inherit",padding:0,display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}>
                 {c.n>0&&<span style={{fontSize:10,fontWeight:700,color:"#fff",fontVariantNumeric:"tabular-nums",textShadow:"0 1px 2px rgba(0,0,0,0.6)"}}>{c.n}</span>}
               </button>
             );
