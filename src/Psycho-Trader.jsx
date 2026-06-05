@@ -1292,7 +1292,7 @@ function PnLChart(props){
         {segs.map(function(s,i){return <path key={"f"+i} d={fillPath(s.pts)} fill={s.pos?"#22c55e22":"#ef444433"}/>;})}
         {segs.map(function(s,i){return <path key={"l"+i} d={linePath(s.pts)} fill="none" stroke={s.pos?"#22c55e":"#ef4444"} strokeWidth="2" strokeLinejoin="round"/>;})}
         {points.slice(1,-1).map(function(p,i){return <circle key={i} cx={xPx(p.min)} cy={yPx(p.pnl)} r="3" fill={p.pnl>=0?"#22c55e":"#ef4444"} stroke="#0a0a0f" strokeWidth="1.5"/>;})}
-        {yTicks.map(function(v,i){var y=yPx(v);if(y<PT||y>PT+chartH)return null;return <text key={i} x={PL-4} y={y+4} textAnchor="end" fontSize="8" fill="#475569">{v>=0?"+$"+v:"-$"+Math.abs(v)}</text>;})}
+        {yTicks.map(function(v,i){var y=yPx(v);if(y<PT||y>PT+chartH)return null;if(HIDE_DOLLAR_PNL)return null;return <text key={i} x={PL-4} y={y+4} textAnchor="end" fontSize="8" fill="#475569">{v>=0?"+$"+v:"-$"+Math.abs(v)}</text>;})}
         {xLabels.map(function(xl){return <text key={xl.min} x={xPx(xl.min)} y={PT+chartH+16} textAnchor="middle" fontSize="8" fill="#475569">{xl.l}</text>;})}
         <line x1={PL} y1={PT} x2={PL} y2={PT+chartH} stroke="#1e293b" strokeWidth="1"/>
         <line x1={PL} y1={PT+chartH} x2={PL+chartW} y2={PT+chartH} stroke="#1e293b" strokeWidth="1"/>
@@ -1308,6 +1308,8 @@ function DailyPnLBar(props){
   if(entries.length===0)return null;
   var sorted=entries.slice().sort(function(a,b){return new Date(a.date)-new Date(b.date);});
   var pnls=sorted.map(function(e){return parseFloat(e.pnl)||0;});
+  // CHANGED: Compute % per day (relative to that day's account balance) so hide-$ can show meaningful percentages.
+  var pcts=sorted.map(function(e){var sb=0;try{sb=getAccountBalanceAtDate(e.date);}catch(x){}return sb>0?((parseFloat(e.pnl)||0)/sb*100):0;});
   // CHANGED: Compute summary stats for the dashboard-style header above the chart.
   var greenN=pnls.filter(function(v){return v>0;}).length;
   var redN=pnls.filter(function(v){return v<0;}).length;
@@ -1315,7 +1317,11 @@ function DailyPnLBar(props){
   var bestDay=Math.max.apply(null,pnls);
   var worstDay=Math.min.apply(null,pnls);
   var avgDay=pnls.reduce(function(s,v){return s+v;},0)/pnls.length;
-  var fmt=function(n){if(HIDE_DOLLAR_PNL)return (n>=0?"+":"-")+"$•••";return (n>=0?"+":"-")+"$"+Math.abs(n).toFixed(0);};
+  var bestPct=Math.max.apply(null,pcts);
+  var worstPct=Math.min.apply(null,pcts);
+  var avgPct=pcts.reduce(function(s,v){return s+v;},0)/pcts.length;
+  // CHANGED: fmt now takes both $ and % so it can return the % when dollars are hidden.
+  var fmt=function(n,pct){if(HIDE_DOLLAR_PNL)return (pct>=0?"+":"")+pct.toFixed(2)+"%";return (n>=0?"+":"-")+"$"+Math.abs(n).toFixed(0);};
   var maxAbs=Math.max.apply(null,pnls.map(function(v){return Math.abs(v);}))||1;
   var W=460,H=160,PL=44,PR=12,PT=12,PB=32,chartW=W-PL-PR,chartH=H-PT-PB;
   var barW=Math.max(4,Math.floor((chartW/sorted.length)*0.7)),gap=chartW/sorted.length,zeroY=PT+chartH/2;
@@ -1343,22 +1349,22 @@ function DailyPnLBar(props){
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:8}}>
         <div style={{padding:"6px 9px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:6}}>
           <div style={{fontSize:9,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Green / Red</div>
-          <div style={{fontSize:14,fontWeight:700,marginTop:2,fontVariantNumeric:"tabular-nums"}}><span style={{color:"#22c55e"}}>{greenN}</span><span style={{color:"#94a3b8",fontWeight:500}}> / </span><span style={{color:"#ef4444"}}>{redN}</span>{flatN>0&&<span style={{fontSize:10,color:"#94a3b8",marginLeft:5,fontWeight:500}}>· {flatN}f</span>}</div>
+          <div style={{fontSize:12,fontWeight:700,marginTop:2,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}><span style={{color:"#22c55e"}}>{greenN}</span><span style={{color:"#94a3b8",fontWeight:500}}> / </span><span style={{color:"#ef4444"}}>{redN}</span>{flatN>0&&<span style={{color:"#94a3b8",marginLeft:5,fontWeight:500}}>· {flatN}f</span>}</div>
         </div>
         <div style={{padding:"6px 9px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:6}}>
           <div style={{fontSize:9,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Best / Worst</div>
-          <div style={{fontSize:11,fontWeight:700,marginTop:2,fontVariantNumeric:"tabular-nums"}}><span style={{color:"#22c55e"}}>{fmt(bestDay)}</span><span style={{color:"#94a3b8"}}> / </span><span style={{color:"#ef4444"}}>{fmt(worstDay)}</span></div>
+          <div style={{fontSize:11,fontWeight:700,marginTop:2,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}><span style={{color:"#22c55e"}}>{fmt(bestDay,bestPct)}</span><span style={{color:"#94a3b8"}}> / </span><span style={{color:"#ef4444"}}>{fmt(worstDay,worstPct)}</span></div>
         </div>
         <div style={{padding:"6px 9px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:6}}>
           <div style={{fontSize:9,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Avg / Day</div>
-          <div style={{fontSize:14,fontWeight:700,marginTop:2,color:avgDay>=0?"#22c55e":"#ef4444",fontVariantNumeric:"tabular-nums"}}>{fmt(avgDay)}</div>
+          <div style={{fontSize:12,fontWeight:700,marginTop:2,color:avgDay>=0?"#22c55e":"#ef4444",fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{fmt(avgDay,avgPct)}</div>
         </div>
       </div>
       <div style={{background:"#0a0a0f",borderRadius:8,padding:"4px 0 0",border:"1px solid #1e293b"}}>
       <svg width="100%" viewBox={"0 0 "+W+" "+H} style={{overflow:"visible",userSelect:"none"}}
         onMouseMove={onMouseMove}
         onMouseLeave={function(){setHoverIdx(null);}}>
-        {yTicks.map(function(v,i){var y=zeroY-(v/maxAbs)*(chartH/2);return <g key={i}><line x1={PL} y1={y} x2={PL+chartW} y2={y} stroke={v===0?"#334155":"#1e293b"} strokeWidth="1" strokeDasharray={v===0?"":"3,3"}/><text x={PL-4} y={y+4} textAnchor="end" fontSize="8" fill="#94a3b8">{v>=0?"+$"+Math.abs(v):"-$"+Math.abs(v)}</text></g>;})}
+        {yTicks.map(function(v,i){var y=zeroY-(v/maxAbs)*(chartH/2);return <g key={i}><line x1={PL} y1={y} x2={PL+chartW} y2={y} stroke={v===0?"#334155":"#1e293b"} strokeWidth="1" strokeDasharray={v===0?"":"3,3"}/>{!HIDE_DOLLAR_PNL&&<text x={PL-4} y={y+4} textAnchor="end" fontSize="8" fill="#94a3b8">{v>=0?"+$"+Math.abs(v):"-$"+Math.abs(v)}</text>}</g>;})}
         {sorted.map(function(e,i){
           var pnl=parseFloat(e.pnl)||0,bx=barX(i),bh=barH(pnl),by=barY(pnl),isHov=hoverIdx===i;
           var color=pnl>=0?"#22c55e":"#ef4444",hc2=pnl>=0?"#4ade80":"#f87171";
@@ -5464,7 +5470,8 @@ function DisciplineScatter(props){
         // Use process-only score so each trade's "discipline so far today" is reflected.
         var score=calcDiscipline(slice,parseFloat(r.riskMax)||0,{processOnly:true,commitment:r.commitment||null});
         var pnl=parseFloat(t.pnl)||0;
-        pts.push({date:r.date,score:score,pnl:pnl,pct:sb>0?(pnl/sb*100):0,n:1});
+        var rm=parseFloat(r.riskMax)||0;
+        pts.push({date:r.date,score:score,pnl:pnl,pct:sb>0?(pnl/sb*100):0,r:rm>0?(pnl/rm):0,n:1});
       });
     });
   }else{
@@ -5475,38 +5482,36 @@ function DisciplineScatter(props){
       if(isNaN(score))score=calcDiscipline(trades,parseFloat(r.riskMax)||0);
       var dayPnl=parseFloat(r.pnl)||0;
       var sb=0;try{sb=getAccountBalanceAtDate(r.date);}catch(e){}
-      pts.push({date:r.date,score:score,pnl:dayPnl,pct:sb>0?(dayPnl/sb*100):0,n:trades.length});
+      var rm=parseFloat(r.riskMax)||0;
+      pts.push({date:r.date,score:score,pnl:dayPnl,pct:sb>0?(dayPnl/sb*100):0,r:rm>0?(dayPnl/rm):0,n:trades.length});
     });
   }
   if(pts.length<3)return null;
   var thr=loadDisciplineLockThreshold();
   var W=320,H=120,padL=24,padR=8,padT=10,padB=18;
-  var pnls=pts.map(function(p){return p.pnl;});
-  var maxP=Math.max.apply(null,pnls.concat([0]));
-  var minP=Math.min.apply(null,pnls.concat([0]));
-  if(maxP===minP){maxP+=1;minP-=1;}
+  // CHANGED: Y-axis now plots R-multiple instead of raw $ / %. Each point's r = pnl / riskMax.
+  var rs=pts.map(function(p){return p.r;});
+  var maxR=Math.max.apply(null,rs.concat([0]));
+  var minR=Math.min.apply(null,rs.concat([0]));
+  if(maxR===minR){maxR+=1;minR-=1;}
   function xFor(s){return padL+(s/100)*(W-padL-padR);}
-  function yFor(v){return padT+(1-(v-minP)/(maxP-minP))*(H-padT-padB);}
-  // Correlation between score and pnl — Pearson r.
+  function yFor(v){return padT+(1-(v-minR)/(maxR-minR))*(H-padT-padB);}
+  // Correlation between score and R — Pearson r.
   function corr(){
     var n=pts.length;
-    var sx=0,sy=0;pts.forEach(function(p){sx+=p.score;sy+=p.pnl;});
+    var sx=0,sy=0;pts.forEach(function(p){sx+=p.score;sy+=p.r;});
     var mx=sx/n,my=sy/n,num=0,dx=0,dy=0;
-    pts.forEach(function(p){var a=p.score-mx,b=p.pnl-my;num+=a*b;dx+=a*a;dy+=b*b;});
+    pts.forEach(function(p){var a=p.score-mx,b=p.r-my;num+=a*b;dx+=a*a;dy+=b*b;});
     if(dx===0||dy===0)return 0;
     return num/Math.sqrt(dx*dy);
   }
   var r=corr();
-  // Aggregate stats above/below threshold for the side readout.
+  // Aggregate stats above/below threshold for the side readout — averaged in R.
   var below=pts.filter(function(p){return p.score<thr;}),above=pts.filter(function(p){return p.score>=thr;});
-  var belowAvg=below.length>0?below.reduce(function(s,p){return s+p.pnl;},0)/below.length:0;
-  var aboveAvg=above.length>0?above.reduce(function(s,p){return s+p.pnl;},0)/above.length:0;
-  // CHANGED: % averages (avg daily % P&L) for hide-$ mode.
-  var belowAvgPct=below.length>0?below.reduce(function(s,p){return s+(p.pct||0);},0)/below.length:0;
-  var aboveAvgPct=above.length>0?above.reduce(function(s,p){return s+(p.pct||0);},0)/above.length:0;
-  var fmt=function(n){if(HIDE_DOLLAR_PNL)return (n>=0?"+":"-")+"$•••";return (n>=0?"+":"-")+"$"+Math.abs(n).toFixed(0);};
-  // CHANGED: expectancy/group-average formatter — % when $ hidden, else $.
-  var fmtAvg=function(dollar,pct){if(HIDE_DOLLAR_PNL)return (pct>=0?"+":"")+pct.toFixed(2)+"%";return (dollar>=0?"+":"-")+"$"+Math.abs(dollar).toFixed(0);};
+  var belowAvgR=below.length>0?below.reduce(function(s,p){return s+(p.r||0);},0)/below.length:0;
+  var aboveAvgR=above.length>0?above.reduce(function(s,p){return s+(p.r||0);},0)/above.length:0;
+  // CHANGED: All point labels now use R-multiple instead of $ / %.
+  var fmtR=function(v){return (v>=0?"+":"")+v.toFixed(2)+"R";};
   var [hover,setHover]=useState(null);
   var svgRef=React.useRef(null);
   function onMove(e){
@@ -5519,7 +5524,7 @@ function DisciplineScatter(props){
     // Find nearest point.
     var best=null,bestD=Infinity;
     pts.forEach(function(p,i){
-      var dx=xFor(p.score)-x,dy=yFor(p.pnl)-y;
+      var dx=xFor(p.score)-x,dy=yFor(p.r)-y;
       var d=dx*dx+dy*dy;
       if(d<bestD){bestD=d;best=i;}
     });
@@ -5536,14 +5541,14 @@ function DisciplineScatter(props){
         <div>
           <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{hp?hp.date:"Discipline × Performance"}</div>
           {hp?(
-            <div style={{fontSize:20,fontWeight:700,color:hp.pnl>=0?"#22c55e":"#ef4444",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{HIDE_DOLLAR_PNL?((hp.pct>=0?"+":"")+hp.pct.toFixed(2)+"%"):fmt(hp.pnl)}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:6}}>score {Math.round(hp.score)} · {hp.n}t</span></div>
+            <div style={{fontSize:20,fontWeight:700,color:hp.r>=0?"#22c55e":"#ef4444",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{fmtR(hp.r)}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:6}}>score {Math.round(hp.score)} · {hp.n}t</span></div>
           ):(
             <div style={{fontSize:20,fontWeight:700,color:r<-0.2?"#22c55e":r>0.2?"#ef4444":"#94a3b8",marginTop:2,fontVariantNumeric:"tabular-nums"}}>r = {r.toFixed(2)}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:6}}>{Math.abs(r)<0.2?"weak":Math.abs(r)<0.5?"moderate":"strong"} link</span></div>
           )}
         </div>
         <div style={{textAlign:"right",fontSize:10,color:"#94a3b8",lineHeight:1.55}}>
-          <div>Below thr ({below.length}): <span style={{color:belowAvg>=0?"#86efac":"#fca5a5",fontWeight:700}}>{fmtAvg(belowAvg,belowAvgPct)}</span></div>
-          <div>At/above ({above.length}): <span style={{color:aboveAvg>=0?"#86efac":"#fca5a5",fontWeight:700}}>{fmtAvg(aboveAvg,aboveAvgPct)}</span></div>
+          <div>Below thr ({below.length}): <span style={{color:belowAvgR>=0?"#86efac":"#fca5a5",fontWeight:700}}>{fmtR(belowAvgR)}</span></div>
+          <div>At/above ({above.length}): <span style={{color:aboveAvgR>=0?"#86efac":"#fca5a5",fontWeight:700}}>{fmtR(aboveAvgR)}</span></div>
         </div>
       </div>
       <svg ref={svgRef} viewBox={"0 0 "+W+" "+H} style={{display:"block",width:"100%",height:"100%",flex:1,minHeight:120,cursor:hover!=null&&props.onNavigateToTrade?"pointer":"crosshair",touchAction:"none"}} preserveAspectRatio="none" onMouseMove={onMove} onMouseLeave={onLeave} onTouchStart={onMove} onTouchMove={onMove} onTouchEnd={onLeave} onClick={onSvgClick}>
@@ -5555,16 +5560,18 @@ function DisciplineScatter(props){
         {/* X-axis labels */}
         {[0,25,50,75,100].map(function(v){return <text key={v} x={xFor(v)} y={H-5} fontSize="7" fill="#64748b" textAnchor="middle">{v}</text>;})}
         <text x={padL-3} y={yFor(0)+2} fontSize="7" fill="#64748b" textAnchor="end">0</text>
-        <text x={padL-3} y={yFor(maxP)+3} fontSize="7" fill="#64748b" textAnchor="end">{fmt(maxP).replace("$","")}</text>
-        <text x={padL-3} y={yFor(minP)} fontSize="7" fill="#64748b" textAnchor="end">{fmt(minP).replace("$","")}</text>
+        <text x={padL-3} y={yFor(maxR)+3} fontSize="7" fill="#64748b" textAnchor="end">{fmtR(maxR)}</text>
+        <text x={padL-3} y={yFor(minR)} fontSize="7" fill="#64748b" textAnchor="end">{fmtR(minR)}</text>
         {/* Dots */}
         {pts.map(function(p,i){
-          var col=p.pnl>=0?"#22c55e":"#ef4444";
+          var col=p.r>=0?"#22c55e":"#ef4444";
           var isH=hover===i;
           // CHANGED: Click a dot to jump to that date in the Journal.
-          return <circle key={i} cx={xFor(p.score)} cy={yFor(p.pnl)} r={isH?4:2.5} fill={col} opacity={hover==null||isH?0.95:0.5} stroke={isH?"#fff":"none"} strokeWidth="0.6" style={{cursor:props.onNavigateToTrade?"pointer":"default"}} onClick={function(){if(props.onNavigateToTrade&&p.date)props.onNavigateToTrade(p.date);}}/>;
+          return <circle key={i} cx={xFor(p.score)} cy={yFor(p.r)} r={isH?4:2.5} fill={col} opacity={hover==null||isH?0.95:0.5} stroke={isH?"#fff":"none"} strokeWidth="0.6" style={{cursor:props.onNavigateToTrade?"pointer":"default"}} onClick={function(){if(props.onNavigateToTrade&&p.date)props.onNavigateToTrade(p.date);}}/>;
         })}
       </svg>
+      {/* CHANGED: Brief explanation of the headline correlation (r). */}
+      <div style={{fontSize:10,color:"#64748b",fontStyle:"italic",marginTop:6,lineHeight:1.4}}>r is the correlation between discipline score and R-multiple. Positive r means higher discipline pairs with higher R; negative means they diverge.</div>
     </div>
   );
 }
@@ -5949,7 +5956,7 @@ function PerformanceTab(props){
             var pfColor=pf==="∞"||pfn>1?"#22c55e":pfn<1?"#ef4444":"#94a3b8";
             return <StatSec title="Overview" colSpan={props.mobile?1:6}>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:6,padding:"4px 0"}}>
-                <StatTile label="Total P&L" value={HIDE_DOLLAR_PNL?(totalPnl>=0?"+$•••":"-$•••"):((totalPnl>=0?"+":"-")+"$"+Math.abs(totalPnl).toFixed(2))} color={totalPnl>=0?"#22c55e":"#ef4444"}/>
+                <StatTile label="Total P&L" value={HIDE_DOLLAR_PNL?(function(){var s=0;filtered.forEach(function(r){var sb=0;try{sb=getAccountBalanceAtDate(r.date);}catch(x){}s+=(sb>0?((parseFloat(r.pnl)||0)/sb*100):0);});return (s>=0?"+":"")+s.toFixed(2)+"%";})():((totalPnl>=0?"+":"-")+"$"+Math.abs(totalPnl).toFixed(2))} color={totalPnl>=0?"#22c55e":"#ef4444"}/>
                 <StatTile label="Trades" value={allTrades.length} sub={tradingDays>0?(Math.ceil(avgTradesPerDay)+"/day · "+tradingDays+"d"):""}/>
                 <StatTile label="Profit Factor" value={pf} color={pfColor}/>
                 <StatTile label="Win Rate" value={winRate+"%"} color="#22c55e" sub={wins.length+" wins"}/>
@@ -5961,12 +5968,58 @@ function PerformanceTab(props){
               </div>
             </StatSec>;
           })()}
+          {/* CHANGED: Order per user spec — EquityCurve, then Daily P&L (under it), then Heatmap. */}
           <div style={{breakInside:"avoid",WebkitColumnBreakInside:"avoid",marginBottom:16}}><EquityCurve entries={filtered} range={range}/></div>
           <StatSec title="Daily P&L">
             <DailyPnLBar entries={filtered}/>
           </StatSec>
           <div style={{breakInside:"avoid",WebkitColumnBreakInside:"avoid",marginBottom:16}}><StreakTracker rows={filtered} settings={settings}/></div>
+          {/* CHANGED: R-Multiple + Discipline Scatter rendered consecutively so they group in the masonry. */}
           <div style={{breakInside:"avoid",WebkitColumnBreakInside:"avoid",marginBottom:16}}><RMultipleHistogram rows={filtered} fallbackRiskMax={parseFloat(settings.riskMax)||0}/></div>
+          <div style={{breakInside:"avoid",WebkitColumnBreakInside:"avoid",marginBottom:16}}><DisciplineScatter rows={filtered} settings={settings} range={range} onNavigateToTrade={props.onNavigateToTrade}/></div>
+          <div style={{breakInside:"avoid",WebkitColumnBreakInside:"avoid",marginBottom:16}}><SessionDayHeatmap rows={filtered} settings={settings}/></div>
+          {(function(){
+            function renderBreakdown(title,groups,sparkBase){
+              var rows=Object.keys(groups).map(function(k){
+                var g=groups[k];
+                var wr=g.n>0?Math.round((g.w/g.n)*100):0;
+                var avgPct=g.pcts.length>0?(g.pcts.reduce(function(s,v){return s+v;},0)/g.pcts.length):0;
+                var exp=g.n>0?g.pnl/g.n:0;
+                return {k:k,n:g.n,wr:wr,avgPct:avgPct,exp:exp};
+              });
+              // Sort by expectancy descending.
+              rows.sort(function(a,b){return b.exp-a.exp;});
+              var max=Math.max.apply(null,rows.map(function(r){return Math.abs(HIDE_DOLLAR_PNL?r.avgPct:r.exp);}).concat([0.0001]));
+              // CHANGED: Bar length now represents TOTAL contribution (sum across trades) instead
+               // of per-trade expectancy, so frequently-traded patterns get more visual weight
+               // than 1-trade outliers. The right-side number remains the per-trade expectancy.
+              var rowsTotal=rows.map(function(r){return Object.assign({},r,{totalContrib:HIDE_DOLLAR_PNL?(r.pcts||[]).reduce(function(s,x){return s+x;},0):r.pnl});});
+              var maxTotal=Math.max.apply(null,rowsTotal.map(function(r){return Math.abs(r.totalContrib);}).concat([0]));
+              var totalN=rowsTotal.reduce(function(s,r){return s+r.n;},0);
+              var positive=rowsTotal.filter(function(r){return r.exp>0;}).length;
+              var preview=totalN>0?(rowsTotal.length+" tags · "+positive+" green"):"";
+              return (
+                <StatSec key={title} title={title} colSpan={props.mobile?1:6}>
+                  {rowsTotal.length===0&&<div style={{fontSize:13,color:"#64748b",fontStyle:"italic",padding:"4px 0"}}>No data yet.</div>}
+                  {rowsTotal.map(function(r,i){
+                    var valueLabel=HIDE_DOLLAR_PNL?((r.avgPct>=0?"+":"")+r.avgPct.toFixed(2)+"%"):((r.exp>=0?"+":"-")+"$"+Math.abs(r.exp).toFixed(0));
+                    return (
+                      <HBar key={r.k} label={r.k} value={r.totalContrib} max={maxTotal} valueLabel={valueLabel} sub={" · "+r.n+"t · "+r.wr+"% wr"} last={i===rowsTotal.length-1}/>
+                    );
+                  })}
+                </StatSec>
+              );
+            }
+            var setupG={},cpG={},indG={};
+            allTrades.forEach(function(t){
+              var p=parseFloat(t.pnl)||0,pp=parseFloat(t.pctPnl);
+              function bump(g,k){if(!g[k])g[k]={n:0,w:0,pnl:0,pcts:[]};g[k].n++;g[k].pnl+=p;if(p>0)g[k].w++;if(!isNaN(pp))g[k].pcts.push(pp);}
+              if(t.setup)bump(setupG,t.setup);
+              if(t.candlePattern)bump(cpG,t.candlePattern);
+              (t.indicators||[]).forEach(function(ind){bump(indG,ind);});
+            });
+            return <>{renderBreakdown("Setups",setupG)}{renderBreakdown("Candle Patterns",cpG)}{renderBreakdown("Indicators",indG)}</>;
+          })()}
           {(function(){
             if(allTrades.length===0)return null;
             function bestWorst(fieldKey,isArr){
@@ -6034,46 +6087,6 @@ function PerformanceTab(props){
               </StatSec>
             );
           })()}
-          <div style={{breakInside:"avoid",WebkitColumnBreakInside:"avoid",marginBottom:16}}><DisciplineScatter rows={filtered} settings={settings} range={range} onNavigateToTrade={props.onNavigateToTrade}/></div>
-          {(function(){
-            function renderBreakdown(title,groups,sparkBase){
-              var rows=Object.keys(groups).map(function(k){
-                var g=groups[k];
-                var wr=g.n>0?Math.round((g.w/g.n)*100):0;
-                var avgPct=g.pcts.length>0?(g.pcts.reduce(function(s,v){return s+v;},0)/g.pcts.length):0;
-                var exp=g.n>0?g.pnl/g.n:0;
-                return {k:k,n:g.n,wr:wr,avgPct:avgPct,exp:exp};
-              });
-              // Sort by expectancy descending.
-              rows.sort(function(a,b){return b.exp-a.exp;});
-              var max=Math.max.apply(null,rows.map(function(r){return Math.abs(HIDE_DOLLAR_PNL?r.avgPct:r.exp);}).concat([0.0001]));
-              var totalN=rows.reduce(function(s,r){return s+r.n;},0);
-              var positive=rows.filter(function(r){return r.exp>0;}).length;
-              var preview=totalN>0?(rows.length+" tags · "+positive+" green"):"";
-              return (
-                <StatSec key={title} title={title} colSpan={props.mobile?1:6}>
-                  {rows.length===0&&<div style={{fontSize:13,color:"#64748b",fontStyle:"italic",padding:"4px 0"}}>No data yet.</div>}
-                  {rows.map(function(r,i){
-                    var val=HIDE_DOLLAR_PNL?r.avgPct:r.exp;
-                    var valueLabel=HIDE_DOLLAR_PNL?((r.avgPct>=0?"+":"")+r.avgPct.toFixed(2)+"%"):((r.exp>=0?"+":"-")+"$"+Math.abs(r.exp).toFixed(0));
-                    return (
-                      <HBar key={r.k} label={r.k} value={val} max={max} valueLabel={valueLabel} sub={" · "+r.n+"t · "+r.wr+"% wr"} last={i===rows.length-1}/>
-                    );
-                  })}
-                </StatSec>
-              );
-            }
-            var setupG={},cpG={},indG={};
-            allTrades.forEach(function(t){
-              var p=parseFloat(t.pnl)||0,pp=parseFloat(t.pctPnl);
-              function bump(g,k){if(!g[k])g[k]={n:0,w:0,pnl:0,pcts:[]};g[k].n++;g[k].pnl+=p;if(p>0)g[k].w++;if(!isNaN(pp))g[k].pcts.push(pp);}
-              if(t.setup)bump(setupG,t.setup);
-              if(t.candlePattern)bump(cpG,t.candlePattern);
-              (t.indicators||[]).forEach(function(ind){bump(indG,ind);});
-            });
-            return <>{renderBreakdown("Setups",setupG)}{renderBreakdown("Candle Patterns",cpG)}{renderBreakdown("Indicators",indG)}</>;
-          })()}
-          <div style={{breakInside:"avoid",WebkitColumnBreakInside:"avoid",marginBottom:16}}><SessionDayHeatmap rows={filtered} settings={settings}/></div>
           {(function(){
             var groups={};
             var cleanN=0,violN=0;
