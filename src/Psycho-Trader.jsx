@@ -6318,39 +6318,42 @@ function HelpGuide(){
   function L(props){return <div style={li}><span style={dot}>•</span>{props.children}</div>;}
   return (
     <div>
-      <p style={Object.assign({},p,{color:"#cbd5e1"})}>This app is a trading journal built to enforce discipline, not just record trades. The core idea: it actively stops you from the behaviors that blow up accounts — overtrading, revenge trading, sizing up too fast, and trading on tilt. Here's how each part works.</p>
+      <p style={Object.assign({},p,{color:"#cbd5e1"})}>Psycho-Trader is a trading journal built to enforce discipline, not just record trades. The core idea: it actively pushes back on the behaviors that blow up accounts — overtrading, revenge trading, sizing up too fast, and trading on tilt. Here's how each part works.</p>
 
       <div style={h}>The five tabs</div>
-      <L><span style={em}>Dashboard</span> — your daily home base. Shows your account balance, today's focus, your progress/rank, the calendar of past days, and your clean-day streak.</L>
-      <L><span style={em}>Trades</span> — where you log trades. Start here each day: complete the pre-market checklist, commit to a plan, then log entries as you take them.</L>
-      <L><span style={em}>Goals</span> — your targets for P&L, win rate, account milestones, and discipline. The discipline goal is tied to your lock threshold automatically.</L>
-      <L><span style={em}>Performance</span> — your stats: win rate, profit factor, expectancy, best/worst setups, averages, and a scaling-milestone preview. Use the dropdown to scope by week, month, etc.</L>
-      <L><span style={em}>Settings</span> — balance, sizing parameters, checklists, sessions, scoring, and backup. You're reading this here.</L>
+      <L><span style={em}>Dashboard</span> — your daily home base. Account balance, today's focus, calendar of past days, and your clean-day streak.</L>
+      <L><span style={em}>Trades</span> — log trades for the day. Start here each morning: complete the pre-market checklist, commit to a plan, then log entries as you take them. Editable trade cards with screenshots, indicators, candle patterns, emotional state, and grade.</L>
+      <L><span style={em}>Goals</span> — your targets for P&L, win rate, account milestones, and discipline. Custom goals can be filed under default sections (Performance / P&L / Account) or your own named sections.</L>
+      <L><span style={em}>Performance</span> — your stats and patterns: win rate, profit factor, expectancy, Session×Day heatmap, R-multiple distribution, discipline-vs-R scatter, and per-tag breakdowns for Setups / Candle Patterns / Indicators. Use the dropdown to scope by this week (Sun–today), last week (Sun–Sat), month, 3-month, year, or all time.</L>
+      <L><span style={em}>Settings</span> — balance, sizing parameters, sessions, checklists, discipline scoring, backup/restore, and sign-out.</L>
 
       <div style={h}>Starting your trading day</div>
-      <p style={p}>On the Trades tab, first work through the <span style={em}>Pre-Market Checklist</span>. Until it's complete, position and risk sizing stay hidden — this stops you from jumping in before you've prepared. Then set your <span style={em}>commitment</span>: your max trades for the day and which setups you'll take. Once you commit, it locks, so you can't quietly rewrite the plan mid-day when you're tempted.</p>
+      <p style={p}>On the Trades tab, first work through the <span style={em}>Pre-Market Checklist</span>. Until it's complete, position and risk sizing stay hidden so you can't jump in unprepared. Then set your <span style={em}>commitment</span>: max trades for the day (derived automatically from your Session Strategy) and which setups you'll take. Once committed, it locks — you can't quietly rewrite the plan mid-day when you're tempted.</p>
 
-      <div style={h}>The discipline lock (the heart of the app)</div>
-      <p style={p}>Every day gets a <span style={em}>discipline score</span> out of 100. You start at 100 and lose points for rule violations and negative emotions, gain a little for good grades and clean execution. If your score drops below your <span style={em}>lock threshold</span> (default 60), the app <span style={em}>locks you out of new trades</span> — and the lock is not removable. It clears on its own after one full trading day (a weekend counts, so a Friday lock clears Monday).</p>
-      <p style={p}>Important: the lock only blocks <span style={em}>new entries</span>. You can always manage and exit an open position, including the one that triggered the lock — locking you inside a live trade would be dangerous. The lock banner has a button straight to your open trades.</p>
+      <div style={h}>The half-size lock (the heart of the app)</div>
+      <p style={p}>Every day gets a <span style={em}>discipline score</span> out of 100. You start at 100 and lose points for rule violations, negative emotions, exceeding your commitment, and ignoring the setup review; you gain a little for A-grades and positive emotional state. If your score drops below your <span style={em}>lock threshold</span> (default 85), the app <span style={em}>auto-halves your position and risk caps</span> rather than blocking trades outright — half-size trading stays active for one full trading day (a weekend serves as cooldown, so a Friday lock clears Monday). The lock is immutable once triggered — later score recomputes can't make it disappear.</p>
+      <p style={p}>Hard stops (session daily-loss / daily-gain limits) and the "Oversized entry" violation also scale to the half-size cap, so the entire risk profile shrinks together. The banner shows when the lock was triggered (today, yesterday, or N days ago).</p>
 
       <div style={h}>How the discipline score works</div>
-      <p style={p}>The score is mostly about <span style={em}>process</span>, not profit — that's deliberate. A disciplined losing day can still score well; a reckless winning day won't. There's a small outcome term based on your R-multiple (day P&L ÷ your max risk), but it's capped and can't rescue a day that broke the rules: a profitable day with violations gets no outcome bonus, and the lock decision ignores the outcome term entirely. You can tune the penalties and the R-term in the Discipline Scoring section.</p>
+      <p style={p}>The score is mostly about <span style={em}>process</span>, not profit — deliberately. A disciplined losing day can still score well; a reckless winning day won't. There's a small outcome term based on your R-multiple (day P&L ÷ your max risk), but it's capped and can't rescue a day that broke the rules: a profitable day with violations gets no outcome bonus, and the lock decision uses the process-only score. Tune penalties and the R-term in the Discipline Scoring section.</p>
 
       <div style={h}>Position sizing &amp; scaling</div>
-      <p style={p}>In percentage mode, your position and risk are derived from a <span style={em}>base</span> that grows with your account balance. It steps up in $1k increments up to $15k, then in $5k increments beyond — so above $15k your size holds steady across each $5k band and only increases at the next tier. This protects you from sizing up too soon. The <span style={em}>Scale Milestones</span> table in Performance previews your size at each tier.</p>
+      <p style={p}>Position and risk caps are read from <span style={em}>Auto-Sizing Parameters</span> in Settings. They're then scaled by the active session's <span style={em}>sizeFraction</span> (e.g., a 0.7 size fraction for an aggressive session yields 70% of base), and halved again if you're in a half-size lock.</p>
+
+      <div style={h}>Session Strategy</div>
+      <p style={p}>Define your trading sessions in Settings (pre-market, opening, midday, closing, etc.) with start/end times, size fractions, max trades, daily R loss/gain stops, and days-of-week. Each trade is automatically attributed to its session based on when you entered. Off-hours trades get attributed to the nearest enabled session so they still show in the heatmap and breakdowns.</p>
 
       <div style={h}>Streaks &amp; commitment review</div>
       <L><span style={em}>Clean-day streak</span> — consecutive trading days where your discipline stayed above the lock threshold, win or lose. Only trading days count; weekends and days off don't break it. Your personal best is saved.</L>
-      <L><span style={em}>Commitment review</span> — at day's end, the app scores you against your own stated plan: did you stay within your trade cap, did you trade only your committed setups. Following your own plan is the win, regardless of P&L.</L>
+      <L><span style={em}>Commitment review</span> — at day's end, the app checks your stated plan against what actually happened: did you stay within your trade cap, did you stick to your committed setups. Following your own plan is the win, regardless of P&L.</L>
 
-      <div style={h}>Withdrawals &amp; ranks</div>
-      <p style={p}>Your withdrawal allowance is a percentage of the profit you've earned since your last withdrawal — so cashing out is tied directly to account growth. Achievements, challenges, and ranks are a separate motivational layer that tracks your progress and discipline; they don't gate withdrawals.</p>
+      <div style={h}>Withdrawals</div>
+      <p style={p}>Your withdrawal allowance is <span style={em}>30% of the profit you've earned since your last withdrawal</span> — so cashing out is tied directly to growth. Deposits and withdrawals (with running totals) live in Settings → Balance.</p>
 
-      <div style={h}>Your data &amp; backups</div>
-      <p style={p}>Everything is stored locally in your browser — nothing is sent to a server. That means clearing your browser data will erase your history, so use the <span style={em}>Backup / Restore</span> section regularly to export a copy you can keep or move to another device.</p>
+      <div style={h}>Your data &amp; sync</div>
+      <p style={p}>Data syncs to Supabase under your account so it follows you across devices. On sign-in to a new device, the app pulls your cloud history. Use <span style={em}>Backup / Restore</span> in Settings to export a JSON snapshot you can keep offline or migrate. Sign out from the bottom of Settings.</p>
 
-      <p style={Object.assign({},p,{marginTop:14,color:"#64748b",fontSize:12})}>The whole philosophy: make the disciplined choice the easy one and the reckless choice harder. The friction is the feature.</p>
+      <p style={Object.assign({},p,{marginTop:14,color:"#64748b",fontSize:12})}>The philosophy: make the disciplined choice the easy one and the reckless choice harder. The friction is the feature.</p>
     </div>
   );
 }
