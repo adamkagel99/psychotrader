@@ -2385,12 +2385,14 @@ function EconomicEvents(props){
   if(availableImpacts.holiday||impactFilter.indexOf("holiday")>=0)allImpactLevels.push({id:"holiday",label:"Holiday",color:"#8b5cf6"});
   return (
     <div style={CS({marginBottom:16})}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:expanded?12:8,position:"relative"}}>
-        <button onClick={function(){setExpanded(function(e){return !e;});}} style={{display:"flex",alignItems:"center",gap:10,background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",padding:0,flexShrink:0}}>
+      {/* CHANGED: Whole header row is clickable to expand/collapse. Filter cluster stops propagation so its own clicks don't toggle the panel. */}
+      <div onClick={function(){setExpanded(function(e){return !e;});}} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:expanded?12:8,position:"relative",cursor:"pointer"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
           <span style={{fontSize:13,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Economic Events</span>
           <span style={{fontSize:12,color:"#475569"}}>{weekEvents.length}</span>
-        </button>
-        <div style={{display:"flex",alignItems:"center",gap:6,flex:1,justifyContent:"flex-end"}}>
+          <span style={{fontSize:10,color:"#475569",transition:"transform 0.2s",display:"inline-block",transform:expanded?"rotate(180deg)":"rotate(0deg)"}}>▾</span>
+        </div>
+        <div onClick={function(e){e.stopPropagation();}} style={{display:"flex",alignItems:"center",gap:6,flex:1,justifyContent:"flex-end"}}>
           {currencyList.length>=1&&(
             <div style={{position:"relative"}}>
               <button onClick={function(){setCurrencyOpen(function(o){return !o;});setImpactOpen(false);}} style={{padding:"4px 9px",background:currencyFilter.length>0?"#1e1b4b":"#0a0a0f",border:"1px solid "+(currencyFilter.length>0?"#4338ca":"#334155"),borderRadius:4,color:currencyFilter.length>0?"#a5b4fc":"#94a3b8",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:4,maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
@@ -3007,14 +3009,17 @@ function GoalsSnapshot(props){
   var rows=loadJournalRows();
   var livePnL=props.totalPnL||0;
   var now=getNow();
+  // CHANGED: Week is Sunday → Saturday to match the rest of the app.
   var y=now.getFullYear(),m=now.getMonth(),d=now.getDate(),day=now.getDay();
-  var wkStart;
-  if(day===6||day===0){var dum=day===6?2:1;wkStart=new Date(y,m,d+dum);}
-  else{wkStart=new Date(y,m,d-(day-1));}
-  var wkEnd=new Date(wkStart);wkEnd.setDate(wkStart.getDate()+4);
+  var wkStart=new Date(y,m,d-day);
+  var wkEnd=new Date(wkStart);wkEnd.setDate(wkStart.getDate()+6);
   var moStart=new Date(y,m,1);
-  var weekPnL=rows.filter(function(e){var dd=new Date(e.date);return dd>=wkStart&&dd<=wkEnd;}).reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0)+livePnL;
-  var monthPnL=rows.filter(function(e){return new Date(e.date)>=moStart;}).reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0)+livePnL;
+  var todayKey=todayStr();
+  // CHANGED: Only add livePnL when today's NOT already represented in saved journal rows
+  // (avoids double-counting today after Save Day to Journal).
+  var todayInRows=rows.some(function(e){return e.date===todayKey;});
+  var weekPnL=rows.filter(function(e){var dd=new Date(e.date);return dd>=wkStart&&dd<=wkEnd;}).reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0)+(todayInRows?0:livePnL);
+  var monthPnL=rows.filter(function(e){return new Date(e.date)>=moStart;}).reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0)+(todayInRows?0:livePnL);
   var dailyPnL=livePnL;
   var allT=rows.reduce(function(a,e){return a.concat(e.trades||[]);},[]);
   var allW=allT.filter(function(t){return parseFloat(t.pnl)>0;});
@@ -4560,10 +4565,9 @@ function GoalsTab(props){
   var todayPnL=todayJournal?(parseFloat(todayJournal.pnl)||0):liveTotalPnL;
   var livePnL=todayJournal?0:liveTotalPnL;
 
-  var wkStart;
-  if(day===6||day===0){var dum=day===6?2:1;wkStart=new Date(y,m,d+dum);}
-  else{wkStart=new Date(y,m,d-(day-1));}
-  var wkEnd=new Date(wkStart);wkEnd.setDate(wkStart.getDate()+4);
+  // CHANGED: Sun-Sat week boundaries to match the rest of the app.
+  var wkStart=new Date(y,m,d-day);
+  var wkEnd=new Date(wkStart);wkEnd.setDate(wkStart.getDate()+6);
   var moStart=new Date(y,m,1);
 
   var weekPnL=rows.filter(function(e){var dd=new Date(e.date);return dd>=wkStart&&dd<=wkEnd;}).reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0)+livePnL;
