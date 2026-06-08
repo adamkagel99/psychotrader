@@ -805,6 +805,9 @@ function buildSessionMap(todayPnL,todayRiskMax,todayTradeCount){
   var todayKey=todayStr();
   if(!map[todayKey]&&(tc>0||todayPnL!==0||todayRiskMax>0)){
     map[todayKey]={pnl:todayPnL,riskMax:todayRiskMax||0,tradeCount:tc,noTradeDay:false};
+  }else if(map[todayKey]&&tc>map[todayKey].tradeCount){
+    // Journal exists but the live state has more trades than the saved entry — trust the live count.
+    map[todayKey]=Object.assign({},map[todayKey],{tradeCount:tc});
   }
   return map;
 }
@@ -1572,10 +1575,10 @@ function DashboardCalendar(props){
                   {d.wasLocked&&<div style={{position:"absolute",top:2,left:3,fontSize:8,fontWeight:800,color:"#fff",background:"#ef4444",borderRadius:3,padding:"0 3px",lineHeight:"11px",letterSpacing:0.3}} title="Discipline lock triggered">D</div>}
                   <span style={{fontSize:10,color:"#64748b",letterSpacing:0.5,fontWeight:600}}>{dayLabels[i]}</span>
                   <span style={{fontSize:17,color:col,fontWeight:d.isToday?700:600,lineHeight:1}}>{d.date.getDate()}</span>
-                  {/* CHANGED: $ P&L shown when dollars are visible; R-multiple when hidden. No-trade days show ⊘ NT. */}
+                  {/* CHANGED: Render the P&L number when pnl is non-zero — even if tradeCount didn't sync (e.g. journal saved but trades array temporarily out of band). */}
                   {d.noTradeDay?(
                     <span style={{fontSize:10,color:"#fbbf24",fontWeight:800,letterSpacing:0.3,lineHeight:1,marginTop:2}}>⊘ NT</span>
-                  ):pnl!=null&&d.tradeCount>0?(
+                  ):pnl!=null&&(d.tradeCount>0||pnl!==0)?(
                     HIDE_DOLLAR_PNL?(
                       dayRiskMax>0?<span style={{fontSize:10,color:col,fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1,marginTop:2}}>{(pnl/dayRiskMax>=0?"+":"")+(pnl/dayRiskMax).toFixed(1)}R</span>:<span style={{fontSize:10,lineHeight:1,marginTop:2,color:"transparent"}}>·</span>
                     ):<span style={{fontSize:10,color:col,fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1,marginTop:2}}>{(pnl>=0?"+$":"-$")+Math.abs(pnl).toFixed(0)}</span>
