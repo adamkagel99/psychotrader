@@ -5794,19 +5794,17 @@ function PerformanceTab(props){
     // week), not a rolling 7-day window. A rolling window slides daily and clips a different
     // boundary day each time, which is why a real 5-trading-day week could read as 4. This is a
     // fixed Mon–Fri(+weekend) span, so it shows the same full week regardless of today's weekday.
+    // CHANGED: Week boundaries are Sunday-start (Sun–Sat) per user spec.
     if(range==="thisweek"){
-      var monNow=new Date(now);monNow.setHours(0,0,0,0);
-      var dw=monNow.getDay();var back=(dw===0?6:dw-1);
-      monNow.setDate(monNow.getDate()-back); // Monday of current week, 00:00
-      return dd>=monNow; // Monday through today (and rest of week if any future-dated)
+      var sunNow=new Date(now);sunNow.setHours(0,0,0,0);
+      sunNow.setDate(sunNow.getDate()-sunNow.getDay()); // Sunday of current week, 00:00
+      return dd>=sunNow; // Sunday through today
     }
     if(range==="week"){
-      var monThis=new Date(now);monThis.setHours(0,0,0,0);
-      var dow=monThis.getDay();           // 0=Sun..6=Sat
-      var sinceMon=(dow===0?6:dow-1);     // days back to this week's Monday
-      monThis.setDate(monThis.getDate()-sinceMon); // Monday of CURRENT week, 00:00
-      var startPrev=new Date(monThis);startPrev.setDate(monThis.getDate()-7); // prev Monday
-      var endPrev=new Date(monThis);endPrev.setDate(monThis.getDate()-1);endPrev.setHours(0,0,0,0); // prev Sunday
+      var sunThis=new Date(now);sunThis.setHours(0,0,0,0);
+      sunThis.setDate(sunThis.getDate()-sunThis.getDay()); // Sunday of CURRENT week, 00:00
+      var startPrev=new Date(sunThis);startPrev.setDate(sunThis.getDate()-7); // previous Sunday
+      var endPrev=new Date(sunThis);endPrev.setDate(sunThis.getDate()-1);endPrev.setHours(0,0,0,0); // previous Saturday
       return dd>=startPrev&&dd<=endPrev;
     }
     var cutoff=new Date(now);
