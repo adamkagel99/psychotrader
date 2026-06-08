@@ -80,9 +80,13 @@ function Root() {
   if (phase === "auth" || !session) return <AuthGate />;
   if (phase === "syncing") return <Splash text="Syncing your data…" />;
   return (
-    /* key includes syncTick so a completed background pull re-mounts the app to show fresh data */
+    /* CHANGED: syncTick is now a prop, not part of the React key. This stops the cloud-sync
+       completion from remounting the entire app and erasing in-progress UI (typed-but-unsaved
+       trade forms, etc). The app responds to syncTick changes internally by refreshing data
+       from localStorage without unmounting. */
     <TradingApp
-      key={session.user.id + ":" + syncTick}
+      key={session.user.id}
+      syncTick={syncTick}
       onSignOut={handleSignOut}
     />
   );

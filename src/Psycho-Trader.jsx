@@ -6146,7 +6146,8 @@ function PerformanceTab(props){
                         )}
                         <div style={{minWidth:0}}>
                           <div style={{fontSize:13,color:"#e2e8f0",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{k}</div>
-                          <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>{g.n} {unit}{g.n===1?"":"s"} · <span style={{color:"#fca5a5"}}>{g.lossN} {isLock?("red day"+(g.lossN===1?"":"s")):("loss"+(g.lossN===1?"":"es"))} ({lossRate}%)</span></div>
+                          {/* CHANGED: For the lock row, show N / total trading days in the journal range. */}
+                          <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>{isLock?(g.n+" / "+filtered.length+" trading day"+(filtered.length===1?"":"s")):(g.n+" "+unit+(g.n===1?"":"s"))} · <span style={{color:"#fca5a5"}}>{g.lossN} {isLock?("red day"+(g.lossN===1?"":"s")):("loss"+(g.lossN===1?"":"es"))} ({lossRate}%)</span></div>
                         </div>
                       </div>
                       <div style={{textAlign:"right",flexShrink:0}}><div style={{fontSize:13,fontWeight:700,color:g.lossN>0?"#ef4444":"#64748b",fontVariantNumeric:"tabular-nums"}}>{lossStr}</div><div style={{fontSize:10,color:"#94a3b8",fontWeight:600,marginTop:1}}>{g.lossN>0?(isLock?"avg red day":"avg loss"):"no losses"}</div></div>
@@ -7171,6 +7172,15 @@ function ManageTradeView(props){
 
 function App(props){
   props=props||{};
+  // CHANGED: When the parent (auth/sync wrapper) signals a completed cloud pull via syncTick,
+  // refresh data from localStorage WITHOUT remounting — this preserves all in-progress UI state
+  // (forms, drafts, editing, scroll position). Without this the app was remounting on every
+  // tab return and erasing whatever the user had been typing.
+  useEffect(function(){
+    // Don't fire on initial mount (syncTick=0); only on subsequent increments.
+    if(props.syncTick==null||props.syncTick===0)return;
+    try{bumpReloadKey();}catch(e){}
+  },[props.syncTick]);
   // CHANGED: Persist active tab in sessionStorage so it survives reloads but isn't wiped by cloud-sync (which rewrites localStorage).
   var [tab,setTab]=useState(function(){try{var t=sessionStorage.getItem("tf-active-tab");return t&&["dashboard","trades","goals","performance","settings"].indexOf(t)>=0?t:"dashboard";}catch(e){return "dashboard";}});
   useEffect(function(){try{sessionStorage.setItem("tf-active-tab",tab);}catch(e){}},[tab]);
