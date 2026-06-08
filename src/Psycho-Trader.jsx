@@ -798,8 +798,14 @@ function buildSessionMap(todayPnL,todayRiskMax,todayTradeCount){
     // CHANGED: Include wasLocked so calendars can flag days where discipline lock triggered.
     map[s.date]={pnl:parseFloat(s.pnl)||0,riskMax:parseFloat(s.riskMax)||0,tradeCount:tc,noTradeDay:!!s.noTradeDay,wasLocked:!!s.wasLocked};
   });
+  // CHANGED: Only inject today's live data when there's no saved journal entry for today.
+  // Otherwise the saved journal pnl gets overwritten by stale/zero live state (e.g. after rollover or
+  // before state.trades hydrates), causing week P&L to drop today's contribution.
   var tc=parseInt(todayTradeCount)||0;
-  if(tc>0||todayPnL!==0||todayRiskMax>0)map[todayStr()]=Object.assign({pnl:todayPnL,riskMax:todayRiskMax||0,tradeCount:tc,noTradeDay:false},map[todayStr()]?{wasLocked:map[todayStr()].wasLocked}:{});
+  var todayKey=todayStr();
+  if(!map[todayKey]&&(tc>0||todayPnL!==0||todayRiskMax>0)){
+    map[todayKey]={pnl:todayPnL,riskMax:todayRiskMax||0,tradeCount:tc,noTradeDay:false};
+  }
   return map;
 }
 
