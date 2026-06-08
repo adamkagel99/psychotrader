@@ -2390,7 +2390,6 @@ function EconomicEvents(props){
         <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
           <span style={{fontSize:13,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Economic Events</span>
           <span style={{fontSize:12,color:"#475569"}}>{weekEvents.length}</span>
-          <span style={{fontSize:10,color:"#475569",transition:"transform 0.2s",display:"inline-block",transform:expanded?"rotate(180deg)":"rotate(0deg)"}}>▾</span>
         </div>
         <div onClick={function(e){e.stopPropagation();}} style={{display:"flex",alignItems:"center",gap:6,flex:1,justifyContent:"flex-end"}}>
           {currencyList.length>=1&&(
@@ -3020,7 +3019,10 @@ function GoalsSnapshot(props){
   var todayInRows=rows.some(function(e){return e.date===todayKey;});
   var weekPnL=rows.filter(function(e){var dd=new Date(e.date);return dd>=wkStart&&dd<=wkEnd;}).reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0)+(todayInRows?0:livePnL);
   var monthPnL=rows.filter(function(e){return new Date(e.date)>=moStart;}).reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0)+(todayInRows?0:livePnL);
-  var dailyPnL=livePnL;
+  // CHANGED: When today's already saved to journal, prefer the journal entry's pnl over livePnL
+  // (livePnL can be 0 after rollover/sync while the journal still has the day's saved total).
+  var todayRow=rows.find(function(e){return e.date===todayKey;});
+  var dailyPnL=todayRow?(parseFloat(todayRow.pnl)||0):livePnL;
   var allT=rows.reduce(function(a,e){return a.concat(e.trades||[]);},[]);
   var allW=allT.filter(function(t){return parseFloat(t.pnl)>0;});
   var oWR=allT.length>0?allW.length/allT.length*100:0;
@@ -3972,51 +3974,7 @@ function TradesTab(props){
           </div>
         );
       })()}
-      {/* CHANGED: Save to Journal button only shown for today AND when not yet saved */}
-      {isToday&&!todayJournalEntry&&(state.trades||[]).length>0&&(
-        <div style={CS({marginTop:18,border:"1px solid #4338ca44"})}>
-          <div style={{fontSize:13,color:"#a5b4fc",letterSpacing:1,textTransform:"uppercase",marginBottom:8,fontWeight:600}}>Save to Journal</div>
-          <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>End-of-day write-up. Add a note about what happened, then save the day's trades to your journal.</div>
-          <textarea value={state.dailyNote||""} onChange={function(e){var v=e.target.value;props.setState(function(s){return Object.assign({},s,{dailyNote:v});});}} placeholder="What worked? What didn't? Any rules to remember tomorrow?" style={Object.assign({},fld,{minHeight:90,resize:"vertical",fontFamily:"inherit",lineHeight:1.5,marginBottom:10})}/>
-          <button onClick={function(){
-            try{
-              var key="journal:"+todayStr().replace(/\//g,"-");
-              var closedT=(state.trades||[]).filter(function(t){return t.status!=="open";});
-              var riskMaxN=parseFloat(settings.riskMax)||0;
-              var discScore=0;
-              try{discScore=calcDiscipline(closedT,riskMaxN,{commitment:state.commitment||null});}catch(de){console.error("calcDiscipline failed:",de);discScore=0;}
-              var entry={
-                date:todayStr(),
-                pnl:closedT.reduce(function(s,t){return s+(parseFloat(t.pnl)||0);},0),
-                trades:closedT,
-                note:state.dailyNote||"",
-                ruleViolations:state.ruleViolations||[],
-                commitment:state.commitment||null,
-                wins:closedT.filter(function(t){return parseFloat(t.pnl)>0;}).length,
-                losses:closedT.filter(function(t){return parseFloat(t.pnl)<0;}).length,
-                riskMax:riskMaxN,
-                disciplineScore:discScore
-              };
-              // CHANGED: localStorage has ~5MB quota; base64 screenshots can exceed it.
-              // Try full save; on quota error, retry with screenshots stripped and warn the user.
-              function tryWrite(payload){localStorage.setItem(key,JSON.stringify(payload));}
-              try{
-                tryWrite(entry);
-              }catch(qe){
-                var isQuota=qe&&(qe.name==="QuotaExceededError"||/quota/i.test(qe.message||""));
-                if(!isQuota)throw qe;
-                var stripped=Object.assign({},entry,{trades:closedT.map(function(t){var c=Object.assign({},t);c.screenshots=[];return c;}),screenshotsStripped:true});
-                tryWrite(stripped);
-                entry=stripped;
-                alert("Storage full — saved the day without screenshots. To keep screenshots, delete some older trades' screenshots or clear old journal data in Settings.");
-              }
-              setTodayJournalEntry(entry);
-              if(props.bumpReloadKey)props.bumpReloadKey();
-              if(props.refreshHistory)props.refreshHistory();
-            }catch(e){console.error("Save Day to Journal failed:",e);alert("Failed to save: "+(e&&e.message?e.message:String(e)));}
-          }} style={{width:"100%",padding:"11px",background:"linear-gradient(135deg,#4f46e5,#6366f1)",color:"#fff",border:"none",borderRadius:8,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Save Day to Journal</button>
-        </div>
-      )}
+      {/* Save Day to Journal removed — today's entry is now auto-saved (see App's auto-save effect). */}
         </React.Fragment>
       )}
       {/* CHANGED: Lightbox for No-Trade Day screenshots. */}
@@ -7241,6 +7199,47 @@ function App(props){
   var [checklistVersion,setChecklistVersion]=useState(0);
   // Update CACHED_SESSIONS for getSessionAt to use.
   useEffect(function(){CACHED_SESSIONS=getSessions(settings);},[settings]);
+  // CHANGED: Auto-save today's journal entry whenever closed trades, daily note, commitment, or
+  // riskMax changes. Debounced 500ms to avoid hammering localStorage on every keystroke. Preserves
+  // wasLocked / lockScore / lockedAt fields written by the lock side-effect.
+  useEffect(function(){
+    var timer=setTimeout(function(){
+      try{
+        var closedT=(state.trades||[]).filter(function(t){return t&&t.status!=="open";});
+        var note=state.dailyNote||"";
+        // No closed trades AND no note → don't create an empty journal entry.
+        if(closedT.length===0&&!note)return;
+        var key="journal:"+todayStr().replace(/\//g,"-");
+        var existing=null;try{var raw=localStorage.getItem(key);if(raw)existing=JSON.parse(raw);}catch(e){}
+        var riskMaxN=parseFloat(settings.riskMax)||0;
+        var discScore=0;try{discScore=calcDiscipline(closedT,riskMaxN,{commitment:state.commitment||null});}catch(e){}
+        var entry={
+          date:todayStr(),
+          pnl:closedT.reduce(function(s,t){return s+(parseFloat(t.pnl)||0);},0),
+          trades:closedT,
+          note:note,
+          ruleViolations:state.ruleViolations||[],
+          commitment:state.commitment||null,
+          wins:closedT.filter(function(t){return parseFloat(t.pnl)>0;}).length,
+          losses:closedT.filter(function(t){return parseFloat(t.pnl)<0;}).length,
+          riskMax:riskMaxN,
+          disciplineScore:discScore
+        };
+        // Preserve lock-side fields if they exist on the saved entry.
+        if(existing){
+          if(existing.wasLocked)entry.wasLocked=existing.wasLocked;
+          if(existing.lockScore!=null)entry.lockScore=existing.lockScore;
+          if(existing.lockThreshold!=null)entry.lockThreshold=existing.lockThreshold;
+          if(existing.lockedAt!=null)entry.lockedAt=existing.lockedAt;
+          if(existing.noTradeDay)entry.noTradeDay=existing.noTradeDay;
+          if(existing.noTradeShots)entry.noTradeShots=existing.noTradeShots;
+        }
+        safeWriteJournalEntry(key,entry);
+      }catch(e){}
+    },500);
+    return function(){clearTimeout(timer);};
+  // eslint-disable-next-line
+  },[state.trades,state.dailyNote,state.commitment,state.ruleViolations,settings.riskMax]);
   // CHANGED: One-time migration — re-evaluate "Oversized entry" against the session-scaled posMax,
   // and restamp posMaxAtEntry on all historical trades. Skips silently on storage quota errors.
   useEffect(function(){
