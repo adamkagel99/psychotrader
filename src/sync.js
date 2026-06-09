@@ -212,25 +212,26 @@ function tradeRowToApp(t) {
     risk: t.risk,
     instrument: t.instrument,
     direction: t.direction,
-    sessionId: t.session_id,
+    entryTime: t.entry_time,
+    exitTime: t.exit_time,
     setup: t.setup,
-    timeframe: t.timeframe,
-    grade: t.grade,
-    emotions: t.emotions,
-    violations: t.violations,
-    patterns: t.patterns,
+    candlePattern: t.candle_pattern,
     indicators: t.indicators,
-    screenshots: t.screenshots,
-    openedAt: t.opened_at,
-    closedAt: t.closed_at,
+    grade: t.grade,
+    emotion: t.emotion,
+    violations: t.violations,
     notes: t.notes,
+    screenshots: t.screenshots,
+    entries: t.entries,
+    exits: t.exits,
+    sessionId: t.session_id,
   });
 }
 
-function appTradeToRow(t, dayDate) {
-  const mapped = {
-    client_id: String(t.id),
-    day_date: dayDate,
+function appTradeToRow(t, day_date) {
+  return {
+    client_id: String(t.id != null ? t.id : (day_date + "-" + Math.random().toString(36).slice(2))),
+    day_date,
     status: t.status || null,
     pnl: numOrNull(t.pnl),
     pct_pnl: numOrNull(t.pctPnl),
@@ -238,45 +239,48 @@ function appTradeToRow(t, dayDate) {
     risk: numOrNull(t.risk),
     instrument: t.instrument || null,
     direction: t.direction || null,
-    session_id: t.sessionId || null,
+    entry_time: t.entryTime || null,
+    exit_time: t.exitTime || null,
     setup: t.setup || null,
-    timeframe: t.timeframe || null,
-    grade: t.grade || null,
-    emotions: t.emotions || null,
-    violations: t.violations || null,
-    patterns: t.patterns || null,
+    candle_pattern: t.candlePattern || null,
     indicators: t.indicators || null,
-    screenshots: t.screenshots || null,
-    opened_at: t.openedAt != null ? Math.round(t.openedAt) : null,
-    closed_at: t.closedAt != null ? Math.round(t.closedAt) : null,
+    grade: t.grade || null,
+    emotion: t.emotion || null,
+    violations: t.violations || null,
     notes: t.notes || null,
+    screenshots: t.screenshots || null,
+    entries: t.entries || null,
+    exits: t.exits || null,
+    session_id: t.sessionId || null,
+    raw: stripKnownTradeFields(t),
   };
-  // Preserve any fields we didn't explicitly map.
+}
+
+function stripKnownTradeFields(t) {
   const known = new Set([
     "id","status","pnl","pctPnl","positionSize","risk","instrument","direction",
-    "sessionId","setup","timeframe","grade","emotions","violations","patterns",
-    "indicators","screenshots","openedAt","closedAt","notes",
+    "entryTime","exitTime","setup","candlePattern","indicators","grade","emotion",
+    "violations","notes","screenshots","entries","exits","sessionId",
   ]);
-  const raw = {};
-  Object.keys(t || {}).forEach((k) => { if (!known.has(k)) raw[k] = t[k]; });
-  mapped.raw = raw;
-  return mapped;
+  const r = {};
+  Object.keys(t || {}).forEach((k) => { if (!known.has(k)) r[k] = t[k]; });
+  return r;
 }
 
 function numOrNull(v) {
   if (v === "" || v == null) return null;
-  const n = parseFloat(v);
-  return isNaN(n) ? null : n;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
 }
 
 // ------------------------------------------------------------
-// PUSH: flush queued local writes up to the cloud
+// PUSH: debounced flush of pending writes to Supabase
 // ------------------------------------------------------------
 async function flush() {
-  flushTimer = null;
-  if (!currentUserId || pending.size === 0) return;
-  const batch = Array.from(pending.entries());
+  if (!currentUserId) { flushTimer = null; return; }
+  const batch = [...pending.entries()];
   pending.clear();
+  flushTimer = null;
 
   for (const [key, info] of batch) {
     try {
@@ -348,14 +352,30 @@ async function handleSet(key) {
       { onConflict: "user_id,date" }
     );
 
-    // Replace this day's trades.
-    await supabase.from("trades").delete().eq("user_id", uid).eq("day_date", isoDate);
-    const rows = (entry.trades || []).map((t) =>
-      Object.assign({ user_id: uid }, appTradeToRow(t, isoDate))
-    );
-    if (rows.length) {
+    // CHANGED: DESTRUCTIVE-DELETE GUARD.
+    // Previously we ALWAYS deleted this day's trades and re-upserted from the local entry.
+    // If the local entry's trades array was empty (legacy rollover bug, stale state, race
+    // between background pull and auto-save, etc.) the delete fired but no insert followed —
+    // wiping the trades from Supabase even though the user never asked to clear them.
+    //
+    // New rule: only touch the cloud trades when EITHER
+    //   (a) the local entry has at least one trade to push (delete-then-replace pattern), OR
+    //   (b) the day is explicitly marked as a "no-trade day" (intentional clear).
+    // Otherwise we leave the cloud trades alone — empty local trades are treated as "no
+    // information", not "user cleared the day".
+    const localTrades = Array.isArray(entry.trades) ? entry.trades : [];
+    if (localTrades.length > 0) {
+      await supabase.from("trades").delete().eq("user_id", uid).eq("day_date", isoDate);
+      const rows = localTrades.map((t) =>
+        Object.assign({ user_id: uid }, appTradeToRow(t, isoDate))
+      );
       await supabase.from("trades").upsert(rows, { onConflict: "user_id,client_id" });
+    } else if (entry.noTradeDay === true) {
+      // User explicitly marked a no-trade day; clear any prior trades for that date.
+      await supabase.from("trades").delete().eq("user_id", uid).eq("day_date", isoDate);
     }
+    // else: preserve cloud trades. If the user genuinely wants to delete trades, they can
+    // remove individual trades (which fires per-trade sync) or remove the whole journal day.
     return;
   }
 
@@ -390,8 +410,9 @@ async function handleRemove(key) {
   const uid = currentUserId;
   if (isJournalKey(key)) {
     const date = key.slice("journal:".length);
-    await supabase.from("journal_days").delete().eq("user_id", uid).eq("date", date);
-    await supabase.from("trades").delete().eq("user_id", uid).eq("day_date", date);
+    const isoDate = appToIsoDate(date);
+    await supabase.from("journal_days").delete().eq("user_id", uid).eq("date", isoDate);
+    await supabase.from("trades").delete().eq("user_id", uid).eq("day_date", isoDate);
   } else if (key === "tf-transfers") {
     await supabase.from("transfers").delete().eq("user_id", uid);
   } else if (isSyncableKv(key)) {
@@ -529,8 +550,6 @@ if (typeof window !== "undefined") {
 async function handleSetFromValue(key, rawVal, uid) {
   const prevUser = currentUserId;
   currentUserId = uid;
-  // Temporarily stash into a module var the handlers read from localStorage; to keep
-  // things simple we write to localStorage if possible, else parse inline for journals.
   if (isJournalKey(key)) {
     let entry;
     try { entry = JSON.parse(rawVal); } catch { currentUserId = prevUser; return; }
@@ -564,6 +583,7 @@ async function handleSetFromValue(key, rawVal, uid) {
       commitment: entry.commitment || null,
       raw,
     }, { onConflict: "user_id,date" });
+    // CHANGED: Restore is authoritative — the backup IS the truth. Always replace.
     await supabase.from("trades").delete().eq("user_id", uid).eq("day_date", isoDate);
     const rows = (entry.trades || []).map((t) => Object.assign({ user_id: uid }, appTradeToRow(t, isoDate)));
     if (rows.length) await supabase.from("trades").upsert(rows, { onConflict: "user_id,client_id" });
