@@ -4685,6 +4685,59 @@ function GoalsTab(props){
     return <GoalRing key={key} {...opts} onHide={function(){hide(key);}}/>;
   }
 
+  // CHANGED: Lifted to outer scope so default-section inline cards can render full edit/delete UI.
+  function renderCustomGoal(cg){
+    var val=getCustomVal(cg);
+    var tgtNum=parseFloat(cg.target)||0;
+    var isEditing=editingCustomId===cg.id;
+    if(isEditing&&customDraft){
+      var editCanSave=customDraft.title.trim().length>0&&customDraft.target!==""&&!isNaN(parseFloat(customDraft.target))&&(customDraft.metric!=="custom"||(customDraft.customName||"").trim().length>0);
+      return (
+        <div key={cg.id} style={CS({marginBottom:12,border:"1px solid #4338ca",gridColumn:"1 / -1"})}>
+          <div style={{fontSize:13,color:"#a5b4fc",letterSpacing:1,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Edit Goal</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr",gap:10}}>
+            <div><label style={lbl}>Title</label><input value={customDraft.title} onChange={function(e){var v=e.target.value;setCustomDraft(function(d){return Object.assign({},d,{title:v});});}} style={fld}/></div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              <div><label style={lbl}>Metric</label><select value={customDraft.metric} onChange={function(e){var v=e.target.value;setCustomDraft(function(d){return Object.assign({},d,{metric:v,prefix:defaultPrefixForMetric(v),suffix:defaultSuffixForMetric(v)});});}} style={fld}>
+                <option value="pnl">Total P&L</option><option value="winrate">Win Rate (%)</option><option value="discipline">Discipline Score</option><option value="trades">Trades Taken</option><option value="balance">Account Balance</option><option value="custom">Custom...</option>
+              </select></div>
+              <div><label style={lbl}>Period</label><select value={customDraft.period} onChange={function(e){var v=e.target.value;setCustomDraft(function(d){return Object.assign({},d,{period:v});});}} style={fld}>
+                <option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="all">All Time</option>
+              </select></div>
+            </div>
+            {customDraft.metric==="custom"&&<div><label style={lbl}>Metric Name</label><input value={customDraft.customName||""} onChange={function(e){var v=e.target.value;setCustomDraft(function(d){return Object.assign({},d,{customName:v});});}} placeholder="e.g. R-multiple" style={fld}/></div>}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              <div><label style={lbl}>Target</label><input type="number" value={customDraft.target} onChange={function(e){var v=e.target.value;setCustomDraft(function(d){return Object.assign({},d,{target:v});});}} style={fld}/></div>
+              <div><label style={lbl}>Prefix / Suffix</label><div style={{display:"flex",gap:4}}>
+                <input value={customDraft.prefix||""} onChange={function(e){var v=e.target.value;setCustomDraft(function(d){return Object.assign({},d,{prefix:v});});}} placeholder="$" style={Object.assign({},fld,{flex:1})}/>
+                <input value={customDraft.suffix||""} onChange={function(e){var v=e.target.value;setCustomDraft(function(d){return Object.assign({},d,{suffix:v});});}} placeholder="" style={Object.assign({},fld,{flex:1})}/>
+              </div></div>
+            </div>
+            <div><label style={lbl}>Deadline (optional)</label><input type="date" value={customDraft.deadline||""} onChange={function(e){var v=e.target.value;setCustomDraft(function(d){return Object.assign({},d,{deadline:v});});}} style={Object.assign({},fld,{colorScheme:"dark",color:"#e2e8f0"})}/></div>
+          </div>
+          <div style={{display:"flex",gap:8,marginTop:12}}>
+            <button onClick={function(){setEditingCustomId(null);setCustomDraft(null);}} style={{flex:1,padding:"9px",background:"none",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Cancel</button>
+            <button onClick={function(){if(!editCanSave)return;updateCustom(cg.id,{title:customDraft.title.trim(),target:customDraft.target,metric:customDraft.metric,period:customDraft.period,prefix:customDraft.prefix||"",suffix:customDraft.suffix||"",deadline:customDraft.deadline||null,customName:customDraft.metric==="custom"?(customDraft.customName||"").trim():null,filterField:customDraft.filterField||"",filterValue:customDraft.filterValue||""});setEditingCustomId(null);setCustomDraft(null);}} disabled={!editCanSave} style={{flex:2,padding:"9px",background:editCanSave?"#4f46e5":"#1e293b",border:"none",borderRadius:6,color:editCanSave?"#fff":"#475569",fontSize:13,cursor:editCanSave?"pointer":"not-allowed",fontFamily:"inherit",fontWeight:700}}>Save</button>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div key={cg.id} style={{position:"relative"}}>
+        <GoalCard2 label={cg.title+(cg.metric==="custom"&&cg.customName?" ("+cg.customName+")":"")} value={val} target={tgtNum} prefix={cg.prefix||""} suffix={cg.suffix||""} deadline={cg.deadline||null} decimals={cg.metric==="winrate"||cg.metric==="discipline"||cg.metric==="trades"?0:2} targetDecimals={cg.metric==="winrate"||cg.metric==="discipline"||cg.metric==="trades"?0:0} wrColor={cg.metric==="winrate"} discColor={cg.metric==="discipline"}/>
+        <div style={{position:"absolute",top:6,right:6,display:"flex",gap:3}}>
+          {confirmingDeleteId===cg.id?(<>
+            <button onClick={function(){delCustom(cg.id);setConfirmingDeleteId(null);}} style={{padding:"2px 6px",background:"#7f1d1d",border:"1px solid #ef4444",borderRadius:3,color:"#fff",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>Yes</button>
+            <button onClick={function(){setConfirmingDeleteId(null);}} style={{padding:"2px 6px",background:"transparent",border:"1px solid #334155",borderRadius:3,color:"#94a3b8",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>No</button>
+          </>):(<>
+            <button onClick={function(){setEditingCustomId(cg.id);setCustomDraft({title:cg.title||"",target:cg.target||"",metric:cg.metric||"pnl",period:cg.period||"daily",prefix:cg.prefix||"",suffix:cg.suffix||"",customName:cg.customName||"",deadline:cg.deadline||"",filterField:cg.filterField||"",filterValue:cg.filterValue||""});}} style={{padding:"2px 7px",background:"#1e1b4b",border:"1px solid #4338ca",borderRadius:3,color:"#a5b4fc",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Edit</button>
+            <button onClick={function(){setConfirmingDeleteId(cg.id);}} aria-label="Delete" style={{padding:"2px 6px",background:"#7f1d1d33",border:"1px solid #7f1d1d",borderRadius:3,color:"#fca5a5",fontSize:11,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>
+          </>)}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{paddingTop:16}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
@@ -4826,32 +4879,8 @@ function GoalsTab(props){
         if(customByBucket.account.length>0)hasAccount=true;
         function SectionHead(p){return <div style={{display:"flex",alignItems:"center",gap:8,margin:"4px 0 10px"}}><span style={{fontSize:13}}>{p.icon}</span><span style={{fontSize:12,color:"#cbd5e1",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700}}>{p.title}</span><div style={{flex:1,height:1,background:"#1e293b"}}/></div>;}
         var gridStyle={display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax("+(props.mobile?"140px":"190px")+",1fr))",gap:props.mobile?8:12,alignItems:"stretch"};
-        // CHANGED: Lightweight inline renderer so custom goals can sit in the default-section grids.
-        // Full edit/delete affordances still live in the standalone custom block below.
-        function renderInlineCustom(cg){
-          // CHANGED: While editing, the inline card hides — the standalone Custom Goals bucket renders the edit form so you can finish there.
-          if(editingCustomId===cg.id)return null;
-          var val=getCustomVal(cg);
-          var tgtNum=parseFloat(cg.target)||0;
-          return (
-            <div key={"inline-"+cg.id} style={{position:"relative"}}>
-              <GoalCard2 label={cg.title+(cg.metric==="custom"&&cg.customName?" ("+cg.customName+")":"")} value={val} target={tgtNum} prefix={cg.prefix||""} suffix={cg.suffix||""} deadline={cg.deadline||null} decimals={cg.metric==="winrate"||cg.metric==="discipline"||cg.metric==="trades"?0:2} targetDecimals={cg.metric==="winrate"||cg.metric==="discipline"||cg.metric==="trades"?0:0} wrColor={cg.metric==="winrate"} discColor={cg.metric==="discipline"}/>
-              <div style={{position:"absolute",top:6,right:6,display:"flex",gap:3}}>
-                {confirmingDeleteId===cg.id?(
-                  <>
-                    <button onClick={function(){delCustom(cg.id);setConfirmingDeleteId(null);}} style={{padding:"2px 6px",background:"#7f1d1d",border:"1px solid #ef4444",borderRadius:3,color:"#fff",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>Yes</button>
-                    <button onClick={function(){setConfirmingDeleteId(null);}} style={{padding:"2px 6px",background:"transparent",border:"1px solid #334155",borderRadius:3,color:"#94a3b8",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>No</button>
-                  </>
-                ):(
-                  <>
-                    <button onClick={function(){setEditingCustomId(cg.id);setCustomDraft({title:cg.title||"",target:cg.target||"",metric:cg.metric||"pnl",period:cg.period||"daily",prefix:cg.prefix||"",suffix:cg.suffix||"",customName:cg.customName||"",deadline:cg.deadline||"",filterField:cg.filterField||"",filterValue:cg.filterValue||""});}} style={{padding:"2px 7px",background:"#1e1b4b",border:"1px solid #4338ca",borderRadius:3,color:"#a5b4fc",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Edit</button>
-                    <button onClick={function(){setConfirmingDeleteId(cg.id);}} aria-label="Delete" style={{padding:"2px 6px",background:"#7f1d1d33",border:"1px solid #7f1d1d",borderRadius:3,color:"#fca5a5",fontSize:11,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>
-                  </>
-                )}
-              </div>
-            </div>
-          );
-        }
+        // CHANGED: Use the lifted renderCustomGoal so inline cards have full edit/delete + edit form.
+        function renderInlineCustom(cg){return renderCustomGoal(cg);}
         return (
           <div>
             {hasAccount&&(
@@ -4905,154 +4934,6 @@ function GoalsTab(props){
         if(all.length===0)return null;
         // The per-goal renderer (was previously inlined here as a single map; extracted so it can be reused
         // across multiple section buckets).
-        function renderCustomGoal(cg){
-            var val=getCustomVal(cg);
-            var tgtNum=parseFloat(cg.target)||0;
-            var isEditing=editingCustomId===cg.id;
-            // CHANGED: Inline edit form for the custom goal.
-            if(isEditing&&customDraft){
-              var editCanSave=customDraft.title.trim().length>0&&customDraft.target!==""&&!isNaN(parseFloat(customDraft.target))&&(customDraft.metric!=="custom"||(customDraft.customName||"").trim().length>0);
-              return (
-                <div key={cg.id} style={CS({marginBottom:12,border:"1px solid #4338ca"})}>
-                  <div style={{fontSize:13,color:"#a5b4fc",letterSpacing:1,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Edit Goal</div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr",gap:10}}>
-                    <div><label style={lbl}>Title</label><input value={customDraft.title} onChange={function(e){var v=e.target.value;setCustomDraft(function(d){return Object.assign({},d,{title:v});});}} style={fld}/></div>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                      <div>
-                        <label style={lbl}>Metric</label>
-                        <select value={customDraft.metric} onChange={function(e){var v=e.target.value;setCustomDraft(function(d){return Object.assign({},d,{metric:v,prefix:defaultPrefixForMetric(v),suffix:defaultSuffixForMetric(v)});});}} style={fld}>
-                          <option value="pnl">Total P&L</option>
-                          <option value="winrate">Win Rate (%)</option>
-                          <option value="discipline">Discipline Score</option>
-                          <option value="trades">Trades Taken</option>
-                          <option value="balance">Account Balance</option>
-                          <option value="custom">Custom...</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label style={lbl}>Period</label>
-                        <select value={customDraft.period} onChange={function(e){var v=e.target.value;setCustomDraft(function(d){return Object.assign({},d,{period:v});});}} style={fld}>
-                          <option value="daily">Daily</option>
-                          <option value="weekly">Weekly</option>
-                          <option value="monthly">Monthly</option>
-                          <option value="all">All Time</option>
-                        </select>
-                      </div>
-                    </div>
-                    {customDraft.metric==="custom"&&(
-                      <div>
-                        <label style={lbl}>Metric Name</label>
-                        <input value={customDraft.customName||""} onChange={function(e){var v=e.target.value;setCustomDraft(function(d){return Object.assign({},d,{customName:v});});}} placeholder="e.g. R-multiple" style={fld}/>
-                      </div>
-                    )}
-                    {customDraft.metric!=="custom"&&customDraft.metric!=="balance"&&customDraft.metric!=="discipline"&&(function(){
-                      var opts=props.tradeOptions||defaultOptions();
-                      var fieldOpts=[
-                        {key:"",label:"None (all trades)",values:[]},
-                        {key:"setup",label:"Setup",values:opts.setup||[]},
-                        {key:"grade",label:"Grade",values:["A","B","C","D","F"]},
-                        {key:"direction",label:"Direction",values:["LONG","SHORT","CALL","PUT","BUY","SELL"]},
-                        {key:"timeframe",label:"Timeframe",values:opts.timeframe||[]},
-                        {key:"candlePattern",label:"Candle Pattern",values:opts.candlePattern||[]},
-                        {key:"indicators",label:"Indicator",values:opts.indicator||[]},
-                        {key:"emotions",label:"Emotion",values:opts.emotion||[]},
-                        {key:"violations",label:"Violation",values:ALL_VIOLATIONS},
-                        {key:"assetClass",label:"Asset Class",values:ASSET_CLASS_ORDER}
-                      ];
-                      var selectedField=fieldOpts.find(function(f){return f.key===customDraft.filterField;})||fieldOpts[0];
-                      return (
-                        <div style={{padding:"8px 10px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:6}}>
-                          <div style={{fontSize:10,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700,marginBottom:6}}>Filter by Trade Field</div>
-                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                            <select value={customDraft.filterField||""} onChange={function(e){var v=e.target.value;setCustomDraft(function(d){return Object.assign({},d,{filterField:v,filterValue:""});});}} style={fld}>
-                              {fieldOpts.map(function(f){return <option key={f.key} value={f.key}>{f.label}</option>;})}
-                            </select>
-                            {customDraft.filterField&&(
-                              <select value={customDraft.filterValue||""} onChange={function(e){var v=e.target.value;setCustomDraft(function(d){return Object.assign({},d,{filterValue:v});});}} style={fld}>
-                                <option value="">Select value...</option>
-                                {selectedField.values.map(function(v){return <option key={v} value={v}>{v}</option>;})}
-                              </select>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })()}
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                      <div><label style={lbl}>Target</label><input type="number" value={customDraft.target} onChange={function(e){var v=e.target.value;setCustomDraft(function(d){return Object.assign({},d,{target:v});});}} style={fld}/></div>
-                      <div><label style={lbl}>Prefix / Suffix</label>
-                        <div style={{display:"flex",gap:4}}>
-                          <input value={customDraft.prefix||""} onChange={function(e){var v=e.target.value;setCustomDraft(function(d){return Object.assign({},d,{prefix:v});});}} placeholder="$" style={Object.assign({},fld,{flex:1})}/>
-                          <input value={customDraft.suffix||""} onChange={function(e){var v=e.target.value;setCustomDraft(function(d){return Object.assign({},d,{suffix:v});});}} placeholder="" style={Object.assign({},fld,{flex:1})}/>
-                        </div>
-                      </div>
-                    </div>
-                    {/* CHANGED: Deadline in inline edit. */}
-                    <div style={{marginTop:8}}>
-                      <label style={lbl}>Deadline (optional)</label>
-                      <input type="date" value={customDraft.deadline||""} onChange={function(e){var v=e.target.value;setCustomDraft(function(d){return Object.assign({},d,{deadline:v});});}} style={Object.assign({},fld,{colorScheme:"dark",color:"#e2e8f0"})}/>
-                    </div>
-                  </div>
-                  <div style={{display:"flex",gap:8,marginTop:12}}>
-                    <button onClick={function(){setEditingCustomId(null);setCustomDraft(null);}} style={{flex:1,padding:"9px",background:"none",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Cancel</button>
-                    <button onClick={function(){
-                      if(!editCanSave)return;
-                      updateCustom(cg.id,{
-                        title:customDraft.title.trim(),
-                        target:customDraft.target,
-                        metric:customDraft.metric,
-                        period:customDraft.period,
-                        prefix:customDraft.prefix||"",
-                        suffix:customDraft.suffix||"",
-                        deadline:customDraft.deadline||null,
-                        customName:customDraft.metric==="custom"?(customDraft.customName||"").trim():null,
-                        filterField:customDraft.filterField||"",
-                        filterValue:customDraft.filterValue||""
-                      });
-                      setEditingCustomId(null);
-                      setCustomDraft(null);
-                    }} disabled={!editCanSave} style={{flex:2,padding:"9px",background:editCanSave?"#4f46e5":"#1e293b",border:"none",borderRadius:6,color:editCanSave?"#fff":"#475569",fontSize:13,cursor:editCanSave?"pointer":"not-allowed",fontFamily:"inherit",fontWeight:700}}>Save</button>
-                  </div>
-                </div>
-              );
-            }
-            return (
-              <div key={cg.id} style={{position:"relative",marginBottom:12}}>
-                <GoalCard2
-                  label={cg.title+(cg.metric==="custom"&&cg.customName?" ("+cg.customName+")":"")+(cg.filterField&&cg.filterValue?" · "+cg.filterValue:"")}
-                  value={val}
-                  target={tgtNum}
-                  prefix={cg.prefix||""}
-                  suffix={cg.suffix||""}
-                  deadline={cg.deadline||null}
-                  decimals={cg.metric==="winrate"||cg.metric==="discipline"||cg.metric==="trades"?0:2}
-                  targetDecimals={cg.metric==="winrate"||cg.metric==="discipline"||cg.metric==="trades"?0:0}
-                  wrColor={cg.metric==="winrate"}
-                  discColor={cg.metric==="discipline"}
-                />
-                {/* CHANGED: Visible Edit + Delete buttons in top-right of custom goal cards. Two-step delete. */}
-                <div style={{position:"absolute",top:8,right:8,display:"flex",gap:4,alignItems:"center"}}>
-                  {confirmingDeleteId===cg.id?(
-                    <>
-                      <span style={{fontSize:11,color:"#fca5a5",fontWeight:600,marginRight:4}}>Delete?</span>
-                      <button onClick={function(){delCustom(cg.id);setConfirmingDeleteId(null);}} style={{padding:"3px 9px",background:"#7f1d1d",border:"1px solid #ef4444",borderRadius:4,color:"#fff",fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>Yes</button>
-                      <button onClick={function(){setConfirmingDeleteId(null);}} style={{padding:"3px 9px",background:"transparent",border:"1px solid #334155",borderRadius:4,color:"#94a3b8",fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>No</button>
-                    </>
-                  ):(
-                    <>
-                      <button onClick={function(){setEditingCustomId(cg.id);setCustomDraft({title:cg.title||"",target:cg.target||"",metric:cg.metric||"pnl",period:cg.period||"daily",prefix:cg.prefix||"",suffix:cg.suffix||"",customName:cg.customName||"",deadline:cg.deadline||"",filterField:cg.filterField||"",filterValue:cg.filterValue||""});}} style={{padding:"3px 9px",background:"#1e1b4b",border:"1px solid #4338ca",borderRadius:4,color:"#a5b4fc",fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Edit</button>
-                      <button onClick={function(){setConfirmingDeleteId(cg.id);}} aria-label="Delete" style={{padding:"3px 8px",background:"#7f1d1d33",border:"1px solid #7f1d1d",borderRadius:4,color:"#fca5a5",fontSize:13,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>
-                    </>
-                  )}
-                </div>
-                {cg.metric==="custom"&&(
-                  <div style={{margin:"-6px 0 0",padding:"6px 10px",background:"#0a0a0f",border:"1px solid #1e293b",borderTop:"none",borderRadius:"0 0 8px 8px",display:"flex",alignItems:"center",gap:6}}>
-                    <span style={{fontSize:11,color:"#94a3b8"}}>Current:</span>
-                    <input type="number" value={cg.customValue||""} onChange={function(e){updateCustom(cg.id,{customValue:e.target.value});}} placeholder="0" style={Object.assign({},fld,{padding:"4px 8px",fontSize:12,width:120})}/>
-                  </div>
-                )}
-              </div>
-            );
-        }
         // Bucket by section.
         var buckets={custom:[],performance:[],pnl:[],account:[]};
         var named={};
@@ -5076,9 +4957,6 @@ function GoalsTab(props){
         return (
           <>
             {renderBucket("Custom Goals",buckets.custom,"custom")}
-            {renderBucket("Performance · Custom",buckets.performance,"performance")}
-            {renderBucket("P&L · Custom",buckets.pnl,"pnl")}
-            {renderBucket("Account · Custom",buckets.account,"account")}
             {Object.keys(named).map(function(name){return renderBucket(name,named[name],"named-"+name);})}
           </>
         );
