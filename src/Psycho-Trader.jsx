@@ -7183,6 +7183,25 @@ function App(props){
         if(p&&p.date===todayStr()){p.trades=migrateTrades(p.trades||[]);return p;}
       }
     }catch(e){}
+    // CHANGED: After a restore/import or a fresh sign-in, state.trades for today may be empty even
+    // though journal:today has trades. Hydrate from the journal entry so the "Today" view doesn't
+    // show "No trades logged yet" while the SAVED TO JOURNAL stats show trades present.
+    try{
+      var key="journal:"+todayStr().replace(/\//g,"-");
+      var je=localStorage.getItem(key);
+      if(je){
+        var jp=JSON.parse(je);
+        if(jp&&Array.isArray(jp.trades)&&jp.trades.length>0){
+          var fresh=defaultState();
+          fresh.date=todayStr();
+          fresh.trades=migrateTrades(jp.trades);
+          if(jp.commitment)fresh.commitment=jp.commitment;
+          if(jp.ruleViolations)fresh.ruleViolations=jp.ruleViolations;
+          if(jp.note)fresh.dailyNote=jp.note;
+          return fresh;
+        }
+      }
+    }catch(e){}
     return defaultState();
   });
   var [settings,setSettings]=useState(function(){
