@@ -4724,7 +4724,7 @@ function GoalsTab(props){
     }
     return (
       <div key={cg.id} style={{position:"relative"}}>
-        <GoalCard2 label={cg.title+(cg.metric==="custom"&&cg.customName?" ("+cg.customName+")":"")} value={val} target={tgtNum} prefix={cg.prefix||""} suffix={cg.suffix||""} deadline={cg.deadline||null} decimals={cg.metric==="winrate"||cg.metric==="discipline"||cg.metric==="trades"?0:2} targetDecimals={cg.metric==="winrate"||cg.metric==="discipline"||cg.metric==="trades"?0:0} wrColor={cg.metric==="winrate"} discColor={cg.metric==="discipline"}/>
+        <GoalRing label={cg.title+(cg.metric==="custom"&&cg.customName?" ("+cg.customName+")":"")} value={val} target={tgtNum} prefix={cg.prefix||""} suffix={cg.suffix||""} decimals={cg.metric==="winrate"||cg.metric==="discipline"||cg.metric==="trades"?0:2} targetDecimals={cg.metric==="winrate"||cg.metric==="discipline"||cg.metric==="trades"?0:0} wrColor={cg.metric==="winrate"} discColor={cg.metric==="discipline"}/>
         <div style={{position:"absolute",top:6,right:6,display:"flex",gap:3}}>
           {confirmingDeleteId===cg.id?(<>
             <button onClick={function(){delCustom(cg.id);setConfirmingDeleteId(null);}} style={{padding:"2px 6px",background:"#7f1d1d",border:"1px solid #ef4444",borderRadius:3,color:"#fff",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>Yes</button>
