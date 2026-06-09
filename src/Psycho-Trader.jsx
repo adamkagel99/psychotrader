@@ -7418,9 +7418,10 @@ function App(props){
     if(t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))sf=parseFloat(t.sizeFraction);
     if(sf==null&&t.sessionId){try{var sess=getSessions(settings).find(function(s){return s.id===t.sessionId;});if(sess&&sess.sizeFraction!=null)sf=parseFloat(sess.sizeFraction);}catch(e){}}
     if(sf==null)sf=1;
-    // CHANGED: Apply discipline-lock half-size on top of session sizeFraction. This is what makes
-    // the live trade check match the cap displayed in the UI when half-size trading is active.
-    try{var lk=checkDisciplineLock(state.trades,state.commitment);if(lk&&lk.locked)sf=sf*0.5;}catch(e){}
+    // CHANGED: Half-size lock means "at most half of full size", not "half of whatever the
+    // session already shrank you to". Without this floor, a session with sf=0.5 combined with the
+    // lock's ×0.5 produced 0.25 — way more restrictive than the user expects from "half-size".
+    try{var lk=checkDisciplineLock(state.trades,state.commitment);if(lk&&lk.locked)sf=Math.min(sf,0.5);}catch(e){}
     var effPosMax=posMax>0?posMax*sf:0;
     if(effPosMax>0&&pos>effPosMax&&v.indexOf("Oversized entry")<0)v.push("Oversized entry");
     var stopThreshPct=(riskMaxPct>0)?riskMaxPct*sf:0;
@@ -7525,7 +7526,7 @@ function App(props){
   var sessForSf=getSessions(settings).find(function(s){return s.id===phase;});
   var effSF=sessForSf&&sessForSf.sizeFraction!=null?parseFloat(sessForSf.sizeFraction)||1:1;
   var liveLockForSF=checkDisciplineLock(state.trades,state.commitment);
-  if(liveLockForSF.locked)effSF=effSF*0.5;
+  if(liveLockForSF.locked)effSF=Math.min(effSF,0.5);
   var tradeStatus=(function(){
     // CHANGED: Market-closed no longer blocks new trades — users may log fills from extended hours
     // or trades placed elsewhere right after the bell. All other gates (pre-market checklist,
