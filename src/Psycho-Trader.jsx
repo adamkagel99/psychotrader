@@ -7263,10 +7263,16 @@ function App(props){
         };
         // Preserve lock-side fields if they exist on the saved entry.
         if(existing){
-          if(existing.wasLocked)entry.wasLocked=existing.wasLocked;
-          if(existing.lockScore!=null)entry.lockScore=existing.lockScore;
-          if(existing.lockThreshold!=null)entry.lockThreshold=existing.lockThreshold;
-          if(existing.lockedAt!=null)entry.lockedAt=existing.lockedAt;
+          // CHANGED: But CLEAR them if the recomputed score is now above threshold — keeps the
+          // calendar "D" marker and the half-size cooldown in sync with current truth.
+          var thr=loadDisciplineLockThreshold();
+          var keepLock=existing.wasLocked&&discScore<thr;
+          if(keepLock){
+            if(existing.wasLocked)entry.wasLocked=existing.wasLocked;
+            if(existing.lockScore!=null)entry.lockScore=existing.lockScore;
+            if(existing.lockThreshold!=null)entry.lockThreshold=existing.lockThreshold;
+            if(existing.lockedAt!=null)entry.lockedAt=existing.lockedAt;
+          }
           if(existing.noTradeDay)entry.noTradeDay=existing.noTradeDay;
           if(existing.noTradeShots)entry.noTradeShots=existing.noTradeShots;
         }
@@ -7494,6 +7500,17 @@ function App(props){
           if((entry.noTradeReasons||[]).length>0&&!entry.initialNoTradeReasons)updated.initialNoTradeReasons=entry.noTradeReasons.slice();
           if(entry.noTradeReason&&!entry.initialNoTradeReason)updated.initialNoTradeReason=entry.noTradeReason;
           if(entry.noTradeLoggedAt&&!entry.initialNoTradeLoggedAt)updated.initialNoTradeLoggedAt=entry.noTradeLoggedAt;
+        }
+        // CHANGED: If editing brought today's discipline back above threshold, clear the lock-trigger
+        // metadata so the calendar "D" marker disappears and the half-size cooldown lifts. The lock
+        // is no longer immutable — it reflects current truth, not historical intent.
+        var newScore=updated.disciplineScore;
+        var lockThreshold=loadDisciplineLockThreshold();
+        if(entry.wasLocked&&newScore!=null&&parseFloat(newScore)>=lockThreshold){
+          updated.wasLocked=false;
+          delete updated.lockScore;
+          delete updated.lockThreshold;
+          delete updated.lockedAt;
         }
         localStorage.setItem(key,JSON.stringify(updated));
         journalWasUpdated=true;
