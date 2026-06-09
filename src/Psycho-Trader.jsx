@@ -7422,10 +7422,21 @@ function App(props){
     // lock's ×0.5 produced 0.25 — way more restrictive than the user expects from "half-size".
     try{var lk=checkDisciplineLock(state.trades,state.commitment);if(lk&&lk.locked)sf=Math.min(sf,0.5);}catch(e){}
     var effPosMax=posMax>0?posMax*sf:0;
-    if(effPosMax>0&&pos>effPosMax&&v.indexOf("Oversized entry")<0)v.push("Oversized entry");
+    // CHANGED: Auto-violations must be REMOVABLE — if a re-save brings the trade within the cap,
+    // the previous "Oversized entry" flag should clear. Same for "Max risk exceeded".
+    var overIdx=v.indexOf("Oversized entry");
+    if(effPosMax>0&&pos>effPosMax){
+      if(overIdx<0)v.push("Oversized entry");
+    }else if(overIdx>=0){
+      v.splice(overIdx,1);
+    }
     var stopThreshPct=(riskMaxPct>0)?riskMaxPct*sf:0;
-    if(!isNaN(pnlNum)&&pnlNum<0&&!isNaN(pctNum)&&stopThreshPct>0&&pctNum<-stopThreshPct&&v.indexOf("Max risk exceeded")<0){
-      v.push("Max risk exceeded");
+    var maxRiskIdx=v.indexOf("Max risk exceeded");
+    var stoppedOut=(!isNaN(pnlNum)&&pnlNum<0&&!isNaN(pctNum)&&stopThreshPct>0&&pctNum<-stopThreshPct);
+    if(stoppedOut){
+      if(maxRiskIdx<0)v.push("Max risk exceeded");
+    }else if(maxRiskIdx>=0){
+      v.splice(maxRiskIdx,1);
     }
     var patch={violations:v,sizeFraction:sf};
     if(effPosMax>0)patch.posMaxAtEntry=effPosMax;
