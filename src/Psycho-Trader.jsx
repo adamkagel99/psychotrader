@@ -6452,7 +6452,11 @@ function SettingsTab(props){
         // localStorage quota; we still want the rest to load, and (when signed in) the cloud
         // push uploads images to Storage and rewrites local entries to small paths.
         var quotaHit=false;
-        Object.keys(data).forEach(function(k){try{localStorage.setItem(k,data[k]);}catch(err){quotaHit=true;}});
+        // CHANGED: only restore app keys. Backups can contain `sb-*` Supabase session tokens (and
+        // any other non-tf cruft); writing those overwrites the current logged-in session and
+        // signs the user out. Limit to recognized app keys only.
+        function isAppKey(k){return typeof k==="string"&&(k.startsWith("tf-")||k.startsWith("journal:"));}
+        Object.keys(data).forEach(function(k){if(!isAppKey(k))return;try{localStorage.setItem(k,data[k]);}catch(err){quotaHit=true;}});
         if(typeof window!=="undefined"&&typeof window.__psychoSyncRestore==="function"){
           alert("Restore complete. Uploading to your account (including screenshots)…");
           window.__psychoSyncRestore(data).then(function(){window.location.reload();},function(err){alert("Restored, but cloud upload had an issue: "+(err&&err.message?err.message:err)+". Reloading anyway.");window.location.reload();});
@@ -7248,6 +7252,9 @@ function App(props){
           if(existing.noTradeShots)entry.noTradeShots=existing.noTradeShots;
         }
         safeWriteJournalEntry(key,entry);
+        // CHANGED: nudge dependent components (TradesTab "Saved to Journal" panel, calendar,
+        // Performance, etc.) to re-read from localStorage now that the entry is fresh.
+        try{bumpReloadKey();}catch(e){}
       }catch(e){}
     },500);
     return function(){clearTimeout(timer);};

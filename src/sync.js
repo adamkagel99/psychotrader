@@ -187,6 +187,28 @@ export async function pullFromCloud(userId) {
   (days || []).forEach((d) => {
     const keyDate = isoToKeyDate(d.date);
     const internalDate = isoToInternalDate(d.date);
+    const cloudTrades = tradesByDay[d.date] || [];
+    // CHANGED: Merge cloud trades with whatever's already in local for this day. If cloud has
+    // no trades but local does, prefer local — empty cloud trades have been the legacy-corruption
+    // smoking gun and we never want a background pull to wipe local trades. If both sides have
+    // trades, union by client id (cloud wins on conflicts since it just came through validation).
+    let mergedTrades = cloudTrades;
+    try {
+      const existingRaw = window.localStorage.getItem("journal:" + keyDate);
+      if (existingRaw) {
+        const existing = JSON.parse(existingRaw);
+        const localTrades = Array.isArray(existing.trades) ? existing.trades : [];
+        if (cloudTrades.length === 0 && localTrades.length > 0) {
+          mergedTrades = localTrades;
+        } else if (cloudTrades.length > 0 && localTrades.length > 0) {
+          const byId = {};
+          localTrades.forEach((t) => { if (t && t.id != null) byId[String(t.id)] = t; });
+          cloudTrades.forEach((t) => { if (t && t.id != null) byId[String(t.id)] = t; });
+          mergedTrades = Object.values(byId);
+        }
+      }
+    } catch (e) { /* fall through with cloudTrades */ }
+
     const entry = Object.assign({}, d.raw || {}, {
       date: internalDate,
       pnl: Number(d.pnl) || 0,
@@ -195,7 +217,7 @@ export async function pullFromCloud(userId) {
       noTradeDay: d.no_trade_day || undefined,
       noTradeReason: d.no_trade_reason || undefined,
       commitment: d.commitment || undefined,
-      trades: tradesByDay[d.date] || [],
+      trades: mergedTrades,
     });
     rawSetItem("journal:" + keyDate, JSON.stringify(entry));
   });
