@@ -4436,7 +4436,7 @@ function GoalRing(props){
   return (
     <div style={CS({marginBottom:0,position:"relative",border:completed?"1px solid #22c55e44":"1px solid #1e293b",background:completed?"#0f1f15":"#0d0d12",display:"flex",flexDirection:"column",alignItems:"center",padding:cmp?"10px 8px":"16px 14px 14px",height:"100%",boxSizing:"border-box"})}>
       {gp.onHide&&<button onClick={function(e){e.stopPropagation();gp.onHide();}} aria-label={"Hide "+gp.label} title={"Hide "+gp.label} style={{position:"absolute",top:8,right:8,width:20,height:20,padding:0,background:"none",border:"none",color:"#475569",fontSize:14,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>}
-      {gp.onDelete&&<button onClick={function(e){e.stopPropagation();gp.onDelete();}} aria-label={"Delete "+gp.label} title={"Delete "+gp.label} style={{position:"absolute",top:8,right:8,padding:"3px 8px",background:"#7f1d1d33",border:"1px solid #7f1d1d",borderRadius:4,color:"#fca5a5",fontSize:13,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>}
+      {gp.onDelete&&<button onClick={function(e){e.stopPropagation();gp.onDelete();}} aria-label={"Delete "+gp.label} title={"Delete "+gp.label} style={{position:"absolute",top:8,right:8,width:20,height:20,padding:0,background:"none",border:"none",color:"#475569",fontSize:14,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>}
       <div style={{fontSize:cmp?9:11,color:completed?"#86efac":"#64748b",letterSpacing:cmp?0.5:1,textTransform:"uppercase",fontWeight:completed?700:600,marginBottom:cmp?7:12,textAlign:"center",paddingRight:gp.onHide||gp.onDelete?14:0,lineHeight:1.2}}>{gp.label}</div>
       <div style={{position:"relative",width:SZ,height:SZ,marginBottom:cmp?6:10}}>
         <svg width={SZ} height={SZ} viewBox={"0 0 "+SZ+" "+SZ} style={{transform:"rotate(-90deg)"}}>
@@ -4672,6 +4672,23 @@ function GoalsTab(props){
           return <div key={f.key} style={{marginBottom:12}}><label style={lbl}>{f.label}</label><input type="number" value={draft[f.key]||""} onChange={function(e){var v=e.target.value;setDraft(function(g){return Object.assign({},g,{[f.key]:v});});}} placeholder={f.ph} style={fld}/></div>;
         })}
         <button onClick={saveStandardGoals} style={{width:"100%",padding:"13px",background:"linear-gradient(135deg,#4f46e5,#6366f1)",color:"#fff",border:"none",borderRadius:10,fontSize:16,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginTop:4}}>Save Goals</button>
+        {/* CHANGED: Custom goals editing lives here (was a per-card Edit button before). Click any to open its inline edit form. */}
+        {(goals.custom||[]).length>0&&(
+          <div style={{marginTop:24,paddingTop:16,borderTop:"1px solid #1e293b"}}>
+            <div style={{fontSize:12,color:"#94a3b8",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Custom Goals</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax("+(props.mobile?"140px":"190px")+",1fr))",gap:props.mobile?8:12,alignItems:"stretch"}}>
+              {(goals.custom||[]).map(function(cg){
+                if(editingCustomId===cg.id)return renderCustomGoal(cg);
+                return (
+                  <button key={cg.id} onClick={function(){setEditingCustomId(cg.id);setCustomDraft({title:cg.title||"",target:cg.target||"",metric:cg.metric||"pnl",period:cg.period||"daily",prefix:cg.prefix||"",suffix:cg.suffix||"",customName:cg.customName||"",deadline:cg.deadline||"",filterField:cg.filterField||"",filterValue:cg.filterValue||""});}} style={{textAlign:"left",padding:"10px 12px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8,cursor:"pointer",fontFamily:"inherit",display:"flex",flexDirection:"column",gap:3}}>
+                    <div style={{fontSize:12,color:"#e2e8f0",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cg.title}</div>
+                    <div style={{fontSize:10,color:"#64748b"}}>{cg.metric}{cg.period?" · "+cg.period:""} · target {cg.prefix||""}{cg.target}{cg.suffix||""}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -4724,16 +4741,10 @@ function GoalsTab(props){
     }
     return (
       <div key={cg.id} style={{position:"relative"}}>
-        <GoalRing label={cg.title+(cg.metric==="custom"&&cg.customName?" ("+cg.customName+")":"")} value={val} target={tgtNum} prefix={cg.prefix||""} suffix={cg.suffix||""} decimals={cg.metric==="winrate"||cg.metric==="discipline"||cg.metric==="trades"?0:2} targetDecimals={cg.metric==="winrate"||cg.metric==="discipline"||cg.metric==="trades"?0:0} wrColor={cg.metric==="winrate"} discColor={cg.metric==="discipline"}/>
-        <div style={{position:"absolute",top:6,right:6,display:"flex",gap:3}}>
-          {confirmingDeleteId===cg.id?(<>
-            <button onClick={function(){delCustom(cg.id);setConfirmingDeleteId(null);}} style={{padding:"2px 6px",background:"#7f1d1d",border:"1px solid #ef4444",borderRadius:3,color:"#fff",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>Yes</button>
-            <button onClick={function(){setConfirmingDeleteId(null);}} style={{padding:"2px 6px",background:"transparent",border:"1px solid #334155",borderRadius:3,color:"#94a3b8",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>No</button>
-          </>):(<>
-            <button onClick={function(){setEditingCustomId(cg.id);setCustomDraft({title:cg.title||"",target:cg.target||"",metric:cg.metric||"pnl",period:cg.period||"daily",prefix:cg.prefix||"",suffix:cg.suffix||"",customName:cg.customName||"",deadline:cg.deadline||"",filterField:cg.filterField||"",filterValue:cg.filterValue||""});}} style={{padding:"2px 7px",background:"#1e1b4b",border:"1px solid #4338ca",borderRadius:3,color:"#a5b4fc",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Edit</button>
-            <button onClick={function(){setConfirmingDeleteId(cg.id);}} aria-label="Delete" style={{padding:"2px 6px",background:"#7f1d1d33",border:"1px solid #7f1d1d",borderRadius:3,color:"#fca5a5",fontSize:11,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>
-          </>)}
-        </div>
+        <GoalRing label={cg.title+(cg.metric==="custom"&&cg.customName?" ("+cg.customName+")":"")} value={val} target={tgtNum} prefix={cg.prefix||""} suffix={cg.suffix||""} decimals={cg.metric==="winrate"||cg.metric==="discipline"||cg.metric==="trades"?0:2} targetDecimals={cg.metric==="winrate"||cg.metric==="discipline"||cg.metric==="trades"?0:0} wrColor={cg.metric==="winrate"} discColor={cg.metric==="discipline"} onDelete={function(){
+          // Two-step confirm via window.confirm — matches the lightweight × treatment of default cards.
+          if(confirm("Delete custom goal \""+cg.title+"\"?"))delCustom(cg.id);
+        }}/>
       </div>
     );
   }
@@ -5725,8 +5736,21 @@ function PerformanceTab(props){
   });
   function inRange(d){
     if(range==="all")return true;
-    var dd=new Date(d);if(isNaN(dd.getTime()))return false;
-    dd.setHours(0,0,0,0); // compare on whole days, not time-of-day.
+    // CHANGED: Parse as LOCAL midnight regardless of format. ISO strings ("2026-06-07") would
+    // otherwise be read as UTC midnight, shifting to the previous local day in negative-UTC
+    // timezones and silently dropping yesterday's trades from "This Week".
+    var dd;
+    if(typeof d==="string"){
+      var iso=d.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      var sl=d.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+      var dsh=d.match(/^(\d{1,2})-(\d{1,2})-(\d{4})/);
+      if(iso)dd=new Date(+iso[1],+iso[2]-1,+iso[3]);
+      else if(sl)dd=new Date(+sl[3],+sl[1]-1,+sl[2]);
+      else if(dsh)dd=new Date(+dsh[3],+dsh[1]-1,+dsh[2]);
+      else dd=new Date(d);
+    }else dd=new Date(d);
+    if(isNaN(dd.getTime()))return false;
+    dd.setHours(0,0,0,0);
     var now=getPT();
     // CHANGED: "Last Week" now means the PREVIOUS fixed calendar week (Mon–Sun before the current
     // week), not a rolling 7-day window. A rolling window slides daily and clips a different
