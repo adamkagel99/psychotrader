@@ -1315,7 +1315,24 @@ function DailyPnLBar(props){
   var entries=props.entries||[];
   var [hoverIdx,setHoverIdx]=useState(null);
   if(entries.length===0)return null;
-  var sorted=entries.slice().sort(function(a,b){return new Date(a.date)-new Date(b.date);});
+  var sortedRaw=entries.slice().sort(function(a,b){return new Date(a.date)-new Date(b.date);});
+  // CHANGED: When the range spans > ~60 days, aggregate by week (Sunday-start) so the chart stays readable.
+  var spanMs=new Date(sortedRaw[sortedRaw.length-1].date)-new Date(sortedRaw[0].date);
+  var weekly=spanMs>60*24*3600*1000;
+  var sorted;
+  if(weekly){
+    var buckets={};
+    sortedRaw.forEach(function(e){
+      var d=new Date(e.date);d.setHours(0,0,0,0);
+      d.setDate(d.getDate()-d.getDay()); // Sunday of this week
+      var k=d.getFullYear()+"-"+(d.getMonth()+1)+"-"+d.getDate();
+      if(!buckets[k])buckets[k]={date:k,sortKey:d.getTime(),pnl:0,_rep:e.date};
+      buckets[k].pnl+=parseFloat(e.pnl)||0;
+    });
+    sorted=Object.keys(buckets).map(function(k){return buckets[k];}).sort(function(a,b){return a.sortKey-b.sortKey;});
+  }else{
+    sorted=sortedRaw;
+  }
   var pnls=sorted.map(function(e){return parseFloat(e.pnl)||0;});
   // CHANGED: Compute % per day (relative to that day's account balance) so hide-$ can show meaningful percentages.
   var pcts=sorted.map(function(e){var sb=0;try{sb=getAccountBalanceAtDate(e.date);}catch(x){}return sb>0?((parseFloat(e.pnl)||0)/sb*100):0;});
@@ -2189,7 +2206,7 @@ function TradeForm(props){
                 </div>
               );
             })}
-            {totalEntryC>0&&!isNaN(avgEntry)&&(
+            {(totalEntryC>0&&!isNaN(avgEntry)||(trade.positionSize&&parseFloat(trade.positionSize)>0))&&(
               <div style={{display:"grid",gridTemplateColumns:!props.mobile&&trade.stopLoss?"1fr 1fr 1fr 1fr":"1fr 1fr 1fr",gap:rowGap,marginTop:fldHeader}}>
                 <div style={{background:"#1e293b",borderRadius:6,padding:density>=2?"4px 8px":"6px 10px"}}><div style={{fontSize:9,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>{unitLabel}</div><div style={{fontSize:density>=2?12:14,fontWeight:700,color:"#38bdf8",marginTop:1}}>{totalEntryC}</div></div>
                 <div style={{background:"#1e293b",borderRadius:6,padding:density>=2?"4px 8px":"6px 10px"}}><div style={{fontSize:9,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>Avg Entry</div><div style={{fontSize:density>=2?12:14,fontWeight:700,color:"#f59e0b",marginTop:1}}>${avgEntry.toFixed(2)}</div></div>
@@ -3053,8 +3070,27 @@ function GoalsSnapshot(props){
   if(!hidden.daily&&dailyTarget>0)pnl.push({key:"daily",label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
   if(!hidden.weekly&&weeklyTarget>0)pnl.push({key:"weekly",label:"Week P&L",value:weekPnL,target:weeklyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
   if(!hidden.monthly&&monthlyTarget>0)pnl.push({key:"monthly",label:"Month P&L",value:monthPnL,target:monthlyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
+  // CHANGED: Inject custom goals into the appropriate default section so they show on Home alongside built-ins.
+  var customList=Array.isArray(goals.custom)?goals.custom:[];
+  function homeCustomVal(g){
+    if(g.metric==="custom")return parseFloat(g.customValue||0)||0;
+    if(g.metric==="pnl"){if(g.period==="daily")return dailyPnL;if(g.period==="weekly")return weekPnL;if(g.period==="monthly")return monthPnL;return totalAllPnL||0;}
+    if(g.metric==="winrate")return parseFloat((oWR||0).toFixed(1));
+    if(g.metric==="discipline")return parseFloat((aDisc||0).toFixed(0));
+    if(g.metric==="balance")return props.currentAccount||0;
+    if(g.metric==="trades")return (props.state&&props.state.trades?props.state.trades.length:0);
+    return 0;
+  }
+  customList.forEach(function(cg){
+    var v=homeCustomVal(cg),t=parseFloat(cg.target)||0;
+    var card={key:"custom-"+cg.id,label:cg.title,value:v,target:t,prefix:cg.prefix||"",suffix:cg.suffix||"",decimals:cg.metric==="winrate"||cg.metric==="discipline"||cg.metric==="trades"?0:0,targetDecimals:0,wrColor:cg.metric==="winrate",discColor:cg.metric==="discipline",compact:true};
+    if(cg.section==="account")account.push(card);
+    else if(cg.section==="performance")perf.push(card);
+    else if(cg.section==="pnl")pnl.push(card);
+    // "custom" default + "namedCustom" remain in the dedicated +N count below.
+  });
   var total=account.length+perf.length+pnl.length;
-  var customCount=Array.isArray(goals.custom)?goals.custom.length:0;
+  var customCount=customList.filter(function(cg){return cg.section!=="account"&&cg.section!=="performance"&&cg.section!=="pnl";}).length;
   var gridStyle={display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(104px,1fr))",gap:8,alignItems:"stretch"};
   function Section(p){
     if(p.items.length===0)return null;
@@ -4125,6 +4161,8 @@ function JournalTab(props){
             <div style={{fontSize:13,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Trades</div>
             {editing&&<div style={{fontSize:11,color:"#475569"}}>Tap a trade to edit · × to remove</div>}
           </div>
+          {/* CHANGED: 3 trade cards per row on laptop, single column on mobile. Editing card spans full width. */}
+          <div style={{display:"grid",gridTemplateColumns:props.mobile?"1fr":"1fr 1fr 1fr",gap:12,alignItems:"stretch"}}>
           {trades.map(function(t,i){
             // CHANGED: Universal-edit mode — clicking a trade tile opens its inline editor.
             //          Per-trade Edit/Delete buttons are hidden (handled by hideControls in TradeTile).
@@ -4133,8 +4171,8 @@ function JournalTab(props){
             var isExpanded=editing&&editingTradeIdx===i;
             if(isExpanded){
               return (
+                <div key={t.id||i} style={{gridColumn:"1 / -1"}}>
                 <TradeForm
-                  key={t.id||i}
                   trade={t}
                   setTrade={function(updater){
                     setEditDraft(function(d){
@@ -4150,6 +4188,7 @@ function JournalTab(props){
                   settings={settings}
                   tradeOptions={props.tradeOptions}
                 />
+                </div>
               );
             }
             return (
@@ -4164,6 +4203,7 @@ function JournalTab(props){
               </div>
             );
           })}
+          </div>
         </div>
         {/* CHANGED: Sticky action bar at bottom of edit mode for Cancel / Save Changes. */}
         {editing&&(
@@ -4777,8 +4817,41 @@ function GoalsTab(props){
         var hasAccount=(!hidden.account&&accountTarget>0)||(!hidden.withdrawals&&withdrawalTarget>0);
         var hasPerf=(!hidden.winRate&&winRateTarget>0)||(!hidden.discipline&&disciplineTarget>0);
         var hasPnL=(!hidden.daily&&dailyTarget>0)||(!hidden.weekly&&weeklyTarget>0)||(!hidden.monthly&&monthlyTarget>0);
+        // CHANGED: Pre-bucket custom goals so they can render inline within their assigned default section.
+        var customAll=goals.custom||[];
+        var customByBucket={performance:[],pnl:[],account:[]};
+        customAll.forEach(function(cg){if(customByBucket[cg.section])customByBucket[cg.section].push(cg);});
+        if(customByBucket.performance.length>0)hasPerf=true;
+        if(customByBucket.pnl.length>0)hasPnL=true;
+        if(customByBucket.account.length>0)hasAccount=true;
         function SectionHead(p){return <div style={{display:"flex",alignItems:"center",gap:8,margin:"4px 0 10px"}}><span style={{fontSize:13}}>{p.icon}</span><span style={{fontSize:12,color:"#cbd5e1",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700}}>{p.title}</span><div style={{flex:1,height:1,background:"#1e293b"}}/></div>;}
         var gridStyle={display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax("+(props.mobile?"140px":"190px")+",1fr))",gap:props.mobile?8:12,alignItems:"stretch"};
+        // CHANGED: Lightweight inline renderer so custom goals can sit in the default-section grids.
+        // Full edit/delete affordances still live in the standalone custom block below.
+        function renderInlineCustom(cg){
+          // CHANGED: While editing, the inline card hides — the standalone Custom Goals bucket renders the edit form so you can finish there.
+          if(editingCustomId===cg.id)return null;
+          var val=getCustomVal(cg);
+          var tgtNum=parseFloat(cg.target)||0;
+          return (
+            <div key={"inline-"+cg.id} style={{position:"relative"}}>
+              <GoalCard2 label={cg.title+(cg.metric==="custom"&&cg.customName?" ("+cg.customName+")":"")} value={val} target={tgtNum} prefix={cg.prefix||""} suffix={cg.suffix||""} deadline={cg.deadline||null} decimals={cg.metric==="winrate"||cg.metric==="discipline"||cg.metric==="trades"?0:2} targetDecimals={cg.metric==="winrate"||cg.metric==="discipline"||cg.metric==="trades"?0:0} wrColor={cg.metric==="winrate"} discColor={cg.metric==="discipline"}/>
+              <div style={{position:"absolute",top:6,right:6,display:"flex",gap:3}}>
+                {confirmingDeleteId===cg.id?(
+                  <>
+                    <button onClick={function(){delCustom(cg.id);setConfirmingDeleteId(null);}} style={{padding:"2px 6px",background:"#7f1d1d",border:"1px solid #ef4444",borderRadius:3,color:"#fff",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>Yes</button>
+                    <button onClick={function(){setConfirmingDeleteId(null);}} style={{padding:"2px 6px",background:"transparent",border:"1px solid #334155",borderRadius:3,color:"#94a3b8",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>No</button>
+                  </>
+                ):(
+                  <>
+                    <button onClick={function(){setEditingCustomId(cg.id);setCustomDraft({title:cg.title||"",target:cg.target||"",metric:cg.metric||"pnl",period:cg.period||"daily",prefix:cg.prefix||"",suffix:cg.suffix||"",customName:cg.customName||"",deadline:cg.deadline||"",filterField:cg.filterField||"",filterValue:cg.filterValue||""});}} style={{padding:"2px 7px",background:"#1e1b4b",border:"1px solid #4338ca",borderRadius:3,color:"#a5b4fc",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Edit</button>
+                    <button onClick={function(){setConfirmingDeleteId(cg.id);}} aria-label="Delete" style={{padding:"2px 6px",background:"#7f1d1d33",border:"1px solid #7f1d1d",borderRadius:3,color:"#fca5a5",fontSize:11,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>
+                  </>
+                )}
+              </div>
+            </div>
+          );
+        }
         return (
           <div>
             {hasAccount&&(
@@ -4787,6 +4860,7 @@ function GoalsTab(props){
                 <div style={gridStyle}>
                   {!hidden.account&&accountTarget>0&&renderStandardCard("account",{label:"Account Balance",value:currentAccount,target:accountTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true})}
                   {withdrawalTarget>0&&renderStandardCard("withdrawals",{label:"Total Withdrawn",value:totalWithdrawn,target:withdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true})}
+                  {customByBucket.account.map(renderInlineCustom)}
                 </div>
               </div>
             )}
@@ -4796,6 +4870,7 @@ function GoalsTab(props){
                 <div style={gridStyle}>
                   {winRateTarget>0&&renderStandardCard("winRate",{label:"Win Rate",value:oWR,target:winRateTarget,suffix:"%",decimals:0,targetDecimals:0,wrColor:true,subtext:(weekTrades.length>0?("This week: "+Math.round(wWR)+"% ("+weekWins+"/"+weekTrades.length+")"):"This week: no trades yet")+" · all-time above"})}
                   {disciplineTarget>0&&renderStandardCard("discipline",{label:"Discipline Score",value:aDisc,target:disciplineTarget,suffix:"%",decimals:0,targetDecimals:0,discColor:true,subtext:(discWeekDays.length>0?("This week: "+Math.round(aDiscWeek)+"% avg ("+discWeekDays.length+" day"+(discWeekDays.length===1?"":"s")+")"):"This week: no trades yet")+" · stay above your "+disciplineTarget+"% lock threshold"})}
+                  {customByBucket.performance.map(renderInlineCustom)}
                 </div>
               </div>
             )}
@@ -4806,6 +4881,7 @@ function GoalsTab(props){
                   {dailyTarget>0&&renderStandardCard("daily",Object.assign({label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0},pnlFmt))}
                   {weeklyTarget>0&&renderStandardCard("weekly",Object.assign({label:"Week P&L",value:weekPnL,target:weeklyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true},pnlFmt))}
                   {monthlyTarget>0&&renderStandardCard("monthly",Object.assign({label:"Month P&L",value:monthPnL,target:monthlyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true},pnlFmt))}
+                  {customByBucket.pnl.map(renderInlineCustom)}
                 </div>
               </div>
             )}
@@ -5206,7 +5282,19 @@ function EquityCurve(props){
       if(ddPct<maxDDPct)maxDDPct=ddPct;
       pts.push({date:x.date,cum:cum,peak:peak});
     });
-    if(pts.length===0)return null;
+    // CHANGED: If granular mode found no trades (e.g. legacy entries with empty trades but valid pnl),
+    // fall back to day-level cumulative from r.pnl instead of disappearing.
+    if(pts.length===0){
+      cum=0;peak=0;maxDD=0;maxDDPct=0;
+      entries.forEach(function(r){
+        cum+=parseFloat(r.pnl)||0;
+        if(cum>peak)peak=cum;
+        var dd=cum-peak;if(dd<maxDD)maxDD=dd;
+        var peakEq2=startBal+peak;var ddPct2=peakEq2>0?(dd/peakEq2*100):0;
+        if(ddPct2<maxDDPct)maxDDPct=ddPct2;
+        pts.push({date:r.date,cum:cum,peak:peak});
+      });
+    }
   }else{
     entries.forEach(function(r){
       cum+=parseFloat(r.pnl)||0;
@@ -5459,7 +5547,7 @@ function DisciplineScatter(props){
   }
   if(pts.length<3)return null;
   var thr=loadDisciplineLockThreshold();
-  var W=320,H=120,padL=24,padR=8,padT=10,padB=18;
+  var W=320,H=120,padL=34,padR=8,padT=10,padB=18;
   // CHANGED: Y-axis now plots R-multiple instead of raw $ / %. Each point's r = pnl / riskMax.
   var rs=pts.map(function(p){return p.r;});
   var maxR=Math.max.apply(null,rs.concat([0]));
@@ -5552,8 +5640,9 @@ function DisciplineScatter(props){
 // computation across the filtered range.
 function StreakTracker(props){
   var rows=(props.rows||[]).slice();
-  // Only days with at least one closed trade count.
-  rows=rows.filter(function(r){return (r.trades||[]).some(function(t){return t&&t.status!=="open";});});
+  // CHANGED: Count days that either have closed trades OR a non-zero stored pnl (covers legacy
+  // entries whose trades array was emptied but whose pnl snapshot is intact).
+  rows=rows.filter(function(r){return (r.trades||[]).some(function(t){return t&&t.status!=="open";})||((parseFloat(r.pnl)||0)!==0);});
   if(rows.length<2)return null;
   // Sort ascending by date (already sorted earlier, but be defensive).
   rows.sort(function(a,b){return new Date(a.date)-new Date(b.date);});
@@ -5927,7 +6016,15 @@ function PerformanceTab(props){
             var pfColor=pf==="∞"||pfn>1?"#22c55e":pfn<1?"#ef4444":"#94a3b8";
             return <StatSec title="Overview" colSpan={props.mobile?1:6}>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:6,padding:"4px 0"}}>
-                <StatTile label="Total P&L" value={HIDE_DOLLAR_PNL?(function(){var s=0;filtered.forEach(function(r){var sb=0;try{sb=getAccountBalanceAtDate(r.date);}catch(x){}s+=(sb>0?((parseFloat(r.pnl)||0)/sb*100):0);});return (s>=0?"+":"")+s.toFixed(2)+"%";})():((totalPnl>=0?"+":"-")+"$"+Math.abs(totalPnl).toFixed(2))} color={totalPnl>=0?"#22c55e":"#ef4444"}/>
+                <StatTile label="Total P&L" value={HIDE_DOLLAR_PNL?(function(){
+                  // CHANGED: For all-time / long ranges, % return is computed against total deposits
+                  // (cumulative invested capital), not summed daily %s — much more meaningful.
+                  if(range==="all"||range==="year"||range==="3month"){
+                    var dep=0;try{(loadTransfers()||[]).forEach(function(tf){var a=parseFloat(tf.amount)||0;if(a>0)dep+=a;});}catch(e){}
+                    if(dep>0)return (totalPnl>=0?"+":"")+(totalPnl/dep*100).toFixed(2)+"%";
+                  }
+                  var s=0;filtered.forEach(function(r){var sb=0;try{sb=getAccountBalanceAtDate(r.date);}catch(x){}s+=(sb>0?((parseFloat(r.pnl)||0)/sb*100):0);});return (s>=0?"+":"")+s.toFixed(2)+"%";
+                })():((totalPnl>=0?"+":"-")+"$"+Math.abs(totalPnl).toFixed(2))} color={totalPnl>=0?"#22c55e":"#ef4444"}/>
                 <StatTile label="Trades" value={allTrades.length} sub={tradingDays>0?(Math.ceil(avgTradesPerDay)+"/day · "+tradingDays+"d"):""}/>
                 <StatTile label="Profit Factor" value={pf} color={pfColor}/>
                 <StatTile label="Win Rate" value={winRate+"%"} color="#22c55e" sub={wins.length+" wins"}/>
@@ -5973,9 +6070,11 @@ function PerformanceTab(props){
                 <StatSec key={title} title={title} colSpan={props.mobile?1:6}>
                   {rowsTotal.length===0&&<div style={{fontSize:13,color:"#64748b",fontStyle:"italic",padding:"4px 0"}}>No data yet.</div>}
                   {rowsTotal.map(function(r,i){
-                    var valueLabel=HIDE_DOLLAR_PNL?((r.avgPct>=0?"+":"")+r.avgPct.toFixed(2)+"%"):((r.exp>=0?"+":"-")+"$"+Math.abs(r.exp).toFixed(0));
+                    // CHANGED: WR + trade count are primary; avg return is secondary.
+                    var valueLabel=r.wr+"% wr";
+                    var subLabel=" · "+r.n+"t · "+(HIDE_DOLLAR_PNL?((r.avgPct>=0?"+":"")+r.avgPct.toFixed(1)+"%"):((r.exp>=0?"+":"-")+"$"+Math.abs(r.exp).toFixed(0)));
                     return (
-                      <HBar key={r.k} label={r.k} value={r.totalContrib} max={maxTotal} valueLabel={valueLabel} sub={" · "+r.n+"t · "+r.wr+"% wr"} last={i===rowsTotal.length-1}/>
+                      <HBar key={r.k} label={r.k} value={r.totalContrib} max={maxTotal} valueLabel={valueLabel} sub={subLabel} last={i===rowsTotal.length-1}/>
                     );
                   })}
                 </StatSec>
