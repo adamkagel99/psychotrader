@@ -5788,11 +5788,13 @@ function PerformanceTab(props){
   var filtered=allRows.filter(function(r){return inRange(r.date);});
   filtered.sort(function(a,b){return new Date(a.date)-new Date(b.date);});
   var allTrades=[];filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status!=="open")allTrades.push(t);});});
-  // CHANGED: avg trades/day over days that actually had at least one closed trade (matches how the
-  // calendar counts a trading day, so it isn't diluted by no-trade days within the range).
-  var tradingDays=filtered.filter(function(r){return (r.trades||[]).some(function(t){return t.status!=="open";});}).length;
+  // CHANGED: trading day = row with closed trades OR a non-zero stored pnl (covers entries whose
+  // trades array was emptied by an older rollover bug but whose saved pnl is still correct).
+  var tradingDays=filtered.filter(function(r){return (r.trades||[]).some(function(t){return t.status!=="open";})||((parseFloat(r.pnl)||0)!==0);}).length;
   var avgTradesPerDay=tradingDays>0?(allTrades.length/tradingDays):0;
-  var totalPnl=allTrades.reduce(function(s,t){return s+(parseFloat(t.pnl)||0);},0);
+  // CHANGED: Total P&L = sum of each row's stored pnl (snapshot) so it's accurate even when an
+  // entry's trades array is empty/corrupted but its pnl was saved correctly.
+  var totalPnl=filtered.reduce(function(s,r){return s+(parseFloat(r.pnl)||0);},0);
   var wins=allTrades.filter(function(t){return parseFloat(t.pnl)>0;});
   var losses=allTrades.filter(function(t){return parseFloat(t.pnl)<0;});
   var breakevens=allTrades.filter(function(t){return Math.abs(parseFloat(t.pnl)||0)<0.01;});
