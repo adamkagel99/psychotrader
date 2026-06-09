@@ -7413,11 +7413,10 @@ function App(props){
     var pnlNum=parseFloat(t.pnl);
     var pctNum=parseFloat(t.pctPnl);
     var riskMaxPct=(settings&&settings.riskMaxPct!=null)?parseFloat(settings.riskMaxPct):33;
-    // Session size fraction (prefer trade-stamped, else look up).
-    var sf=null;
-    if(t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))sf=parseFloat(t.sizeFraction);
-    if(sf==null&&t.sessionId){try{var sess=getSessions(settings).find(function(s){return s.id===t.sessionId;});if(sess&&sess.sizeFraction!=null)sf=parseFloat(sess.sizeFraction);}catch(e){}}
-    if(sf==null)sf=1;
+    // Session size fraction — always recompute from the trade's session (don't trust a previously
+    // stamped sizeFraction, which may be a legacy compounded value baked in by older code).
+    var sf=1;
+    if(t.sessionId){try{var sess=getSessions(settings).find(function(s){return s.id===t.sessionId;});if(sess&&sess.sizeFraction!=null)sf=parseFloat(sess.sizeFraction)||1;}catch(e){}}
     // CHANGED: Half-size lock means "at most half of full size", not "half of whatever the
     // session already shrank you to". Without this floor, a session with sf=0.5 combined with the
     // lock's ×0.5 produced 0.25 — way more restrictive than the user expects from "half-size".
