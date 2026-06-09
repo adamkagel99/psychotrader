@@ -5792,6 +5792,13 @@ function PerformanceTab(props){
   // CHANGED: No-trade days are deliberate breakeven days (zero trades, net $0) — tracked alongside BE.
   var noTradeDays=filtered.filter(function(r){return r.noTradeDay&&(r.trades||[]).filter(function(t){return t.status!=="open";}).length===0;});
   var winRate=allTrades.length>0?Math.round((wins.length/allTrades.length)*100):0;
+  // CHANGED: Snapshot-based trade count — falls back to wins+losses per row when r.trades is empty
+  // (legacy corruption case). Prefers actual trades array length when present.
+  var totalTradesCount=filtered.reduce(function(s,r){
+    var n=(r.trades||[]).filter(function(t){return t&&t.status!=="open";}).length;
+    if(n===0)n=(parseInt(r.wins)||0)+(parseInt(r.losses)||0);
+    return s+n;
+  },0);
   var breakevenRate=allTrades.length>0?Math.round((breakevens.length/allTrades.length)*100):0;
   var totalWins=wins.reduce(function(s,t){return s+parseFloat(t.pnl);},0);
   var totalLosses=Math.abs(losses.reduce(function(s,t){return s+parseFloat(t.pnl);},0));
@@ -5927,7 +5934,7 @@ function PerformanceTab(props){
                   }
                   var s=0;filtered.forEach(function(r){var sb=0;try{sb=getAccountBalanceAtDate(r.date);}catch(x){}s+=(sb>0?((parseFloat(r.pnl)||0)/sb*100):0);});return (s>=0?"+":"")+s.toFixed(2)+"%";
                 })():((totalPnl>=0?"+":"-")+"$"+Math.abs(totalPnl).toFixed(2))} color={totalPnl>=0?"#22c55e":"#ef4444"}/>
-                <StatTile label="Trades" value={allTrades.length} sub={tradingDays>0?(Math.ceil(avgTradesPerDay)+"/day · "+tradingDays+"d"):""}/>
+                <StatTile label="Trades" value={totalTradesCount} sub={tradingDays>0?(Math.ceil(totalTradesCount/tradingDays)+"/day · "+tradingDays+"d"):""}/>
                 <StatTile label="Profit Factor" value={pf} color={pfColor}/>
                 <StatTile label="Win Rate" value={winRate+"%"} color="#22c55e" sub={wins.length+" wins"}/>
                 <StatTile label="Loss Rate" value={(100-winRate-breakevenRate)+"%"} color="#ef4444" sub={losses.length+" losses"}/>
