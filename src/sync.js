@@ -224,7 +224,8 @@ export async function pullFromCloud(userId) {
 }
 
 function tradeRowToApp(t) {
-  // Start from the catch-all raw blob, then overlay mapped columns.
+  // CHANGED: Start from `raw` (which now holds the extra fields we don't break out into columns)
+  // and overlay only the base mapped columns. This pairs with the new `appTradeToRow` above.
   return Object.assign({}, t.raw || {}, {
     id: t.client_id || t.id,
     status: t.status,
@@ -237,20 +238,17 @@ function tradeRowToApp(t) {
     entryTime: t.entry_time,
     exitTime: t.exit_time,
     setup: t.setup,
-    candlePattern: t.candle_pattern,
-    indicators: t.indicators,
     grade: t.grade,
-    emotion: t.emotion,
-    violations: t.violations,
     notes: t.notes,
-    screenshots: t.screenshots,
-    entries: t.entries,
-    exits: t.exits,
     sessionId: t.session_id,
   });
 }
 
 function appTradeToRow(t, day_date) {
+  // CHANGED: Push only the columns that are guaranteed to exist on the `trades` table. Anything
+  // else (entries, exits, indicators arrays, screenshots, violations, emotion, etc.) goes into the
+  // catch-all `raw` JSONB column. This survives table-schema drift — if the user's Supabase
+  // `trades` table doesn't have a particular column, the upsert no longer 400s the whole batch.
   return {
     client_id: String(t.id != null ? t.id : (day_date + "-" + Math.random().toString(36).slice(2))),
     day_date,
@@ -264,25 +262,18 @@ function appTradeToRow(t, day_date) {
     entry_time: t.entryTime || null,
     exit_time: t.exitTime || null,
     setup: t.setup || null,
-    candle_pattern: t.candlePattern || null,
-    indicators: t.indicators || null,
     grade: t.grade || null,
-    emotion: t.emotion || null,
-    violations: t.violations || null,
     notes: t.notes || null,
-    screenshots: t.screenshots || null,
-    entries: t.entries || null,
-    exits: t.exits || null,
     session_id: t.sessionId || null,
-    raw: stripKnownTradeFields(t),
+    raw: stripBaseTradeFields(t),
   };
 }
 
-function stripKnownTradeFields(t) {
+// Fields stored as their own columns above — everything else goes into `raw`.
+function stripBaseTradeFields(t) {
   const known = new Set([
     "id","status","pnl","pctPnl","positionSize","risk","instrument","direction",
-    "entryTime","exitTime","setup","candlePattern","indicators","grade","emotion",
-    "violations","notes","screenshots","entries","exits","sessionId",
+    "entryTime","exitTime","setup","grade","notes","sessionId",
   ]);
   const r = {};
   Object.keys(t || {}).forEach((k) => { if (!known.has(k)) r[k] = t[k]; });
