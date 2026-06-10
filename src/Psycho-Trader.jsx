@@ -5069,8 +5069,21 @@ function AICoach(props){
       line("Grade distribution",s.gradeDistribution);
   }
   function callAPI(prompt,onText){
+    // CHANGED: Use the user-provided Anthropic API key (stored in Settings → AI Coach). Without
+    // it the deployed web app can't reach the Anthropic API. The dangerous-direct-browser flag
+    // is required for direct browser-to-anthropic.com calls.
+    var apiKey="";try{apiKey=localStorage.getItem("tf-anthropic-key")||"";}catch(e){}
+    if(!apiKey){
+      return Promise.reject(new Error("No Anthropic API key set. Add yours in Settings → AI Coach."));
+    }
     return fetch("https://api.anthropic.com/v1/messages",{
-      method:"POST",headers:{"Content-Type":"application/json"},
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json",
+        "x-api-key":apiKey,
+        "anthropic-version":"2023-06-01",
+        "anthropic-dangerous-direct-browser-access":"true"
+      },
       body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,messages:[{role:"user",content:prompt}]})
     }).then(function(r){return r.json();}).then(function(data){
       if(data&&data.error){throw new Error(data.error.message||"API error");}
@@ -5086,7 +5099,7 @@ function AICoach(props){
       var clean=text.replace(/```json|```/g,"").trim();
       try{setResult(JSON.parse(clean));}catch(e){setResult({summary:clean,focus:""});}
       setLoading(false);
-    }).catch(function(){setError("Couldn't generate insights. Try again.");setLoading(false);});
+    }).catch(function(e){setError(e&&e.message?e.message:"Couldn't generate insights. Try again.");setLoading(false);});
   }
   function ask(){
     var q=question.trim();if(!q)return;
@@ -6332,7 +6345,7 @@ function HelpGuide(){
       <p style={p}>Your withdrawal allowance is <span style={em}>30% of the profit you've earned since your last withdrawal</span> — so cashing out is tied directly to growth. Deposits and withdrawals (with running totals) live in Settings → Balance.</p>
 
       <div style={h}>Your data &amp; sync</div>
-      <p style={p}>Data syncs to Supabase under your account so it follows you across devices. On sign-in to a new device, the app pulls your cloud history. Use <span style={em}>Backup / Restore</span> in Settings to export a JSON snapshot you can keep offline or migrate. Sign out from the bottom of Settings.</p>
+      <p style={p}>Data syncs to Supabase under your account so it follows you across devices. On sign-in to a new device, the app pulls your cloud history. Use <span style={em}>Import / Export</span> in Settings to export a JSON snapshot you can keep offline or migrate. Sign out from the bottom of Settings.</p>
 
       <p style={Object.assign({},p,{marginTop:14,color:"#64748b",fontSize:12})}>The philosophy: make the disciplined choice the easy one and the reckless choice harder. The friction is the feature.</p>
     </div>
@@ -7111,7 +7124,7 @@ function SettingsTab(props){
         </select>
       </SettingsSection>
 
-      <SettingsSection title="Backup / Restore">
+      <SettingsSection title="Import / Export">
         <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Export your data as a backup file, import a previous backup, or clear all data.</div>
         <input ref={backupRef} type="file" accept=".json,application/json" style={{display:"none"}} onChange={function(e){var f=e.target.files&&e.target.files[0];if(f)restoreFromFile(f);e.target.value="";}}/>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
@@ -7140,6 +7153,28 @@ function SettingsTab(props){
             </div>
           </div>
         </div>
+      )}
+      {props.onSignOut&&(
+        <SettingsSection title="AI Coach">
+          {/* CHANGED: API-key field. The deployed app calls Anthropic directly from the browser,
+             so it needs the user's own key. Stored in localStorage; the key is sent as
+             x-api-key plus the dangerous-direct-browser-access header. */}
+          {(function(){
+            var [k,setK]=useState(function(){try{return localStorage.getItem("tf-anthropic-key")||"";}catch(e){return "";}});
+            var [show,setShow]=useState(false);
+            var [saved,setSaved]=useState(false);
+            return (
+              <div>
+                <div style={{fontSize:12,color:"#94a3b8",lineHeight:1.55,marginBottom:10}}>Paste your Anthropic API key to enable the AI Coach in Performance. Stored only in your browser. Get a key at <span style={{color:"#a5b4fc"}}>console.anthropic.com</span>.</div>
+                <div style={{display:"flex",gap:6}}>
+                  <input type={show?"text":"password"} value={k} onChange={function(e){setK(e.target.value);setSaved(false);}} placeholder="sk-ant-..." style={{flex:1,padding:"10px 12px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:8,color:"#e2e8f0",fontSize:13,fontFamily:"inherit",fontVariantNumeric:"tabular-nums"}}/>
+                  <button onClick={function(){setShow(function(v){return !v;});}} style={{padding:"0 12px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:8,color:"#94a3b8",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>{show?"Hide":"Show"}</button>
+                  <button onClick={function(){try{if(k.trim())localStorage.setItem("tf-anthropic-key",k.trim());else localStorage.removeItem("tf-anthropic-key");setSaved(true);setTimeout(function(){setSaved(false);},1500);}catch(e){}}} style={{padding:"0 14px",background:saved?"#166534":"#4f46e5",border:"none",borderRadius:8,color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{saved?"✓ Saved":"Save"}</button>
+                </div>
+              </div>
+            );
+          })()}
+        </SettingsSection>
       )}
       {props.onSignOut&&(
         <div style={{marginTop:24,paddingTop:18,borderTop:"1px solid #1e293b",display:"flex",justifyContent:"center"}}>
