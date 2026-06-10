@@ -6032,7 +6032,9 @@ function PerformanceTab(props){
                 return {name:k,n:g.n,wr:Math.round((g.w/g.n)*100),avgPct:g.pcts.length>0?g.pcts.reduce(function(s,v){return s+v;},0)/g.pcts.length:0};
               });
               if(qualified.length===0)return null;
-              qualified.sort(function(a,b){return b.avgPct-a.avgPct;});
+              // CHANGED: Sort by win rate (descending). Best = highest wr, Worst = lowest wr.
+              // Tiebreak by avg % so two equal-wr buckets don't flip order randomly.
+              qualified.sort(function(a,b){return (b.wr-a.wr)||(b.avgPct-a.avgPct);});
               return {best:qualified[0],worst:qualified[qualified.length-1]};
             }
             var setupBW=bestWorst("setup",false);
@@ -6052,8 +6054,9 @@ function PerformanceTab(props){
                   <div style={{flex:1,minWidth:0,padding:"8px 10px",background:bg,border:"1px solid "+bd,borderRadius:6}}>
                     <div style={{fontSize:9,color:tagColor,letterSpacing:1,fontWeight:700,marginBottom:2}}>{tag}</div>
                     <div style={{fontSize:13,color:"#e2e8f0",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.name}</div>
-                    <div style={{fontSize:14,fontWeight:700,color:col,marginTop:3,fontVariantNumeric:"tabular-nums"}}>{(item.avgPct>=0?"+":"")+item.avgPct.toFixed(2)}%</div>
-                    <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>{item.n}t · {item.wr}% wr</div>
+                    {/* CHANGED: WR is the primary metric (largest number); avg return + count are secondary. */}
+                    <div style={{fontSize:18,fontWeight:800,color:col,marginTop:3,fontVariantNumeric:"tabular-nums",letterSpacing:-0.3}}>{item.wr}<span style={{fontSize:11,fontWeight:600,marginLeft:2}}>% wr</span></div>
+                    <div style={{fontSize:10,color:"#94a3b8",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{item.n}t · {(item.avgPct>=0?"+":"")+item.avgPct.toFixed(2)}%</div>
                   </div>
                 );
               };
@@ -6075,7 +6078,7 @@ function PerformanceTab(props){
             return (
               <StatSec title="Best / Worst Combo" colSpan={props.mobile?1:6}>
                 {rows.map(function(r,i){return <div key={r[0]}>{row(r[0],r[1],i===rows.length-1)}</div>;})}
-                <div style={{fontSize:10,color:"#64748b",fontStyle:"italic",marginTop:6,paddingTop:6,borderTop:"1px solid #1e293b"}}>Ranked by average %. Minimum 2 trades to qualify.</div>
+                <div style={{fontSize:10,color:"#64748b",fontStyle:"italic",marginTop:6,paddingTop:6,borderTop:"1px solid #1e293b"}}>Ranked by win rate. Minimum 2 trades to qualify.</div>
               </StatSec>
             );
           })()}
@@ -6152,22 +6155,26 @@ function PerformanceTab(props){
           <div style={{breakInside:"avoid",WebkitColumnBreakInside:"avoid",marginBottom:16}}><WhatsWorkingPanel trades={allTrades}/></div>
           {(function(){
             function summarize(filterFn){
-              var n=0,w=0,pnl=0,pcts=[];
+              var n=0,w=0,l=0,pnl=0,pcts=[];
               allTrades.forEach(function(t){
                 if(!filterFn(t))return;
-                n++;var p=parseFloat(t.pnl)||0;pnl+=p;if(p>0)w++;
+                n++;var p=parseFloat(t.pnl)||0;pnl+=p;
+                if(p>0)w++;else if(p<0)l++;
                 var pp=parseFloat(t.pctPnl);if(!isNaN(pp))pcts.push(pp);
               });
               var wr=n>0?Math.round((w/n)*100):0;
+              var lr=n>0?Math.round((l/n)*100):0;
               var avgPct=pcts.length>0?(pcts.reduce(function(s,v){return s+v;},0)/pcts.length):0;
               var expectancy=n>0?pnl/n:0;
-              return {n:n,wr:wr,avgPct:avgPct,expectancy:expectancy};
+              return {n:n,wr:wr,lr:lr,avgPct:avgPct,expectancy:expectancy};
             }
             var cats=[
               {label:"No setup tagged",stat:summarize(function(t){return !t.setup;})},
               {label:"No candle pattern",stat:summarize(function(t){return !t.candlePattern;})},
               {label:"No indicators",stat:summarize(function(t){return !(t.indicators&&t.indicators.length>0);})},
             ].filter(function(c){return c.stat.n>0;});
+            // CHANGED: Sort by loss rate descending — the worst-hit untagged category gets called out first.
+            cats.sort(function(a,b){return b.stat.lr-a.stat.lr;});
             if(cats.length===0)return null;
             return (
               <StatSec title="Untagged Trades" colSpan={props.mobile?1:6}>
@@ -6179,13 +6186,17 @@ function PerformanceTab(props){
                     <div key={c.label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:i<cats.length-1?"1px solid #1e293b":"none",gap:8}}>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{fontSize:13,color:"#e2e8f0",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.label}</div>
-                        <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>{g.n} trade{g.n===1?"":"s"} · <span style={{color:wrColor(g.wr)}}>{g.wr}% WR</span></div>
+                        <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>{g.n} trade{g.n===1?"":"s"} · {g.wr}% WR</div>
                       </div>
-                      <div style={{textAlign:"right",flexShrink:0}}><div style={{fontSize:13,fontWeight:700,color:(HIDE_DOLLAR_PNL?g.avgPct:g.expectancy)>=0?"#22c55e":"#ef4444",fontVariantNumeric:"tabular-nums"}}>{pnlStr}</div>{!HIDE_DOLLAR_PNL&&<div style={{fontSize:10,color:g.avgPct>=0?"#86efac":"#fca5a5",fontWeight:600,fontVariantNumeric:"tabular-nums",marginTop:1}}>{avgPctStr}</div>}</div>
+                      {/* CHANGED: LR is the primary big number; expectancy + avg drop to small secondary text. */}
+                      <div style={{textAlign:"right",flexShrink:0}}>
+                        <div style={{fontSize:18,fontWeight:800,color:g.lr>=50?"#ef4444":g.lr>=33?"#fbbf24":"#94a3b8",fontVariantNumeric:"tabular-nums",letterSpacing:-0.3,lineHeight:1}}>{g.lr}<span style={{fontSize:11,fontWeight:600,marginLeft:2}}>% LR</span></div>
+                        <div style={{fontSize:10,color:"#94a3b8",fontVariantNumeric:"tabular-nums",marginTop:3}}>{pnlStr}</div>
+                      </div>
                     </div>
                   );
                 })}
-                <div style={{fontSize:10,color:"#64748b",fontStyle:"italic",marginTop:6,paddingTop:6,borderTop:"1px solid #1e293b"}}>Trades missing each attribute. Tag them in the journal for richer breakdowns.</div>
+                <div style={{fontSize:10,color:"#64748b",fontStyle:"italic",marginTop:6,paddingTop:6,borderTop:"1px solid #1e293b"}}>Sorted by loss rate. Tag these trades in the journal for cleaner breakdowns.</div>
               </StatSec>
             );
           })()}
