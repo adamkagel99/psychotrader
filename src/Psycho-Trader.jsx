@@ -1925,6 +1925,49 @@ function FormSection(props){
   );
 }
 
+// CHANGED: Reusable polished dropdown — matches the Performance "Range" picker visual style.
+// Replaces native <select> across the app. variant="field" (rectangular, form input) or
+// "pill" (rounded chip). Options is an array of {v, l} (value, label).
+function Dropdown(props){
+  var [open,setOpen]=React.useState(false);
+  var value=props.value;
+  var options=props.options||[];
+  var variant=props.variant||"field";
+  var disabled=!!props.disabled;
+  var placeholder=props.placeholder||"Select…";
+  var current=options.find(function(o){return o.v===value;});
+  var hasValue=current!=null;
+  var rootStyle={position:"relative",display:variant==="pill"?"inline-block":"block",width:variant==="pill"?"auto":"100%"};
+  var triggerBase=variant==="pill"
+    ? {display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"7px 14px 7px 16px",background:hasValue?"linear-gradient(135deg,#4338ca,#4f46e5)":"#0a0a0f",border:"1px solid "+(hasValue?"#6366f1":"#334155"),borderRadius:999,color:hasValue?"#fff":"#94a3b8",fontSize:13,fontWeight:hasValue?700:500,cursor:disabled?"not-allowed":"pointer",fontFamily:"inherit",boxShadow:hasValue?"0 1px 4px #4f46e533":"none",opacity:disabled?0.5:1}
+    : {display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"10px 12px",width:"100%",background:"#0a0a0f",border:"1px solid "+(open?"#4338ca":"#334155"),borderRadius:8,color:hasValue?"#e2e8f0":"#64748b",fontSize:13,fontWeight:500,cursor:disabled?"not-allowed":"pointer",fontFamily:"inherit",textAlign:"left",opacity:disabled?0.5:1,transition:"border-color 0.12s"};
+  var trigStyle=Object.assign({},triggerBase,props.style||{});
+  return (
+    <div style={rootStyle}>
+      <button type="button" disabled={disabled} onClick={function(){if(!disabled)setOpen(function(o){return !o;});}} style={trigStyle}>
+        <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{current?current.l:placeholder}</span>
+        <svg width="9" height="9" viewBox="0 0 10 10" style={{flexShrink:0,transform:open?"rotate(180deg)":"none",transition:"transform 0.15s ease"}}><path d="M2 4l3 3 3-3" stroke={variant==="pill"&&hasValue?"#fff":(variant==="field"?"#94a3b8":"#94a3b8")} strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+      </button>
+      {open&&(
+        <>
+          <div onClick={function(){setOpen(false);}} style={{position:"fixed",inset:0,zIndex:30}}/>
+          <div style={{position:"absolute",top:"calc(100% + 6px)",left:0,minWidth:"100%",zIndex:31,background:"#0a0a0f",border:"1px solid #334155",borderRadius:10,padding:4,boxShadow:"0 8px 24px #00000080",maxHeight:280,overflowY:"auto"}}>
+            {options.map(function(o){
+              var on=o.v===value;
+              return (
+                <button key={String(o.v)} type="button" onClick={function(){if(props.onChange)props.onChange(o.v);setOpen(false);}} onMouseEnter={function(e){if(!on)e.currentTarget.style.background="#1e1b4b";}} onMouseLeave={function(e){if(!on)e.currentTarget.style.background="transparent";}} style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",padding:"8px 12px",background:on?"#1e1b4b":"transparent",border:"none",borderRadius:6,color:on?"#a5b4fc":"#cbd5e1",fontSize:13,fontWeight:on?700:500,cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"background 0.1s",whiteSpace:"nowrap"}}>
+                  <span>{o.l}</span>
+                  {on&&<span style={{color:"#a5b4fc",fontSize:11,marginLeft:8}}>✓</span>}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function TradeForm(props){
   var trade=props.trade,setTrade=props.setTrade,onSave=props.onSave,onCancel=props.onCancel,settings=props.settings;
   var opts=props.tradeOptions||defaultOptions();
@@ -2036,26 +2079,19 @@ function TradeForm(props){
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:rowGap,marginBottom:sectionMb}}>
               <div>
                 <label style={lblCompact}>Asset Class</label>
-                <select value={assetClassId} onChange={function(e){
-                  var newCls=e.target.value;
+                <Dropdown value={assetClassId} onChange={function(newCls){
                   setTrade(function(t){
                     var nc=getAssetClass(newCls);
                     var dir=t.direction;
                     if(dir&&nc.directions.indexOf(dir)<0)dir="";
                     return Object.assign({},t,{assetClass:newCls,direction:dir,instrument:""});
                   });
-                }} style={compactFld}>
-                  {enabledClasses.map(function(c){return <option key={c} value={c}>{ASSET_CLASSES[c].label}</option>;})}
-                </select>
+                }} options={enabledClasses.map(function(c){return {v:c,l:ASSET_CLASSES[c].label};})} style={compactFld}/>
               </div>
               <div>
                 <label style={lblCompact}>Instrument</label>
                 {classInstruments.length>0?(
-                  <select value={customInstrumentMode?"__custom__":(trade.instrument||"")} onChange={function(e){var v=e.target.value;if(v==="__custom__"){setCustomInstrumentMode(true);st(function(p){return Object.assign({},p,doRecalc(p.entries||[],p.exits||[],p.assetClass,"",p.direction),{instrument:""});});}else{setCustomInstrumentMode(false);st(function(p){return Object.assign({},p,doRecalc(p.entries||[],p.exits||[],p.assetClass,v,p.direction),{instrument:v});});}}} style={compactFld}>
-                    <option value="">Select...</option>
-                    {classInstruments.map(function(it){return <option key={it.symbol} value={it.symbol}>{it.symbol}{it.name?" — "+it.name:""}</option>;})}
-                    <option value="__custom__">+ Custom...</option>
-                  </select>
+                  <Dropdown value={customInstrumentMode?"__custom__":(trade.instrument||"")} onChange={function(v){if(v==="__custom__"){setCustomInstrumentMode(true);st(function(p){return Object.assign({},p,doRecalc(p.entries||[],p.exits||[],p.assetClass,"",p.direction),{instrument:""});});}else{setCustomInstrumentMode(false);st(function(p){return Object.assign({},p,doRecalc(p.entries||[],p.exits||[],p.assetClass,v,p.direction),{instrument:v});});}}} placeholder="Select..." options={[{v:"",l:"Select..."}].concat(classInstruments.map(function(it){return {v:it.symbol,l:it.symbol+(it.name?" — "+it.name:"")};})).concat([{v:"__custom__",l:"+ Custom..."}])} style={compactFld}/>
                 ):(
                   <input value={trade.instrument||""} onChange={function(e){var v=e.target.value.toUpperCase();st(function(p){return Object.assign({},p,doRecalc(p.entries||[],p.exits||[],p.assetClass,v,p.direction),{instrument:v});});}} placeholder="SPY" style={Object.assign({},compactFld,{colorScheme:"dark",color:"#e2e8f0"})}/>
                 )}
@@ -2082,10 +2118,7 @@ function TradeForm(props){
           {!isExistingTrade&&(
             <div style={{marginBottom:sectionMb}}>
               <label style={lblCompact}>Setup</label>
-              <select value={trade.setup||""} onChange={function(e){var v=e.target.value;upd("setup",v);setPretradeChecked({});}} style={compactFld}>
-                <option value="">Select setup...</option>
-                {opts.setup.map(function(s){return <option key={s} value={s}>{s}</option>;})}
-              </select>
+              <Dropdown value={trade.setup||""} onChange={function(v){upd("setup",v);setPretradeChecked({});}} placeholder="Select setup..." options={[{v:"",l:"Select setup..."}].concat(opts.setup.map(function(s){return {v:s,l:s};}))} style={compactFld}/>
             </div>
           )}
           {/* CHANGED: Pre-trade checklist for the current asset class. Form below is locked until complete. */}
@@ -2160,16 +2193,16 @@ function TradeForm(props){
             if(formSections.timeframe!==false)cols.push("1fr");
             return (
               <div style={{display:"grid",gridTemplateColumns:cols.join(" "),gap:rowGap,marginBottom:sectionMb}}>
-                <div><label style={lblCompact}>Direction</label><select value={trade.direction} onChange={function(e){var v=e.target.value;st(function(p){return Object.assign({},p,doRecalc(p.entries||[],p.exits||[],p.assetClass,p.instrument,v),{direction:v});});}} style={compactFld}><option value="">Select</option>{assetClass.directions.map(function(d){return <option key={d} value={d}>{d}</option>;})}</select></div>
-                {showSetupHere&&<div><label style={lblCompact}>Setup</label><select value={trade.setup} onChange={function(e){upd("setup",e.target.value);}} style={compactFld}><option value="">Select</option>{opts.setup.map(function(s){return <option key={s} value={s}>{s}</option>;})}</select></div>}
-                {formSections.timeframe!==false&&<div><label style={lblCompact}>Timeframe</label><select value={trade.timeframe||""} onChange={function(e){upd("timeframe",e.target.value);}} style={compactFld}><option value="">Select</option>{opts.timeframe.map(function(t){return <option key={t} value={t}>{t}</option>;})}</select></div>}
+                <div><label style={lblCompact}>Direction</label><Dropdown value={trade.direction} onChange={function(v){st(function(p){return Object.assign({},p,doRecalc(p.entries||[],p.exits||[],p.assetClass,p.instrument,v),{direction:v});});}} placeholder="Select" options={[{v:"",l:"Select"}].concat(assetClass.directions.map(function(d){return {v:d,l:d};}))} style={compactFld}/></div>
+                {showSetupHere&&<div><label style={lblCompact}>Setup</label><Dropdown value={trade.setup} onChange={function(v){upd("setup",v);}} placeholder="Select" options={[{v:"",l:"Select"}].concat(opts.setup.map(function(s){return {v:s,l:s};}))} style={compactFld}/></div>}
+                {formSections.timeframe!==false&&<div><label style={lblCompact}>Timeframe</label><Dropdown value={trade.timeframe||""} onChange={function(v){upd("timeframe",v);}} placeholder="Select" options={[{v:"",l:"Select"}].concat(opts.timeframe.map(function(t){return {v:t,l:t};}))} style={compactFld}/></div>}
               </div>
             );
           })()}
           {formSections.candlePattern!==false&&(
           <div style={{marginBottom:sectionMb}}>
             <label style={lblCompact}>Candle Pattern</label>
-            <select value={trade.candlePattern||""} onChange={function(e){upd("candlePattern",e.target.value);}} style={compactFld}><option value="">Select...</option>{opts.candlePattern.map(function(p){return <option key={p} value={p}>{p}</option>;})}</select>
+            <Dropdown value={trade.candlePattern||""} onChange={function(v){upd("candlePattern",v);}} placeholder="Select..." options={[{v:"",l:"Select..."}].concat(opts.candlePattern.map(function(p){return {v:p,l:p};}))} style={compactFld}/>
           </div>
           )}
           {formSections.indicators!==false&&(
@@ -2738,17 +2771,7 @@ function ScalingTargetCard(props){
     <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid "+(reached?"#166534":"#1e293b"),borderRadius:10}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,gap:8,flexWrap:"wrap"}}>
         <div style={{fontSize:10,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Account Balance</div>
-        <select value={scalingTarget} onChange={function(e){setScalingTarget(e.target.value);}} style={Object.assign({},fld,{width:"auto",padding:"4px 8px",fontSize:12})}>
-          <option value="auto">Scale to next $1k</option>
-          <option value="next5">Next $5k milestone</option>
-          <option value="next10">Next $10k milestone</option>
-          <option value="5000">$5,000</option>
-          <option value="10000">$10,000</option>
-          <option value="25000">$25,000</option>
-          <option value="50000">$50,000</option>
-          <option value="100000">$100,000</option>
-          <option value="250000">$250,000</option>
-        </select>
+        <Dropdown value={scalingTarget} onChange={function(v){setScalingTarget(v);}} options={[{v:"auto",l:"Scale to next $1k"},{v:"next5",l:"Next $5k milestone"},{v:"next10",l:"Next $10k milestone"},{v:"5000",l:"$5,000"},{v:"10000",l:"$10,000"},{v:"25000",l:"$25,000"},{v:"50000",l:"$50,000"},{v:"100000",l:"$100,000"},{v:"250000",l:"$250,000"}]} style={{padding:"5px 10px",fontSize:12}}/>
       </div>
       <div style={{display:"flex",alignItems:"baseline",gap:10,marginBottom:10,flexWrap:"wrap"}}>
         <div style={{fontSize:26,fontWeight:800,color:reached?"#22c55e":"#818cf8",letterSpacing:-0.5,fontVariantNumeric:"tabular-nums"}}>{fmtPnLUSD(balance)}</div>
@@ -4715,12 +4738,8 @@ function GoalsTab(props){
           <div style={{display:"grid",gridTemplateColumns:"1fr",gap:10}}>
             <div><label style={lbl}>Title</label><input value={customDraft.title} onChange={function(e){var v=e.target.value;setCustomDraft(function(d){return Object.assign({},d,{title:v});});}} style={fld}/></div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-              <div><label style={lbl}>Metric</label><select value={customDraft.metric} onChange={function(e){var v=e.target.value;setCustomDraft(function(d){return Object.assign({},d,{metric:v,prefix:defaultPrefixForMetric(v),suffix:defaultSuffixForMetric(v)});});}} style={fld}>
-                <option value="pnl">Total P&L</option><option value="winrate">Win Rate (%)</option><option value="discipline">Discipline Score</option><option value="trades">Trades Taken</option><option value="balance">Account Balance</option><option value="custom">Custom...</option>
-              </select></div>
-              <div><label style={lbl}>Period</label><select value={customDraft.period} onChange={function(e){var v=e.target.value;setCustomDraft(function(d){return Object.assign({},d,{period:v});});}} style={fld}>
-                <option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="all">All Time</option>
-              </select></div>
+              <div><label style={lbl}>Metric</label><Dropdown value={customDraft.metric} onChange={function(v){setCustomDraft(function(d){return Object.assign({},d,{metric:v,prefix:defaultPrefixForMetric(v),suffix:defaultSuffixForMetric(v)});});}} options={[{v:"pnl",l:"Total P&L"},{v:"winrate",l:"Win Rate (%)"},{v:"discipline",l:"Discipline Score"},{v:"trades",l:"Trades Taken"},{v:"balance",l:"Account Balance"},{v:"custom",l:"Custom..."}]}/></div>
+              <div><label style={lbl}>Period</label><Dropdown value={customDraft.period} onChange={function(v){setCustomDraft(function(d){return Object.assign({},d,{period:v});});}} options={[{v:"daily",l:"Daily"},{v:"weekly",l:"Weekly"},{v:"monthly",l:"Monthly"},{v:"all",l:"All Time"}]}/></div>
             </div>
             {customDraft.metric==="custom"&&<div><label style={lbl}>Metric Name</label><input value={customDraft.customName||""} onChange={function(e){var v=e.target.value;setCustomDraft(function(d){return Object.assign({},d,{customName:v});});}} placeholder="e.g. R-multiple" style={fld}/></div>}
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
@@ -4776,24 +4795,11 @@ function GoalsTab(props){
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
               <div>
                 <label style={lbl}>Metric</label>
-                {/* CHANGED: Custom option in metric dropdown */}
-                <select value={newGoal.metric} onChange={function(e){var m=e.target.value;setNewGoal(function(g){return Object.assign({},g,{metric:m,prefix:defaultPrefixForMetric(m),suffix:defaultSuffixForMetric(m)});});}} style={fld}>
-                  <option value="pnl">Total P&L</option>
-                  <option value="winrate">Win Rate (%)</option>
-                  <option value="discipline">Discipline Score</option>
-                  <option value="trades">Trades Taken</option>
-                  <option value="balance">Account Balance</option>
-                  <option value="custom">Custom...</option>
-                </select>
+                <Dropdown value={newGoal.metric} onChange={function(m){setNewGoal(function(g){return Object.assign({},g,{metric:m,prefix:defaultPrefixForMetric(m),suffix:defaultSuffixForMetric(m)});});}} options={[{v:"pnl",l:"Total P&L"},{v:"winrate",l:"Win Rate (%)"},{v:"discipline",l:"Discipline Score"},{v:"trades",l:"Trades Taken"},{v:"balance",l:"Account Balance"},{v:"custom",l:"Custom..."}]}/>
               </div>
               <div>
                 <label style={lbl}>Period</label>
-                <select value={newGoal.period} onChange={function(e){setNewGoal(function(g){return Object.assign({},g,{period:e.target.value});});}} style={fld}>
-                  <option value="daily">Daily</option>
-                  <option value="weekly">Weekly</option>
-                  <option value="monthly">Monthly</option>
-                  <option value="all">All Time</option>
-                </select>
+                <Dropdown value={newGoal.period} onChange={function(v){setNewGoal(function(g){return Object.assign({},g,{period:v});});}} options={[{v:"daily",l:"Daily"},{v:"weekly",l:"Weekly"},{v:"monthly",l:"Monthly"},{v:"all",l:"All Time"}]}/>
               </div>
             </div>
             {/* CHANGED: Custom metric input fields */}
@@ -4824,14 +4830,9 @@ function GoalsTab(props){
                 <div style={{padding:"8px 10px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:6,marginTop:4}}>
                   <div style={{fontSize:10,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700,marginBottom:6}}>Filter by Trade Field (optional)</div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                    <select value={newGoal.filterField||""} onChange={function(e){setNewGoal(function(g){return Object.assign({},g,{filterField:e.target.value,filterValue:""});});}} style={fld}>
-                      {fieldOpts.map(function(f){return <option key={f.key} value={f.key}>{f.label}</option>;})}
-                    </select>
+                    <Dropdown value={newGoal.filterField||""} onChange={function(v){setNewGoal(function(g){return Object.assign({},g,{filterField:v,filterValue:""});});}} options={fieldOpts.map(function(f){return {v:f.key,l:f.label};})}/>
                     {newGoal.filterField&&(
-                      <select value={newGoal.filterValue||""} onChange={function(e){setNewGoal(function(g){return Object.assign({},g,{filterValue:e.target.value});});}} style={fld}>
-                        <option value="">Select value...</option>
-                        {selectedField.values.map(function(v){return <option key={v} value={v}>{v}</option>;})}
-                      </select>
+                      <Dropdown value={newGoal.filterValue||""} onChange={function(v){setNewGoal(function(g){return Object.assign({},g,{filterValue:v});});}} placeholder="Select value..." options={[{v:"",l:"Select value..."}].concat(selectedField.values.map(function(v){return {v:v,l:v};}))}/>
                     )}
                   </div>
                   {newGoal.filterField&&newGoal.filterValue&&(
@@ -5719,6 +5720,7 @@ function PerformanceTab(props){
   var [rows,setRows]=useState([]);
   // CHANGED: Persist the time-range selection across tab switches (matches scalingTarget below).
   var [range,setRange]=useState(function(){try{return localStorage.getItem("tf-stats-range")||"all";}catch(e){return "all";}});
+  var [rangeMenuOpen,setRangeMenuOpen]=useState(false);
   // CHANGED: Custom date range — two ISO date strings persisted across reloads. Defaults to last 14 days.
   var [customStart,setCustomStart]=useState(function(){try{return localStorage.getItem("tf-stats-custom-start")||"";}catch(e){return "";}});
   var [customEnd,setCustomEnd]=useState(function(){try{return localStorage.getItem("tf-stats-custom-end")||"";}catch(e){return "";}});
@@ -5858,23 +5860,48 @@ function PerformanceTab(props){
           so the layout is symmetric in both rest and stuck states. */}
       <div style={{position:"sticky",top:70,zIndex:20,marginBottom:14,marginLeft:-12,marginRight:-12,paddingLeft:12,paddingRight:12,paddingTop:14,paddingBottom:10,background:"#0a0a0f",borderBottom:"1px solid #1e293b"}}>
         <div style={{fontSize:18,fontWeight:700,color:"#e2e8f0",marginBottom:8,lineHeight:1.2}}>Performance</div>
-        <div style={{display:"flex",gap:6,overflowX:"auto",WebkitOverflowScrolling:"touch",paddingBottom:2,marginLeft:-2,marginRight:-2,paddingLeft:2,paddingRight:2}}>
-          {[
-            {v:"thisweek",l:props.mobile?"This Wk":"This Week"},
-            {v:"week",l:props.mobile?"Last Wk":"Last Week"},
-            {v:"month",l:"30d"},
-            {v:"mtd",l:"MTD"},
-            {v:"3month",l:"3mo"},
-            {v:"year",l:"1yr"},
-            {v:"ytd",l:"YTD"},
-            {v:"all",l:props.mobile?"All":"All Time"},
-            {v:"custom",l:"Custom"}
-          ].map(function(opt){
-            var on=range===opt.v;
+        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+          {/* CHANGED: Custom dropdown replaces the native <select> for a polished, on-brand look. */}
+          {(function(){
+            var presets=[
+              {v:"thisweek",l:"This Week"},
+              {v:"week",l:"Last Week"},
+              {v:"month",l:"30 days"},
+              {v:"mtd",l:"Month to Date"},
+              {v:"3month",l:"3 Months"},
+              {v:"year",l:"1 Year"},
+              {v:"ytd",l:"Year to Date"},
+              {v:"all",l:"All Time"}
+            ];
+            var current=presets.find(function(p){return p.v===range;});
+            var active=range!=="custom";
             return (
-              <button key={opt.v} onClick={function(){var prevY=window.scrollY;setRange(opt.v);try{localStorage.setItem("tf-stats-range",opt.v);}catch(e){}requestAnimationFrame(function(){window.scrollTo(0,prevY);});}} style={{padding:props.mobile?"5px 8px":"6px 12px",background:on?"#4338ca":"#0a0a0f",border:"1px solid "+(on?"#6366f1":"#334155"),borderRadius:999,color:on?"#fff":"#94a3b8",fontSize:props.mobile?11:12,fontWeight:on?700:500,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>{opt.l}</button>
+              <div style={{position:"relative"}}>
+                <button onClick={function(){setRangeMenuOpen(function(o){return !o;});}} style={{display:"flex",alignItems:"center",gap:8,padding:props.mobile?"6px 12px 6px 14px":"7px 14px 7px 16px",background:active?"linear-gradient(135deg,#4338ca,#4f46e5)":"#0a0a0f",border:"1px solid "+(active?"#6366f1":"#334155"),borderRadius:999,color:active?"#fff":"#94a3b8",fontSize:props.mobile?12:13,fontWeight:active?700:500,cursor:"pointer",fontFamily:"inherit",boxShadow:active?"0 1px 4px #4f46e533":"none"}}>
+                  <span>{active&&current?current.l:"Range"}</span>
+                  <svg width="9" height="9" viewBox="0 0 10 10" style={{transform:rangeMenuOpen?"rotate(180deg)":"none",transition:"transform 0.15s ease"}}><path d="M2 4l3 3 3-3" stroke={active?"#fff":"#94a3b8"} strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </button>
+                {rangeMenuOpen&&(
+                  <>
+                    {/* Click-outside catcher */}
+                    <div onClick={function(){setRangeMenuOpen(false);}} style={{position:"fixed",inset:0,zIndex:30}}/>
+                    <div style={{position:"absolute",top:"calc(100% + 6px)",left:0,zIndex:31,background:"#0a0a0f",border:"1px solid #334155",borderRadius:10,padding:4,minWidth:160,boxShadow:"0 8px 24px #00000080"}}>
+                      {presets.map(function(p){
+                        var on=range===p.v;
+                        return (
+                          <button key={p.v} onClick={function(){var prevY=window.scrollY;setRange(p.v);try{localStorage.setItem("tf-stats-range",p.v);}catch(e){}setRangeMenuOpen(false);requestAnimationFrame(function(){window.scrollTo(0,prevY);});}} onMouseEnter={function(e){if(!on)e.currentTarget.style.background="#1e1b4b";}} onMouseLeave={function(e){if(!on)e.currentTarget.style.background="transparent";}} style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",padding:"8px 12px",background:on?"#1e1b4b":"transparent",border:"none",borderRadius:6,color:on?"#a5b4fc":"#cbd5e1",fontSize:13,fontWeight:on?700:500,cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"background 0.1s"}}>
+                            <span>{p.l}</span>
+                            {on&&<span style={{color:"#a5b4fc",fontSize:11}}>✓</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
             );
-          })}
+          })()}
+          <button onClick={function(){var prevY=window.scrollY;setRange("custom");try{localStorage.setItem("tf-stats-range","custom");}catch(e){}setRangeMenuOpen(false);requestAnimationFrame(function(){window.scrollTo(0,prevY);});}} style={{padding:props.mobile?"6px 14px":"7px 16px",background:range==="custom"?"linear-gradient(135deg,#4338ca,#4f46e5)":"#0a0a0f",border:"1px solid "+(range==="custom"?"#6366f1":"#334155"),borderRadius:999,color:range==="custom"?"#fff":"#94a3b8",fontSize:props.mobile?12:13,fontWeight:range==="custom"?700:500,cursor:"pointer",fontFamily:"inherit",boxShadow:range==="custom"?"0 1px 4px #4f46e533":"none"}}>Custom</button>
         </div>
         {/* CHANGED: Date pickers reveal when Custom is selected. */}
         {range==="custom"&&(
