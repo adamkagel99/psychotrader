@@ -6074,7 +6074,7 @@ function PerformanceTab(props){
             if(cpBW)rows.push(["Candle Pattern",cpBW]);
             if(indBW)rows.push(["Indicator",indBW]);
             return (
-              <StatSec title="Best / Worst Combo" colSpan={props.mobile?1:6}>
+              <StatSec title="Best / Worst" colSpan={props.mobile?1:6}>
                 {/* CHANGED: Single BEST / WORST column header at the top of the section, aligned with the card columns below. */}
                 <div style={{display:"grid",gridTemplateColumns:"90px 1fr",gap:8,alignItems:"center",paddingBottom:6,borderBottom:"1px solid #1e293b",marginBottom:2}}>
                   <div/>
