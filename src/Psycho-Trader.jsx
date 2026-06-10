@@ -1575,6 +1575,10 @@ function DashboardCalendar(props){
       {/* CHANGED: Week strip hidden when full calendar is expanded (it's redundant). */}
       {!open&&(
         <div style={{padding:"0 14px 14px"}}>
+          {/* CHANGED: Day-of-week header row above the strip, matching the expanded calendar. */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:5,marginBottom:4}}>
+            {dayLabels.map(function(dl,i){return <div key={i} style={{textAlign:"center",fontSize:10,color:"#64748b",letterSpacing:0.5,fontWeight:600,textTransform:"uppercase"}}>{dl}</div>;})}
+          </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:5}}>
             {weekDays.map(function(d,i){
               var pnl=d.pnl;
@@ -1582,17 +1586,14 @@ function DashboardCalendar(props){
               var bg="#0a0a0f",bd="#1e293b",col="#94a3b8";
               if(d.holiday){bg="#2a1d0a";bd="#713f12";col="#fbbf24";}
               if(pnl!=null&&pnl!==0){if(pnl>0){bg="#14532d";bd="#166534";col="#86efac";}else{bg="#7f1d1d";bd="#991b1b";col="#fca5a5";}}
-              // CHANGED: No-Trade Day marker — amber dashed cell matching the full calendar.
               var ntStyle="solid";
               if(d.noTradeDay){bg="#1c1408";bd="#a16207";col="#fcd34d";ntStyle="dashed";}
               if(d.isToday){bd="#818cf8";ntStyle="solid";}
               return (
-                <button key={i} onClick={function(){if(props.onSelectDate)props.onSelectDate(d.ds);}} style={{padding:"9px 0 6px",background:bg,border:(d.noTradeDay?"1.5px ":"1px ")+ntStyle+" "+bd,borderRadius:6,cursor:"pointer",fontFamily:"inherit",display:"flex",flexDirection:"column",alignItems:"center",gap:2,minHeight:54,position:"relative"}} title={d.holiday||(d.noTradeDay?"No-trade day (deliberately sat out)":(pnl!=null?(HIDE_DOLLAR_PNL?"":(pnl>=0?"+$":"-$")+Math.abs(pnl).toFixed(2)):""))}>
-                  {/* CHANGED: Discipline-lock D badge in week strip cells too. */}
+                <button key={i} onClick={function(){if(props.onSelectDate)props.onSelectDate(d.ds);}} style={{padding:"9px 0 6px",background:bg,border:(d.noTradeDay?"1.5px ":"1px ")+ntStyle+" "+bd,borderRadius:6,cursor:"pointer",fontFamily:"inherit",display:"flex",flexDirection:"column",alignItems:"center",gap:2,minHeight:50,position:"relative"}} title={d.holiday||(d.noTradeDay?"No-trade day (deliberately sat out)":(pnl!=null?(HIDE_DOLLAR_PNL?"":(pnl>=0?"+$":"-$")+Math.abs(pnl).toFixed(2)):""))}>
                   {d.wasLocked&&<div style={{position:"absolute",top:2,left:3,fontSize:8,fontWeight:800,color:"#fff",background:"#ef4444",borderRadius:3,padding:"0 3px",lineHeight:"11px",letterSpacing:0.3}} title="Discipline lock triggered">D</div>}
-                  <span style={{fontSize:10,color:"#64748b",letterSpacing:0.5,fontWeight:600}}>{dayLabels[i]}</span>
+                  {/* CHANGED: Inner letter removed — the column header above takes its place. */}
                   <span style={{fontSize:17,color:col,fontWeight:d.isToday?700:600,lineHeight:1}}>{d.date.getDate()}</span>
-                  {/* CHANGED: Render the P&L number when pnl is non-zero — even if tradeCount didn't sync (e.g. journal saved but trades array temporarily out of band). */}
                   {d.noTradeDay?(
                     <span style={{fontSize:10,color:"#fbbf24",fontWeight:800,letterSpacing:0.3,lineHeight:1,marginTop:2}}>⊘ NT</span>
                   ):pnl!=null&&(d.tradeCount>0||pnl!==0)?(
@@ -4858,14 +4859,7 @@ function GoalsTab(props){
             {/* CHANGED: Section selector — file the goal under an existing section, the default Custom bucket, or a new named section. */}
             <div style={{marginTop:8}}>
               <label style={lbl}>Section</label>
-              <select value={newGoal.section||"custom"} onChange={function(e){var v=e.target.value;setNewGoal(function(g){return Object.assign({},g,{section:v,sectionName:v==="newCustom"?"":g.sectionName});});}} style={fld}>
-                <option value="custom">Custom Goals (default)</option>
-                <option value="performance">Performance</option>
-                <option value="pnl">P&amp;L</option>
-                <option value="account">Account</option>
-                {Array.from(new Set((goals.custom||[]).filter(function(g){return g.section==="namedCustom"&&g.sectionName;}).map(function(g){return g.sectionName;}))).map(function(name){return <option key={"sec-"+name} value={"existing:"+name}>{name}</option>;})}
-                <option value="newCustom">＋ Create new section…</option>
-              </select>
+              <Dropdown value={newGoal.section||"custom"} onChange={function(v){setNewGoal(function(g){return Object.assign({},g,{section:v,sectionName:v==="newCustom"?"":g.sectionName});});}} options={[{v:"custom",l:"Custom Goals (default)"},{v:"performance",l:"Performance"},{v:"pnl",l:"P&L"},{v:"account",l:"Account"}].concat(Array.from(new Set((goals.custom||[]).filter(function(g){return g.section==="namedCustom"&&g.sectionName;}).map(function(g){return g.sectionName;}))).map(function(name){return {v:"existing:"+name,l:name};})).concat([{v:"newCustom",l:"＋ Create new section…"}])}/>
               {newGoal.section==="newCustom"&&(
                 <input value={newGoal.sectionName||""} onChange={function(e){var v=e.target.value;setNewGoal(function(g){return Object.assign({},g,{sectionName:v});});}} placeholder="New section name" style={Object.assign({},fld,{marginTop:6})}/>
               )}
@@ -5720,7 +5714,6 @@ function PerformanceTab(props){
   var [rows,setRows]=useState([]);
   // CHANGED: Persist the time-range selection across tab switches (matches scalingTarget below).
   var [range,setRange]=useState(function(){try{return localStorage.getItem("tf-stats-range")||"all";}catch(e){return "all";}});
-  var [rangeMenuOpen,setRangeMenuOpen]=useState(false);
   // CHANGED: Custom date range — two ISO date strings persisted across reloads. Defaults to last 14 days.
   var [customStart,setCustomStart]=useState(function(){try{return localStorage.getItem("tf-stats-custom-start")||"";}catch(e){return "";}});
   var [customEnd,setCustomEnd]=useState(function(){try{return localStorage.getItem("tf-stats-custom-end")||"";}catch(e){return "";}});
@@ -5861,47 +5854,18 @@ function PerformanceTab(props){
       <div style={{position:"sticky",top:70,zIndex:20,marginBottom:14,marginLeft:-12,marginRight:-12,paddingLeft:12,paddingRight:12,paddingTop:14,paddingBottom:10,background:"#0a0a0f",borderBottom:"1px solid #1e293b"}}>
         <div style={{fontSize:18,fontWeight:700,color:"#e2e8f0",marginBottom:8,lineHeight:1.2}}>Performance</div>
         <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-          {/* CHANGED: Custom dropdown replaces the native <select> for a polished, on-brand look. */}
-          {(function(){
-            var presets=[
-              {v:"thisweek",l:"This Week"},
-              {v:"week",l:"Last Week"},
-              {v:"month",l:"30 days"},
-              {v:"mtd",l:"Month to Date"},
-              {v:"3month",l:"3 Months"},
-              {v:"year",l:"1 Year"},
-              {v:"ytd",l:"Year to Date"},
-              {v:"all",l:"All Time"}
-            ];
-            var current=presets.find(function(p){return p.v===range;});
-            var active=range!=="custom";
-            return (
-              <div style={{position:"relative"}}>
-                <button onClick={function(){setRangeMenuOpen(function(o){return !o;});}} style={{display:"flex",alignItems:"center",gap:8,padding:props.mobile?"6px 12px 6px 14px":"7px 14px 7px 16px",background:active?"linear-gradient(135deg,#4338ca,#4f46e5)":"#0a0a0f",border:"1px solid "+(active?"#6366f1":"#334155"),borderRadius:999,color:active?"#fff":"#94a3b8",fontSize:props.mobile?12:13,fontWeight:active?700:500,cursor:"pointer",fontFamily:"inherit",boxShadow:active?"0 1px 4px #4f46e533":"none"}}>
-                  <span>{active&&current?current.l:"Range"}</span>
-                  <svg width="9" height="9" viewBox="0 0 10 10" style={{transform:rangeMenuOpen?"rotate(180deg)":"none",transition:"transform 0.15s ease"}}><path d="M2 4l3 3 3-3" stroke={active?"#fff":"#94a3b8"} strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                </button>
-                {rangeMenuOpen&&(
-                  <>
-                    {/* Click-outside catcher */}
-                    <div onClick={function(){setRangeMenuOpen(false);}} style={{position:"fixed",inset:0,zIndex:30}}/>
-                    <div style={{position:"absolute",top:"calc(100% + 6px)",left:0,zIndex:31,background:"#0a0a0f",border:"1px solid #334155",borderRadius:10,padding:4,minWidth:160,boxShadow:"0 8px 24px #00000080"}}>
-                      {presets.map(function(p){
-                        var on=range===p.v;
-                        return (
-                          <button key={p.v} onClick={function(){var prevY=window.scrollY;setRange(p.v);try{localStorage.setItem("tf-stats-range",p.v);}catch(e){}setRangeMenuOpen(false);requestAnimationFrame(function(){window.scrollTo(0,prevY);});}} onMouseEnter={function(e){if(!on)e.currentTarget.style.background="#1e1b4b";}} onMouseLeave={function(e){if(!on)e.currentTarget.style.background="transparent";}} style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",padding:"8px 12px",background:on?"#1e1b4b":"transparent",border:"none",borderRadius:6,color:on?"#a5b4fc":"#cbd5e1",fontSize:13,fontWeight:on?700:500,cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"background 0.1s"}}>
-                            <span>{p.l}</span>
-                            {on&&<span style={{color:"#a5b4fc",fontSize:11}}>✓</span>}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </>
-                )}
-              </div>
-            );
-          })()}
-          <button onClick={function(){var prevY=window.scrollY;setRange("custom");try{localStorage.setItem("tf-stats-range","custom");}catch(e){}setRangeMenuOpen(false);requestAnimationFrame(function(){window.scrollTo(0,prevY);});}} style={{padding:props.mobile?"6px 14px":"7px 16px",background:range==="custom"?"linear-gradient(135deg,#4338ca,#4f46e5)":"#0a0a0f",border:"1px solid "+(range==="custom"?"#6366f1":"#334155"),borderRadius:999,color:range==="custom"?"#fff":"#94a3b8",fontSize:props.mobile?12:13,fontWeight:range==="custom"?700:500,cursor:"pointer",fontFamily:"inherit",boxShadow:range==="custom"?"0 1px 4px #4f46e533":"none"}}>Custom</button>
+          {/* CHANGED: Uses the shared Dropdown component (pill variant) for visual consistency app-wide. */}
+          <Dropdown variant="pill" value={range==="custom"?null:range} placeholder="Range" options={[
+            {v:"thisweek",l:"This Week"},
+            {v:"week",l:"Last Week"},
+            {v:"month",l:"30 days"},
+            {v:"mtd",l:"Month to Date"},
+            {v:"3month",l:"3 Months"},
+            {v:"year",l:"1 Year"},
+            {v:"ytd",l:"Year to Date"},
+            {v:"all",l:"All Time"}
+          ]} onChange={function(v){var prevY=window.scrollY;setRange(v);try{localStorage.setItem("tf-stats-range",v);}catch(e){}requestAnimationFrame(function(){window.scrollTo(0,prevY);});}}/>
+          <button onClick={function(){var prevY=window.scrollY;setRange("custom");try{localStorage.setItem("tf-stats-range","custom");}catch(e){}requestAnimationFrame(function(){window.scrollTo(0,prevY);});}} style={{padding:props.mobile?"6px 14px":"7px 16px",background:range==="custom"?"linear-gradient(135deg,#4338ca,#4f46e5)":"#0a0a0f",border:"1px solid "+(range==="custom"?"#6366f1":"#334155"),borderRadius:999,color:range==="custom"?"#fff":"#94a3b8",fontSize:props.mobile?12:13,fontWeight:range==="custom"?700:500,cursor:"pointer",fontFamily:"inherit",boxShadow:range==="custom"?"0 1px 4px #4f46e533":"none"}}>Custom</button>
         </div>
         {/* CHANGED: Date pickers reveal when Custom is selected. */}
         {range==="custom"&&(
@@ -7056,10 +7020,7 @@ function SettingsTab(props){
               {/* CHANGED: Per-session default asset class. When set, overrides global default when this session is active. */}
               <div style={{marginBottom:8}}>
                 <label style={lbl}>Default Asset Class</label>
-                <select disabled={disabled} value={s.defaultAssetClass||""} onChange={function(e){updateSession(idx,{defaultAssetClass:e.target.value||null});}} style={Object.assign({},fld,{padding:"5px 8px",fontSize:12},dFld)}>
-                  <option value="">— Use global default —</option>
-                  {ASSET_CLASS_ORDER.map(function(c){return <option key={c} value={c}>{ASSET_CLASSES[c].label}</option>;})}
-                </select>
+                <Dropdown disabled={disabled} value={s.defaultAssetClass||""} onChange={function(v){updateSession(idx,{defaultAssetClass:v||null});}} options={[{v:"",l:"— Use global default —"}].concat(ASSET_CLASS_ORDER.map(function(c){return {v:c,l:ASSET_CLASSES[c].label};}))}/>
               </div>
               {/* Days-of-week selector */}
               <div style={{marginBottom:8}}>
@@ -7091,17 +7052,11 @@ function SettingsTab(props){
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:8,marginBottom:10}}>
           <div>
             <label style={lbl}>Asset class</label>
-            <select value={pretradeEditClass} onChange={function(e){setPretradeEditClass(e.target.value);}} style={fld}>
-              {ASSET_CLASS_ORDER.map(function(c){return <option key={c} value={c}>{ASSET_CLASSES[c].label}</option>;})}
-            </select>
+            <Dropdown value={pretradeEditClass} onChange={function(v){setPretradeEditClass(v);}} options={ASSET_CLASS_ORDER.map(function(c){return {v:c,l:ASSET_CLASSES[c].label};})}/>
           </div>
           <div>
             <label style={lbl}>Filter by setup</label>
-            <select value={pretradeFilterSetup} onChange={function(e){setPretradeFilterSetup(e.target.value);}} style={fld}>
-              <option value="">All items</option>
-              <option value="__none__">All setups (unassigned)</option>
-              {((tradeOptions&&tradeOptions.setup)||[]).map(function(s){return <option key={s} value={s}>{s}</option>;})}
-            </select>
+            <Dropdown value={pretradeFilterSetup} onChange={function(v){setPretradeFilterSetup(v);}} options={[{v:"",l:"All items"},{v:"__none__",l:"All setups (unassigned)"}].concat(((tradeOptions&&tradeOptions.setup)||[]).map(function(s){return {v:s,l:s};}))}/>
           </div>
         </div>
         {(function(){
@@ -7130,10 +7085,7 @@ function SettingsTab(props){
                     <ToggleSwitch checked={!!item.inverted} onChange={function(v){var ns=allItems.map(function(x){return x.key===item.key?Object.assign({},x,{inverted:v}):x;});var nm=Object.assign({},pretradeMap);nm[pretradeEditClass]=ns;persistPretrade(nm);}}/>
                     <input value={item.label} onChange={function(e){var v=e.target.value;var ns=allItems.map(function(x){return x.key===item.key?Object.assign({},x,{label:v}):x;});var nm=Object.assign({},pretradeMap);nm[pretradeEditClass]=ns;persistPretrade(nm);}} style={Object.assign({},fld,{padding:"6px 9px",fontSize:13})}/>
                     <input value={item.cat||""} onChange={function(e){var v=e.target.value;var ns=allItems.map(function(x){return x.key===item.key?Object.assign({},x,{cat:v}):x;});var nm=Object.assign({},pretradeMap);nm[pretradeEditClass]=ns;persistPretrade(nm);}} placeholder="Category" style={Object.assign({},fld,{padding:"6px 9px",fontSize:13})}/>
-                    <select value={item.setup||""} onChange={function(e){var v=e.target.value;var ns=allItems.map(function(x){return x.key===item.key?Object.assign({},x,{setup:v}):x;});var nm=Object.assign({},pretradeMap);nm[pretradeEditClass]=ns;persistPretrade(nm);}} style={Object.assign({},fld,{padding:"6px 4px",fontSize:12})}>
-                      <option value="">All setups</option>
-                      {setupOpts.map(function(s){return <option key={s} value={s}>{s}</option>;})}
-                    </select>
+                    <Dropdown value={item.setup||""} onChange={function(v){var ns=allItems.map(function(x){return x.key===item.key?Object.assign({},x,{setup:v}):x;});var nm=Object.assign({},pretradeMap);nm[pretradeEditClass]=ns;persistPretrade(nm);}} options={[{v:"",l:"All setups"}].concat(setupOpts.map(function(s){return {v:s,l:s};}))}/>
                     <button onClick={function(){
                       setPretradeMap(function(prev){
                         var arr=(prev[pretradeEditClass]||[]).filter(function(x){return x.key!==item.key;});
@@ -7151,10 +7103,7 @@ function SettingsTab(props){
                 <ToggleSwitch checked={!!newPretradeItem.inverted} onChange={function(v){setNewPretradeItem(function(d){return Object.assign({},d,{inverted:v});});}}/>
                 <input value={newPretradeItem.label} onChange={function(e){setNewPretradeItem(function(d){return Object.assign({},d,{label:e.target.value});});}} placeholder="New item label..." style={Object.assign({},fld,{padding:"6px 9px",fontSize:13})}/>
                 <input value={newPretradeItem.cat} onChange={function(e){setNewPretradeItem(function(d){return Object.assign({},d,{cat:e.target.value});});}} placeholder="Category" style={Object.assign({},fld,{padding:"6px 9px",fontSize:13})}/>
-                <select value={newPretradeItem.setup!==undefined&&newPretradeItem.setup!==""?newPretradeItem.setup:(pretradeFilterSetup&&pretradeFilterSetup!=="__none__"?pretradeFilterSetup:"")} onChange={function(e){setNewPretradeItem(function(d){return Object.assign({},d,{setup:e.target.value});});}} style={Object.assign({},fld,{padding:"6px 4px",fontSize:12})}>
-                  <option value="">All setups</option>
-                  {setupOpts.map(function(s){return <option key={s} value={s}>{s}</option>;})}
-                </select>
+                <Dropdown value={newPretradeItem.setup!==undefined&&newPretradeItem.setup!==""?newPretradeItem.setup:(pretradeFilterSetup&&pretradeFilterSetup!=="__none__"?pretradeFilterSetup:"")} onChange={function(v){setNewPretradeItem(function(d){return Object.assign({},d,{setup:v});});}} options={[{v:"",l:"All setups"}].concat(setupOpts.map(function(s){return {v:s,l:s};}))}/>
                 <button onClick={function(){
                   var label=(newPretradeItem.label||"").trim();
                   if(!label)return;
@@ -7202,9 +7151,7 @@ function SettingsTab(props){
       </SettingsSection>
 
       <SettingsSection title="Timezone">
-        <select value={settings.timezone||USER_TIMEZONE} onChange={function(e){var tz=e.target.value;setUserTimezone(tz);setSettings(function(s){var ns=Object.assign({},s,{timezone:tz});if(!s.sessions||s.sessions.length===0)ns.sessions=defaultSessionsForTz(tz);return ns;});}} style={fld}>
-          {TIMEZONES.map(function(tz){return <option key={tz.value} value={tz.value}>{tz.label}</option>;})}
-        </select>
+        <Dropdown value={settings.timezone||USER_TIMEZONE} onChange={function(tz){setUserTimezone(tz);setSettings(function(s){var ns=Object.assign({},s,{timezone:tz});if(!s.sessions||s.sessions.length===0)ns.sessions=defaultSessionsForTz(tz);return ns;});}} options={TIMEZONES.map(function(tz){return {v:tz.value,l:tz.label};})}/>
       </SettingsSection>
 
       <SettingsSection title="Import / Export">
