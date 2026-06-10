@@ -5719,6 +5719,10 @@ function PerformanceTab(props){
   var [rows,setRows]=useState([]);
   // CHANGED: Persist the time-range selection across tab switches (matches scalingTarget below).
   var [range,setRange]=useState(function(){try{return localStorage.getItem("tf-stats-range")||"all";}catch(e){return "all";}});
+  // CHANGED: Custom date range — two ISO date strings persisted across reloads. Defaults to last 14 days.
+  var [customStart,setCustomStart]=useState(function(){try{return localStorage.getItem("tf-stats-custom-start")||"";}catch(e){return "";}});
+  var [customEnd,setCustomEnd]=useState(function(){try{return localStorage.getItem("tf-stats-custom-end")||"";}catch(e){return "";}});
+  useEffect(function(){try{localStorage.setItem("tf-stats-custom-start",customStart||"");localStorage.setItem("tf-stats-custom-end",customEnd||"");}catch(e){}},[customStart,customEnd]);
   useEffect(function(){try{localStorage.setItem("tf-stats-range",range);}catch(e){}},[range]);
   useEffect(function(){setRows(loadJournalRows());},[props.reloadKey]);
   var liveTotalPnL=props.totalPnL||0;
@@ -5782,6 +5786,28 @@ function PerformanceTab(props){
       var endPrev=new Date(sunThis);endPrev.setDate(sunThis.getDate()-1);endPrev.setHours(0,0,0,0); // previous Saturday
       return dd>=startPrev&&dd<=endPrev;
     }
+    if(range==="mtd"){
+      // CHANGED: Month-to-date = first of current month → today.
+      var startM=new Date(now.getFullYear(),now.getMonth(),1);startM.setHours(0,0,0,0);
+      return dd>=startM;
+    }
+    if(range==="ytd"){
+      // CHANGED: Year-to-date = Jan 1 of current year → today.
+      var startY=new Date(now.getFullYear(),0,1);startY.setHours(0,0,0,0);
+      return dd>=startY;
+    }
+    if(range==="custom"){
+      // CHANGED: Custom range — bounded by user-picked ISO dates. Missing bound = open-ended on that side.
+      if(customStart){
+        var sParts=customStart.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if(sParts){var sD=new Date(+sParts[1],+sParts[2]-1,+sParts[3]);sD.setHours(0,0,0,0);if(dd<sD)return false;}
+      }
+      if(customEnd){
+        var eParts=customEnd.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if(eParts){var eD=new Date(+eParts[1],+eParts[2]-1,+eParts[3]);eD.setHours(0,0,0,0);if(dd>eD)return false;}
+      }
+      return true;
+    }
     var cutoff=new Date(now);
     if(range==="month")cutoff.setMonth(now.getMonth()-1);
     else if(range==="3month")cutoff.setMonth(now.getMonth()-3);
@@ -5837,16 +5863,29 @@ function PerformanceTab(props){
             {v:"thisweek",l:props.mobile?"This Wk":"This Week"},
             {v:"week",l:props.mobile?"Last Wk":"Last Week"},
             {v:"month",l:"30d"},
+            {v:"mtd",l:"MTD"},
             {v:"3month",l:"3mo"},
             {v:"year",l:"1yr"},
-            {v:"all",l:props.mobile?"All":"All Time"}
+            {v:"ytd",l:"YTD"},
+            {v:"all",l:props.mobile?"All":"All Time"},
+            {v:"custom",l:"Custom"}
           ].map(function(opt){
             var on=range===opt.v;
             return (
-              <button key={opt.v} onClick={function(){var prevY=window.scrollY;setRange(opt.v);requestAnimationFrame(function(){window.scrollTo(0,prevY);});}} style={{padding:props.mobile?"5px 8px":"6px 12px",background:on?"#4338ca":"#0a0a0f",border:"1px solid "+(on?"#6366f1":"#334155"),borderRadius:999,color:on?"#fff":"#94a3b8",fontSize:props.mobile?11:12,fontWeight:on?700:500,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>{opt.l}</button>
+              <button key={opt.v} onClick={function(){var prevY=window.scrollY;setRange(opt.v);try{localStorage.setItem("tf-stats-range",opt.v);}catch(e){}requestAnimationFrame(function(){window.scrollTo(0,prevY);});}} style={{padding:props.mobile?"5px 8px":"6px 12px",background:on?"#4338ca":"#0a0a0f",border:"1px solid "+(on?"#6366f1":"#334155"),borderRadius:999,color:on?"#fff":"#94a3b8",fontSize:props.mobile?11:12,fontWeight:on?700:500,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>{opt.l}</button>
             );
           })}
         </div>
+        {/* CHANGED: Date pickers reveal when Custom is selected. */}
+        {range==="custom"&&(
+          <div style={{display:"flex",gap:8,marginTop:8,alignItems:"center",flexWrap:"wrap"}}>
+            <label style={{fontSize:11,color:"#94a3b8",letterSpacing:0.5}}>From</label>
+            <input type="date" value={customStart} onChange={function(e){setCustomStart(e.target.value);}} style={{padding:"5px 8px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:6,color:"#e2e8f0",fontSize:12,fontFamily:"inherit",colorScheme:"dark"}}/>
+            <label style={{fontSize:11,color:"#94a3b8",letterSpacing:0.5}}>To</label>
+            <input type="date" value={customEnd} onChange={function(e){setCustomEnd(e.target.value);}} style={{padding:"5px 8px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:6,color:"#e2e8f0",fontSize:12,fontFamily:"inherit",colorScheme:"dark"}}/>
+            {(customStart||customEnd)&&<button onClick={function(){setCustomStart("");setCustomEnd("");}} style={{padding:"4px 9px",background:"transparent",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Clear</button>}
+          </div>
+        )}
       </div>
       {filtered.length>0&&(function(){
         // CHANGED: Gather summary stats for AI Coach.
