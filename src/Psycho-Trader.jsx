@@ -7203,7 +7203,10 @@ function App(props){
     try{bumpReloadKey();}catch(e){}
   },[props.syncTick]);
   // CHANGED: Persist active tab in sessionStorage so it survives reloads but isn't wiped by cloud-sync (which rewrites localStorage).
-  var [tab,setTab]=useState(function(){try{var t=sessionStorage.getItem("tf-active-tab");return t&&["dashboard","trades","goals","performance","settings"].indexOf(t)>=0?t:"dashboard";}catch(e){return "dashboard";}});
+  // CHANGED: Always open to the home (dashboard) tab on sign-in / app load. Previously the
+  // last-active tab was restored from sessionStorage which could land you in Settings or
+  // Performance after a refresh — surprising and rarely what you want first.
+  var [tab,setTab]=useState("dashboard");
   useEffect(function(){try{sessionStorage.setItem("tf-active-tab",tab);}catch(e){}},[tab]);
   // CHANGED: Collapsible sidebar state for laptop layout.
   var [sidebarCollapsed,setSidebarCollapsed]=useState(true);
