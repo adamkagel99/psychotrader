@@ -6048,24 +6048,22 @@ function PerformanceTab(props){
                 var bd=kind==="best"?"#16653466":"#7f1d1d66";
                 var bg=kind==="best"?"#0a1f1022":"#1c0a0a22";
                 var col=kind==="best"?"#22c55e":"#ef4444";
-                var tag=kind==="best"?"▲ BEST":"▼ WORST";
-                var tagColor=kind==="best"?"#86efac":"#fca5a5";
                 return (
-                  <div style={{flex:1,minWidth:0,padding:"8px 10px",background:bg,border:"1px solid "+bd,borderRadius:6}}>
-                    <div style={{fontSize:9,color:tagColor,letterSpacing:1,fontWeight:700,marginBottom:2}}>{tag}</div>
+                  <div style={{minWidth:0,padding:"8px 10px",background:bg,border:"1px solid "+bd,borderRadius:6}}>
                     <div style={{fontSize:9,color:"#e2e8f0",fontWeight:700,letterSpacing:1,textTransform:"uppercase",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.name}</div>
-                    {/* CHANGED: WR is the primary metric (largest number); avg return + count are secondary. */}
                     <div style={{fontSize:9,fontWeight:700,color:col,marginTop:3,fontVariantNumeric:"tabular-nums",letterSpacing:1}}>{item.wr}<span style={{marginLeft:2}}>% WR</span></div>
                     <div style={{fontSize:10,color:"#94a3b8",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{item.n}t · {(item.avgPct>=0?"+":"")+item.avgPct.toFixed(2)}%</div>
                   </div>
                 );
               };
               return (
-                <div style={{padding:"8px 0",borderBottom:isLast?"none":"1px solid #1e293b"}}>
-                  <div style={{fontSize:10,color:"#cbd5e1",letterSpacing:1,textTransform:"uppercase",fontWeight:700,marginBottom:6}}>{label}</div>
-                  <div style={{display:"flex",gap:6}}>
+                <div style={{padding:"8px 0",borderBottom:isLast?"none":"1px solid #1e293b",display:"grid",gridTemplateColumns:"90px 1fr",gap:8,alignItems:"center"}}>
+                  <div style={{fontSize:10,color:"#cbd5e1",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>{label}</div>
+                  {/* CHANGED: Always render two columns; if only one item qualifies, the other side
+                     gets a dimmed placeholder so the card width stays consistent across rows. */}
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
                     {Card(bw.best,"best")}
-                    {!same&&Card(bw.worst,"worst")}
+                    {same?<div style={{minWidth:0,padding:"8px 10px",background:"#0a0a0f",border:"1px dashed #1e293b",borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:10,color:"#475569",fontStyle:"italic"}}>same as best</span></div>:Card(bw.worst,"worst")}
                   </div>
                 </div>
               );
@@ -6077,6 +6075,14 @@ function PerformanceTab(props){
             if(indBW)rows.push(["Indicator",indBW]);
             return (
               <StatSec title="Best / Worst Combo" colSpan={props.mobile?1:6}>
+                {/* CHANGED: Single BEST / WORST column header at the top of the section, aligned with the card columns below. */}
+                <div style={{display:"grid",gridTemplateColumns:"90px 1fr",gap:8,alignItems:"center",paddingBottom:6,borderBottom:"1px solid #1e293b",marginBottom:2}}>
+                  <div/>
+                  <div style={{display:"flex",gap:6}}>
+                    <div style={{flex:1,fontSize:9,color:"#86efac",letterSpacing:1,fontWeight:700,textAlign:"center"}}>▲ BEST</div>
+                    <div style={{flex:1,fontSize:9,color:"#fca5a5",letterSpacing:1,fontWeight:700,textAlign:"center"}}>▼ WORST</div>
+                  </div>
+                </div>
                 {rows.map(function(r,i){return <div key={r[0]}>{row(r[0],r[1],i===rows.length-1)}</div>;})}
                 <div style={{fontSize:10,color:"#64748b",fontStyle:"italic",marginTop:6,paddingTop:6,borderTop:"1px solid #1e293b"}}>Ranked by win rate. Minimum 2 trades to qualify.</div>
               </StatSec>
