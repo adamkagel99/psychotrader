@@ -6053,9 +6053,9 @@ function PerformanceTab(props){
                 return (
                   <div style={{flex:1,minWidth:0,padding:"8px 10px",background:bg,border:"1px solid "+bd,borderRadius:6}}>
                     <div style={{fontSize:9,color:tagColor,letterSpacing:1,fontWeight:700,marginBottom:2}}>{tag}</div>
-                    <div style={{fontSize:13,color:"#e2e8f0",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.name}</div>
+                    <div style={{fontSize:9,color:"#e2e8f0",fontWeight:700,letterSpacing:1,textTransform:"uppercase",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.name}</div>
                     {/* CHANGED: WR is the primary metric (largest number); avg return + count are secondary. */}
-                    <div style={{fontSize:18,fontWeight:800,color:col,marginTop:3,fontVariantNumeric:"tabular-nums",letterSpacing:-0.3}}>{item.wr}<span style={{fontSize:11,fontWeight:600,marginLeft:2}}>% wr</span></div>
+                    <div style={{fontSize:9,fontWeight:700,color:col,marginTop:3,fontVariantNumeric:"tabular-nums",letterSpacing:1}}>{item.wr}<span style={{marginLeft:2}}>% WR</span></div>
                     <div style={{fontSize:10,color:"#94a3b8",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{item.n}t · {(item.avgPct>=0?"+":"")+item.avgPct.toFixed(2)}%</div>
                   </div>
                 );
@@ -6190,7 +6190,7 @@ function PerformanceTab(props){
                       </div>
                       {/* CHANGED: LR is the primary big number; expectancy + avg drop to small secondary text. */}
                       <div style={{textAlign:"right",flexShrink:0}}>
-                        <div style={{fontSize:18,fontWeight:800,color:g.lr>=50?"#ef4444":g.lr>=33?"#fbbf24":"#94a3b8",fontVariantNumeric:"tabular-nums",letterSpacing:-0.3,lineHeight:1}}>{g.lr}<span style={{fontSize:11,fontWeight:600,marginLeft:2}}>% LR</span></div>
+                        <div style={{fontSize:18,fontWeight:800,color:g.lr>=50?"#ef4444":g.lr>=33?"#fbbf24":"#94a3b8",fontVariantNumeric:"tabular-nums",letterSpacing:-0.3,lineHeight:1}}>{g.lr}<span style={{marginLeft:2}}>% LR</span></div>
                         <div style={{fontSize:10,color:"#94a3b8",fontVariantNumeric:"tabular-nums",marginTop:3}}>{pnlStr}</div>
                       </div>
                     </div>
