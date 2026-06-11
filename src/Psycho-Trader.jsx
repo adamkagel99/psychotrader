@@ -6477,7 +6477,13 @@ function SettingsTab(props){
   function backupAll(){
     var dump={};
     try{
-      for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k)dump[k]=localStorage.getItem(k);}
+      // CHANGED: Only export the app's own keys (tf-* and journal:*). Earlier exports included
+      // sb-* Supabase session tokens which, on import to another device, would overwrite the
+      // destination's auth session and sign the user out. Filter at the source instead.
+      for(var i=0;i<localStorage.length;i++){
+        var k=localStorage.key(i);
+        if(k&&(k.startsWith("tf-")||k.startsWith("journal:")))dump[k]=localStorage.getItem(k);
+      }
     }catch(e){alert("Could not read storage: "+(e.message||e));return;}
     var json=JSON.stringify(dump,null,2);
     // CHANGED: Filename uses LOCAL date, not UTC. toISOString() returns UTC, which silently
@@ -6542,7 +6548,12 @@ function SettingsTab(props){
   function clearAll(){
     if(!confirm("Clear ALL data? This cannot be undone."))return;
     if(!confirm("Are you absolutely sure? This will delete every trade, journal, and setting."))return;
-    localStorage.clear();window.location.reload();
+    // CHANGED: Wipe cloud too. Previously only localStorage was cleared and the next page-load
+    // pulled today's data back from Supabase, making the button look broken.
+    function reset(){localStorage.clear();window.location.reload();}
+    if(typeof window!=="undefined"&&typeof window.__psychoSyncWipe==="function"){
+      window.__psychoSyncWipe().then(reset,function(err){console.error("Cloud wipe failed:",err);reset();});
+    }else{reset();}
   }
   var sessions=getSessions(settings);
   // CHANGED: 2-week strategy lock check. When active, all session mutations are no-ops.

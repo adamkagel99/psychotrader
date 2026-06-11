@@ -500,8 +500,23 @@ export async function backgroundPull(userId) {
 // Exposed globally so the app's Restore button can push the imported data to the
 // cloud and WAIT before reloading (otherwise the debounced push is lost on reload).
 if (typeof window !== "undefined") {
-  // Restore: clear this user's cloud data, then push every key from the backup
-  // OBJECT directly (not localStorage, which may have dropped oversized image keys).
+  // CHANGED: Cloud wipe — exposed so the app's "Clear Data" button can drop the user's cloud rows
+  // BEFORE clearing localStorage. Without this, the next page-load pulls today's data back from
+  // the cloud and "Clear Data" looks broken.
+  window.__psychoSyncWipe = async function () {
+    if (!currentUserId) return;
+    const uid = currentUserId;
+    try {
+      await supabase.from("trades").delete().eq("user_id", uid);
+      await supabase.from("journal_days").delete().eq("user_id", uid);
+      await supabase.from("transfers").delete().eq("user_id", uid);
+      await supabase.from("user_kv").delete().eq("user_id", uid);
+    } catch (e) { console.error("Cloud wipe failed:", e); throw e; }
+  };
+
+  // Restore: DESTRUCTIVE. Wipes the user's cloud data + local app data, then pushes every key
+  // from the backup OBJECT. The backup file is the new source of truth — nothing from before
+  // survives. (If a user wants additive behavior they can manually merge files first.)
   window.__psychoSyncRestore = async function (backup) {
     if (!currentUserId) return;
     const uid = currentUserId;
@@ -511,11 +526,19 @@ if (typeof window !== "undefined") {
       await supabase.from("transfers").delete().eq("user_id", uid);
       await supabase.from("user_kv").delete().eq("user_id", uid);
     } catch (e) { console.error("Cloud clear before restore failed:", e); }
+    // Also clear local app keys so restore is a clean slate. SKIP_KEYS (events cache) is preserved.
+    try {
+      const toRemove = [];
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const k = window.localStorage.key(i);
+        if (typeof k === "string" && SKIP_KEYS.has(k)) continue;
+        if (isJournalKey(k) || (typeof k === "string" && k.startsWith("tf-"))) toRemove.push(k);
+      }
+      toRemove.forEach((k) => rawRemove.call(window.localStorage, k));
+    } catch (e) { console.error("Local clear before restore failed:", e); }
 
     for (const key of Object.keys(backup || {})) {
       if (!(isJournalKey(key) || key === "tf-transfers" || isSyncableKv(key))) continue;
-      // Ensure localStorage has the value for handleSet to read; if it was dropped
-      // due to quota, write the rewritten (image-stripped) version after upload.
       try { rawSetItem(key, backup[key]); } catch (e) { /* quota: handled below */ }
       try {
         await handleSetFromValue(key, backup[key], uid);
