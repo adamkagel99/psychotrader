@@ -13,12 +13,9 @@ function loadTransfers(){
   try{
     var s=localStorage.getItem(TRANSFERS_KEY);if(!s)return[];
     var p=JSON.parse(s);if(!Array.isArray(p))return[];
-    // CHANGED: One-time migration — old convention had Deposit=-, Withdrawal=+. Flip if not yet migrated.
-    var migFlag=localStorage.getItem("tf-transfers-mig-v2");
-    if(!migFlag){
-      p=p.map(function(t){return Object.assign({},t,{amount:-(parseFloat(t.amount)||0)});});
-      try{localStorage.setItem(TRANSFERS_KEY,JSON.stringify(p));localStorage.setItem("tf-transfers-mig-v2","1");}catch(e){}
-    }
+    // CHANGED: The old "flip every amount" migration was removed — it was a one-time fix that
+    // re-fired and corrupted user data whenever localStorage was cleared (Clear Data, import, etc).
+    // Convention is now permanent: deposits = positive amount, withdrawals = negative.
     return p;
   }catch(e){return[];}
 }
