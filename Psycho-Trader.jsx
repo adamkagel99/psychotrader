@@ -3343,7 +3343,7 @@ function CommitmentPanel(props){
   var fld={width:"100%",padding:"10px 12px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8,color:"#e2e8f0",fontSize:14,fontFamily:"inherit",boxSizing:"border-box"};
   if(committed&&!open){
     return (
-      <div style={{marginBottom:14,padding:"12px 14px",background:"#0f1a14",border:"1px solid #166534",borderRadius:10}}>
+      <div style={{marginBottom:props.hideMargin?0:14,padding:"12px 14px",background:"#0f1a14",border:"1px solid #166534",borderRadius:10,width:"100%",boxSizing:"border-box",display:"flex",flexDirection:"column"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <span style={{fontSize:13,fontWeight:700,color:"#86efac"}}>✓ Today's commitment</span>
           <span style={{fontSize:11,color:"#94a3b8"}}>locked in</span>
@@ -3613,7 +3613,14 @@ function TradesTab(props){
   return (
     <div style={{paddingTop:16}}>
       {isToday&&<EventWarningBanner windowMin={60}/>}
-      {phase!=="closed"&&<CommitmentPanel state={props.state} setState={props.setState} phase={phase} settings={settings}/>}
+      {/* CHANGED: Commitment + Session in a single row on laptop — neither has so much content
+         that it justifies a full-width row, and pairing them eliminates the empty-space waste
+         from before. The standalone Conditions chip is dropped; the same state is already
+         surfaced as the disabled-looking "Conditions Choppy" button in the Journal header. */}
+      <div style={{display:"flex",flexDirection:props.mobile?"column":"row",gap:props.mobile?0:12,alignItems:"stretch",marginBottom:props.mobile?0:14}}>
+        {phase!=="closed"&&<div style={{flex:1,minWidth:0,display:"flex"}}><CommitmentPanel state={props.state} setState={props.setState} phase={phase} settings={settings} hideMargin/></div>}
+        {phase!=="closed"&&<div style={{flex:1,minWidth:0,display:"flex"}}><SessionStrategy phase={phase} preCheckComplete={preCheckComplete} settings={settings} hideMargin/></div>}
+      </div>
       {/* CHANGED: Discipline lockout banner — date-aware. When viewing today, shows the active lock
           (if any). When viewing a past day that had a lock event saved on its journal row, shows
           the historical lock summary. Otherwise hidden. */}
@@ -3717,24 +3724,7 @@ function TradesTab(props){
         }
         return null;
       })()}
-      {/* CHANGED: On non-mobile, render Conditions chip + Session banner in a single row. The
-         chip stretches to match the Session banner's height so they read as a balanced pair
-         rather than a tall banner next to an orphaned tiny pill. Stacks on mobile. */}
-      <div style={{display:"flex",flexDirection:props.mobile?"column":"row",gap:props.mobile?0:12,alignItems:"stretch",marginBottom:props.mobile?0:14}}>
-        {phase!=="closed"&&(function(){
-          var condItems=loadConditionsItems();
-          if(condItems.length===0)return null;
-          var conditionsChecked=props.state.conditionsChecked||{};
-          var warnings=condItems.filter(function(it){return !!conditionsChecked[it.key];});
-          var allGood=warnings.length===0;
-          return (
-            <div style={{flex:props.mobile?"none":"0 0 260px",display:"flex"}}>
-              <CompactConditions allGood={allGood} condItems={condItems} warnings={warnings} conditionsChecked={conditionsChecked} setState={props.setState}/>
-            </div>
-          );
-        })()}
-        {phase!=="closed"&&<div style={{flex:1,minWidth:0}}><SessionStrategy phase={phase} preCheckComplete={preCheckComplete} settings={settings} hideMargin/></div>}
-      </div>
+      {/* CHANGED: Position/Risk strip removed from journal — shown in the New Trade form instead. */}
       {phase!=="closed"&&isToday&&props.liveTrades&&props.liveTrades.length>0&&(
         <div style={CS({marginBottom:16,border:"1px solid #ea580c",background:"#1c1108"})}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
