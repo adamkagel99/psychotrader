@@ -2179,7 +2179,7 @@ function TradeForm(props){
                   defaultISO=n.getFullYear()+"-"+(n.getMonth()+1).toString().padStart(2,"0")+"-"+n.getDate().toString().padStart(2,"0");
                 }
                 var val=trade.expiry||defaultISO;
-                return <div><label style={lblCompact}>Expiry</label><input type="date" value={val} onChange={function(e){upd("expiry",e.target.value);}} style={Object.assign({},compactFld,{colorScheme:"dark",color:"#e2e8f0"})}/></div>;
+                return <div><label style={lblCompact}>Expiry</label><input type="date" onMouseDown={function(e){var inp=e.currentTarget;setTimeout(function(){try{inp.focus();if(inp.showPicker)inp.showPicker();}catch(err){}},0);}} value={val} onChange={function(e){upd("expiry",e.target.value);}} style={Object.assign({},compactFld,{colorScheme:"dark",color:"#e2e8f0"})}/></div>;
               })()}
             </div>
           )}
@@ -4750,7 +4750,7 @@ function GoalsTab(props){
                 <input value={customDraft.suffix||""} onChange={function(e){var v=e.target.value;setCustomDraft(function(d){return Object.assign({},d,{suffix:v});});}} placeholder="" style={Object.assign({},fld,{flex:1})}/>
               </div></div>
             </div>
-            <div><label style={lbl}>Deadline (optional)</label><input type="date" value={customDraft.deadline||""} onChange={function(e){var v=e.target.value;setCustomDraft(function(d){return Object.assign({},d,{deadline:v});});}} style={Object.assign({},fld,{colorScheme:"dark",color:"#e2e8f0"})}/></div>
+            <div><label style={lbl}>Deadline (optional)</label><input type="date" onMouseDown={function(e){var inp=e.currentTarget;setTimeout(function(){try{inp.focus();if(inp.showPicker)inp.showPicker();}catch(err){}},0);}} value={customDraft.deadline||""} onChange={function(e){var v=e.target.value;setCustomDraft(function(d){return Object.assign({},d,{deadline:v});});}} style={Object.assign({},fld,{colorScheme:"dark",color:"#e2e8f0"})}/></div>
           </div>
           <div style={{display:"flex",gap:8,marginTop:12}}>
             <button onClick={function(){setEditingCustomId(null);setCustomDraft(null);}} style={{flex:1,padding:"9px",background:"none",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Cancel</button>
@@ -4854,7 +4854,7 @@ function GoalsTab(props){
             {/* CHANGED: Optional deadline date. */}
             <div style={{marginTop:8}}>
               <label style={lbl}>Deadline (optional)</label>
-              <input type="date" value={newGoal.deadline||""} onChange={function(e){setNewGoal(function(g){return Object.assign({},g,{deadline:e.target.value});});}} style={Object.assign({},fld,{colorScheme:"dark",color:"#e2e8f0"})}/>
+              <input type="date" onMouseDown={function(e){var inp=e.currentTarget;setTimeout(function(){try{inp.focus();if(inp.showPicker)inp.showPicker();}catch(err){}},0);}} value={newGoal.deadline||""} onChange={function(e){setNewGoal(function(g){return Object.assign({},g,{deadline:e.target.value});});}} style={Object.assign({},fld,{colorScheme:"dark",color:"#e2e8f0"})}/>
             </div>
             {/* CHANGED: Section selector — file the goal under an existing section, the default Custom bucket, or a new named section. */}
             <div style={{marginTop:8}}>
@@ -5871,9 +5871,9 @@ function PerformanceTab(props){
         {range==="custom"&&(
           <div style={{display:"flex",gap:8,marginTop:8,alignItems:"center",flexWrap:"wrap"}}>
             <label style={{fontSize:11,color:"#94a3b8",letterSpacing:0.5}}>From</label>
-            <input type="date" value={customStart} onChange={function(e){setCustomStart(e.target.value);}} style={{padding:"5px 8px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:6,color:"#e2e8f0",fontSize:12,fontFamily:"inherit",colorScheme:"dark"}}/>
+            <input type="date" onMouseDown={function(e){var inp=e.currentTarget;setTimeout(function(){try{inp.focus();if(inp.showPicker)inp.showPicker();}catch(err){}},0);}} value={customStart} onChange={function(e){setCustomStart(e.target.value);}} style={{padding:"5px 8px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:6,color:"#e2e8f0",fontSize:12,fontFamily:"inherit",colorScheme:"dark"}}/>
             <label style={{fontSize:11,color:"#94a3b8",letterSpacing:0.5}}>To</label>
-            <input type="date" value={customEnd} onChange={function(e){setCustomEnd(e.target.value);}} style={{padding:"5px 8px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:6,color:"#e2e8f0",fontSize:12,fontFamily:"inherit",colorScheme:"dark"}}/>
+            <input type="date" onMouseDown={function(e){var inp=e.currentTarget;setTimeout(function(){try{inp.focus();if(inp.showPicker)inp.showPicker();}catch(err){}},0);}} value={customEnd} onChange={function(e){setCustomEnd(e.target.value);}} style={{padding:"5px 8px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:6,color:"#e2e8f0",fontSize:12,fontFamily:"inherit",colorScheme:"dark"}}/>
             {(customStart||customEnd)&&<button onClick={function(){setCustomStart("");setCustomEnd("");}} style={{padding:"4px 9px",background:"transparent",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Clear</button>}
           </div>
         )}
@@ -6652,7 +6652,7 @@ function SettingsTab(props){
           })}
         </div>
         <div style={{display:"grid",gridTemplateColumns:"120px 110px 1fr auto",gap:6,marginBottom:8}}>
-          <input type="date" value={transferDraft.date} onChange={function(e){setTransferDraft(function(d){return Object.assign({},d,{date:e.target.value});});}} style={Object.assign({},fld,{padding:"6px 9px",fontSize:13,colorScheme:"dark",color:"#e2e8f0"})}/>
+          <input type="date" onMouseDown={function(e){var inp=e.currentTarget;setTimeout(function(){try{inp.focus();if(inp.showPicker)inp.showPicker();}catch(err){}},0);}} value={transferDraft.date} onChange={function(e){setTransferDraft(function(d){return Object.assign({},d,{date:e.target.value});});}} style={Object.assign({},fld,{padding:"6px 9px",fontSize:13,colorScheme:"dark",color:"#e2e8f0"})}/>
           <input type="number" min="0" step="0.01" value={transferDraft.amount} onChange={function(e){setTransferDraft(function(d){return Object.assign({},d,{amount:e.target.value});});}} placeholder="$ amount" style={Object.assign({},fld,{padding:"6px 9px",fontSize:13})}/>
           <input value={transferDraft.note} onChange={function(e){setTransferDraft(function(d){return Object.assign({},d,{note:e.target.value});});}} placeholder="Note (optional)" style={Object.assign({},fld,{padding:"6px 9px",fontSize:13})}/>
           <button onClick={addTransfer} style={{padding:"6px 11px",background:"#4f46e5",border:"none",borderRadius:5,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ Add</button>
