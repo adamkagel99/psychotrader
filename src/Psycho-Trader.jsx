@@ -62,6 +62,23 @@ function getImminentEvents(windowMin){
   }).sort(function(a,b){return a._d-b._d;});
 }
 
+// CHANGED: Today's events under the user's currency/impact filters — used by the session banner in Journal.
+function getTodaysFilteredEvents(){
+  var f=loadEventFilters();
+  var now=getPT();
+  var dayStart=new Date(now.getFullYear(),now.getMonth(),now.getDate());dayStart.setHours(0,0,0,0);
+  var dayEnd=new Date(dayStart.getTime()+24*60*60*1000);
+  return loadEvents().map(function(e){return Object.assign({},e,{_d:parseEventDate(e)});}).filter(function(e){
+    if(!e._d)return false;
+    if(e._d<dayStart||e._d>=dayEnd)return false;
+    var imp=normalizeImpact(e.impact);
+    if(imp==="none"||imp==="holiday")return false;
+    if(f.currency.length>0&&f.currency.indexOf(eventCurrency(e))<0)return false;
+    if(f.impact.length>0&&f.impact.indexOf(imp)<0)return false;
+    return true;
+  }).sort(function(a,b){return a._d-b._d;});
+}
+
 var USER_TIMEZONE=(function(){try{var s=localStorage.getItem("tf-tz");return s||"America/Los_Angeles";}catch(e){return "America/Los_Angeles";}})();
 function setUserTimezone(tz){USER_TIMEZONE=tz;try{localStorage.setItem("tf-tz",tz);}catch(e){}}
 var TIMEZONES=[
@@ -1720,6 +1737,33 @@ function SessionStrategy(props){
       ):(
         <div style={{fontSize:14,color:"#94a3b8",lineHeight:1.6,fontStyle:"italic"}}>{isClosed?"Review your trades in the Journal.":rule?"No session notes — add them in Settings → Session Strategy.":"No active session — times don't match any configured session."}</div>
       )}
+      {/* CHANGED: Today's economic events (filtered by user's saved currency / impact filters) shown below the session notes. */}
+      {(function(){
+        var ev=getTodaysFilteredEvents();
+        if(!ev||ev.length===0)return null;
+        var now=getPT();
+        function fmtTime(d){var h=d.getHours();var m=d.getMinutes();var ap=h>=12?"PM":"AM";var hh=h%12||12;return hh+":"+String(m).padStart(2,"0")+" "+ap;}
+        function impColor(imp){if(imp==="high")return "#ef4444";if(imp==="medium")return "#fbbf24";return "#64748b";}
+        return (
+          <div style={{marginTop:12,paddingTop:10,borderTop:"1px solid #1e293b"}}>
+            <div style={{fontSize:11,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:700,marginBottom:6}}>Today's Events · {ev.length}</div>
+            <div style={{display:"flex",flexDirection:"column",gap:4}}>
+              {ev.map(function(e,i){
+                var imp=normalizeImpact(e.impact);
+                var past=e._d<now;
+                return (
+                  <div key={i} style={{display:"flex",alignItems:"center",gap:8,fontSize:12,opacity:past?0.55:1}}>
+                    <span style={{width:6,height:6,borderRadius:"50%",background:impColor(imp),flexShrink:0}}/>
+                    <span style={{color:"#94a3b8",fontVariantNumeric:"tabular-nums",minWidth:60}}>{fmtTime(e._d)}</span>
+                    <span style={{color:"#64748b",fontSize:10,fontWeight:700,letterSpacing:0.5}}>{eventCurrency(e)}</span>
+                    <span style={{color:past?"#64748b":"#e2e8f0",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.title||e.name||""}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -3671,21 +3715,23 @@ function TradesTab(props){
         }
         return null;
       })()}
-      {/* CHANGED: Conditions banner — collapsed to a single-line chip when all clear; full panel only on warnings. */}
-      {phase!=="closed"&&(function(){
-        var condItems=loadConditionsItems();
-        if(condItems.length===0)return null;
-        var conditionsChecked=props.state.conditionsChecked||{};
-        var warnings=condItems.filter(function(it){return !!conditionsChecked[it.key];});
-        var allGood=warnings.length===0;
-        var [open,setOpen]=[props.condOpen,props.setCondOpen];
-        // Local state fallback if parent doesn't provide.
-        return (
-          <CompactConditions allGood={allGood} condItems={condItems} warnings={warnings} conditionsChecked={conditionsChecked} setState={props.setState}/>
-        );
-      })()}
-      {/* CHANGED: Position/Risk strip removed from journal — shown in the New Trade form instead. */}
-      {phase!=="closed"&&<SessionStrategy phase={phase} preCheckComplete={preCheckComplete} settings={settings}/>}
+      {/* CHANGED: On non-mobile, render Conditions chip + Session banner in a single row so the
+         wide Conditions strip doesn't waste vertical space. Stacks on mobile as before. */}
+      <div style={{display:"flex",flexDirection:props.mobile?"column":"row",gap:props.mobile?0:10,alignItems:"stretch"}}>
+        {phase!=="closed"&&(function(){
+          var condItems=loadConditionsItems();
+          if(condItems.length===0)return null;
+          var conditionsChecked=props.state.conditionsChecked||{};
+          var warnings=condItems.filter(function(it){return !!conditionsChecked[it.key];});
+          var allGood=warnings.length===0;
+          return (
+            <div style={{flex:props.mobile?"none":"0 0 auto",minWidth:props.mobile?"auto":220}}>
+              <CompactConditions allGood={allGood} condItems={condItems} warnings={warnings} conditionsChecked={conditionsChecked} setState={props.setState}/>
+            </div>
+          );
+        })()}
+        {phase!=="closed"&&<div style={{flex:1,minWidth:0}}><SessionStrategy phase={phase} preCheckComplete={preCheckComplete} settings={settings}/></div>}
+      </div>
       {phase!=="closed"&&isToday&&props.liveTrades&&props.liveTrades.length>0&&(
         <div style={CS({marginBottom:16,border:"1px solid #ea580c",background:"#1c1108"})}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
