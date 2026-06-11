@@ -3390,12 +3390,10 @@ function CompactConditions(props){
     });
   }
   return (
-    <button onClick={toggle} style={{display:"flex",flexDirection:"column",alignItems:"flex-start",gap:6,padding:"12px 14px",background:allGood?"#0a1f1066":"#1c0a0a66",border:"1px solid "+(allGood?"#16653466":"#7f1d1d66"),borderRadius:10,cursor:"pointer",fontFamily:"inherit",width:"100%",height:"100%",justifyContent:"center"}}>
-      <div style={{display:"flex",alignItems:"center",gap:8,width:"100%"}}>
-        <span style={{width:8,height:8,borderRadius:"50%",background:allGood?"#22c55e":"#ef4444",flexShrink:0}}/>
-        <span style={{fontSize:13,color:allGood?"#86efac":"#fca5a5",fontWeight:700,letterSpacing:0.5}}>{allGood?"Conditions clear":"Conditions choppy"}</span>
-      </div>
-      <span style={{fontSize:11,color:"#64748b",textAlign:"left"}}>{allGood?"All checks clear — tap to flag any.":(warnings.length+" check"+(warnings.length===1?"":"s")+" active — tap to clear all.")}</span>
+    <button onClick={toggle} style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,padding:"6px 10px",background:allGood?"#0a1f1066":"#1c0a0a66",border:"1px solid "+(allGood?"#16653466":"#7f1d1d66"),borderRadius:6,cursor:"pointer",fontFamily:"inherit",width:"100%"}}>
+      <span style={{width:6,height:6,borderRadius:"50%",background:allGood?"#22c55e":"#ef4444"}}/>
+      <span style={{fontSize:11,color:allGood?"#86efac":"#fca5a5",fontWeight:600,letterSpacing:0.5}}>{allGood?"Conditions clear":"Conditions choppy"}</span>
+      <span style={{fontSize:10,color:"#64748b",marginLeft:"auto"}}>{allGood?"tap to flag":"tap to clear"}</span>
     </button>
   );
 }
@@ -3613,11 +3611,18 @@ function TradesTab(props){
   return (
     <div style={{paddingTop:16}}>
       {isToday&&<EventWarningBanner windowMin={60}/>}
-      {/* CHANGED: Commitment + Session in a single row on laptop — neither has so much content
-         that it justifies a full-width row, and pairing them eliminates the empty-space waste
-         from before. The standalone Conditions chip is dropped; the same state is already
-         surfaced as the disabled-looking "Conditions Choppy" button in the Journal header. */}
-      <div style={{display:"flex",flexDirection:props.mobile?"column":"row",gap:props.mobile?0:12,alignItems:"stretch",marginBottom:props.mobile?0:14}}>
+      {/* CHANGED: Slim Conditions chip as a full-width strip at top, then Commitment + Session
+         side-by-side below. alignItems:flex-start lets each banner be its natural height —
+         neither stretches to match a taller sibling, killing the empty-space problem. */}
+      {phase!=="closed"&&(function(){
+        var condItems=loadConditionsItems();
+        if(condItems.length===0)return null;
+        var conditionsChecked=props.state.conditionsChecked||{};
+        var warnings=condItems.filter(function(it){return !!conditionsChecked[it.key];});
+        var allGood=warnings.length===0;
+        return <CompactConditions allGood={allGood} condItems={condItems} warnings={warnings} conditionsChecked={conditionsChecked} setState={props.setState}/>;
+      })()}
+      <div style={{display:"flex",flexDirection:props.mobile?"column":"row",gap:props.mobile?0:12,alignItems:"flex-start",marginBottom:props.mobile?0:14}}>
         {phase!=="closed"&&<div style={{flex:1,minWidth:0,display:"flex"}}><CommitmentPanel state={props.state} setState={props.setState} phase={phase} settings={settings} hideMargin/></div>}
         {phase!=="closed"&&<div style={{flex:1,minWidth:0,display:"flex"}}><SessionStrategy phase={phase} preCheckComplete={preCheckComplete} settings={settings} hideMargin/></div>}
       </div>
