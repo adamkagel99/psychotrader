@@ -5713,7 +5713,11 @@ function PerformanceTab(props){
   var settings=props.settings;
   var [rows,setRows]=useState([]);
   // CHANGED: Persist the time-range selection across tab switches (matches scalingTarget below).
-  var [range,setRange]=useState(function(){try{return localStorage.getItem("tf-stats-range")||"all";}catch(e){return "all";}});
+  var [range,setRange]=useState(function(){try{var r=localStorage.getItem("tf-stats-range")||"all";return r==="custom"?"all":r;}catch(e){return "all";}});
+  // CHANGED: Custom mode tracks whether the Custom pill's date inputs are revealed. The actual
+  // `range` value stays on the previously-selected preset until the user picks at least one
+  // date — so the displayed data doesn't change the moment Custom is tapped.
+  var [customMode,setCustomMode]=useState(function(){try{return localStorage.getItem("tf-stats-range")==="custom";}catch(e){return false;}});
   // CHANGED: Custom date range — two ISO date strings persisted across reloads. Defaults to last 14 days.
   var [customStart,setCustomStart]=useState(function(){try{return localStorage.getItem("tf-stats-custom-start")||"";}catch(e){return "";}});
   var [customEnd,setCustomEnd]=useState(function(){try{return localStorage.getItem("tf-stats-custom-end")||"";}catch(e){return "";}});
@@ -5855,7 +5859,7 @@ function PerformanceTab(props){
         <div style={{fontSize:18,fontWeight:700,color:"#e2e8f0",marginBottom:8,lineHeight:1.2}}>Performance</div>
         <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
           {/* CHANGED: Uses the shared Dropdown component (pill variant) for visual consistency app-wide. */}
-          <Dropdown variant="pill" value={range==="custom"?null:range} placeholder="Range" options={[
+          <Dropdown variant="pill" value={customMode?null:range} placeholder="Range" options={[
             {v:"thisweek",l:"This Week"},
             {v:"week",l:"Last Week"},
             {v:"month",l:"30 days"},
@@ -5864,17 +5868,19 @@ function PerformanceTab(props){
             {v:"year",l:"1 Year"},
             {v:"ytd",l:"Year to Date"},
             {v:"all",l:"All Time"}
-          ]} onChange={function(v){var prevY=window.scrollY;setRange(v);try{localStorage.setItem("tf-stats-range",v);}catch(e){}requestAnimationFrame(function(){window.scrollTo(0,prevY);});}}/>
-          <button onClick={function(){var prevY=window.scrollY;setRange("custom");try{localStorage.setItem("tf-stats-range","custom");}catch(e){}requestAnimationFrame(function(){window.scrollTo(0,prevY);});}} style={{padding:props.mobile?"6px 14px":"7px 16px",background:range==="custom"?"linear-gradient(135deg,#4338ca,#4f46e5)":"#0a0a0f",border:"1px solid "+(range==="custom"?"#6366f1":"#334155"),borderRadius:999,color:range==="custom"?"#fff":"#94a3b8",fontSize:props.mobile?12:13,fontWeight:range==="custom"?700:500,cursor:"pointer",fontFamily:"inherit",boxShadow:range==="custom"?"0 1px 4px #4f46e533":"none"}}>Custom</button>
+          ]} onChange={function(v){var prevY=window.scrollY;setRange(v);setCustomMode(false);try{localStorage.setItem("tf-stats-range",v);}catch(e){}requestAnimationFrame(function(){window.scrollTo(0,prevY);});}}/>
+          {/* CHANGED: Custom pill flips customMode on. The actual `range` stays at the prior preset
+             until the user picks a date — so the page's data doesn't reset when the pill is tapped. */}
+          <button onClick={function(){var prevY=window.scrollY;setCustomMode(true);requestAnimationFrame(function(){window.scrollTo(0,prevY);});}} style={{padding:props.mobile?"6px 14px":"7px 16px",background:customMode?"linear-gradient(135deg,#4338ca,#4f46e5)":"#0a0a0f",border:"1px solid "+(customMode?"#6366f1":"#334155"),borderRadius:999,color:customMode?"#fff":"#94a3b8",fontSize:props.mobile?12:13,fontWeight:customMode?700:500,cursor:"pointer",fontFamily:"inherit",boxShadow:customMode?"0 1px 4px #4f46e533":"none"}}>Custom</button>
         </div>
         {/* CHANGED: Date pickers reveal when Custom is selected. */}
-        {range==="custom"&&(
+        {customMode&&(
           <div style={{display:"flex",gap:8,marginTop:8,alignItems:"center",flexWrap:"wrap"}}>
             <label style={{fontSize:11,color:"#94a3b8",letterSpacing:0.5}}>From</label>
-            <input type="date" onMouseDown={function(e){var inp=e.currentTarget;setTimeout(function(){try{inp.focus();if(inp.showPicker)inp.showPicker();}catch(err){}},0);}} value={customStart} onChange={function(e){setCustomStart(e.target.value);}} style={{padding:"5px 8px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:6,color:"#e2e8f0",fontSize:12,fontFamily:"inherit",colorScheme:"dark"}}/>
+            <input type="date" onMouseDown={function(e){var inp=e.currentTarget;setTimeout(function(){try{inp.focus();if(inp.showPicker)inp.showPicker();}catch(err){}},0);}} value={customStart} onChange={function(e){var v=e.target.value;setCustomStart(v);if(v||customEnd){setRange("custom");try{localStorage.setItem("tf-stats-range","custom");}catch(err){}}}} style={{padding:"5px 8px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:6,color:"#e2e8f0",fontSize:12,fontFamily:"inherit",colorScheme:"dark"}}/>
             <label style={{fontSize:11,color:"#94a3b8",letterSpacing:0.5}}>To</label>
-            <input type="date" onMouseDown={function(e){var inp=e.currentTarget;setTimeout(function(){try{inp.focus();if(inp.showPicker)inp.showPicker();}catch(err){}},0);}} value={customEnd} onChange={function(e){setCustomEnd(e.target.value);}} style={{padding:"5px 8px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:6,color:"#e2e8f0",fontSize:12,fontFamily:"inherit",colorScheme:"dark"}}/>
-            {(customStart||customEnd)&&<button onClick={function(){setCustomStart("");setCustomEnd("");}} style={{padding:"4px 9px",background:"transparent",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Clear</button>}
+            <input type="date" onMouseDown={function(e){var inp=e.currentTarget;setTimeout(function(){try{inp.focus();if(inp.showPicker)inp.showPicker();}catch(err){}},0);}} value={customEnd} onChange={function(e){var v=e.target.value;setCustomEnd(v);if(v||customStart){setRange("custom");try{localStorage.setItem("tf-stats-range","custom");}catch(err){}}}} style={{padding:"5px 8px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:6,color:"#e2e8f0",fontSize:12,fontFamily:"inherit",colorScheme:"dark"}}/>
+            {(customStart||customEnd)&&<button onClick={function(){setCustomStart("");setCustomEnd("");setRange(range==="custom"?"all":range);try{localStorage.setItem("tf-stats-range",range==="custom"?"all":range);}catch(e){}}} style={{padding:"4px 9px",background:"transparent",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Clear</button>}
           </div>
         )}
       </div>
