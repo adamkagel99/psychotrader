@@ -1726,7 +1726,7 @@ function SessionStrategy(props){
     else sizingLine="Disabled — no trading this session";
   }
   return (
-    <div style={CS({marginBottom:16,border:"1px solid "+content.color+"44"})}>
+    <div style={CS({marginBottom:props.hideMargin?0:16,border:"1px solid "+content.color+"44",height:"100%",boxSizing:"border-box"})}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
         <div style={{fontSize:13,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>Current Session</div>
         {sizingLine&&<div style={{fontSize:11,color:sessionEnabled?"#22c55e":"#64748b",fontWeight:600}}>{sizingLine}</div>}
@@ -3343,7 +3343,7 @@ function CommitmentPanel(props){
   var fld={width:"100%",padding:"10px 12px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8,color:"#e2e8f0",fontSize:14,fontFamily:"inherit",boxSizing:"border-box"};
   if(committed&&!open){
     return (
-      <div style={{marginBottom:14,padding:"12px 14px",background:"#0f1a14",border:"1px solid #166534",borderRadius:10}}>
+      <div style={{marginBottom:props.hideMargin?0:14,padding:"12px 14px",background:"#0f1a14",border:"1px solid #166534",borderRadius:10,width:"100%",boxSizing:"border-box",display:"flex",flexDirection:"column"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <span style={{fontSize:13,fontWeight:700,color:"#86efac"}}>✓ Today's commitment</span>
           <span style={{fontSize:11,color:"#94a3b8"}}>locked in</span>
@@ -3390,10 +3390,12 @@ function CompactConditions(props){
     });
   }
   return (
-    <button onClick={toggle} style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,padding:"6px 10px",background:allGood?"#0a1f1066":"#1c0a0a66",border:"1px solid "+(allGood?"#16653466":"#7f1d1d66"),borderRadius:6,cursor:"pointer",fontFamily:"inherit",width:"100%"}}>
-      <span style={{width:6,height:6,borderRadius:"50%",background:allGood?"#22c55e":"#ef4444"}}/>
-      <span style={{fontSize:11,color:allGood?"#86efac":"#fca5a5",fontWeight:600,letterSpacing:0.5}}>{allGood?"Conditions clear":"Conditions choppy"}</span>
-      <span style={{fontSize:10,color:"#64748b",marginLeft:"auto"}}>{allGood?"tap to flag":"tap to clear"}</span>
+    <button onClick={toggle} style={{display:"flex",flexDirection:"column",alignItems:"flex-start",gap:6,padding:"12px 14px",background:allGood?"#0a1f1066":"#1c0a0a66",border:"1px solid "+(allGood?"#16653466":"#7f1d1d66"),borderRadius:10,cursor:"pointer",fontFamily:"inherit",width:"100%",height:"100%",justifyContent:"center"}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,width:"100%"}}>
+        <span style={{width:8,height:8,borderRadius:"50%",background:allGood?"#22c55e":"#ef4444",flexShrink:0}}/>
+        <span style={{fontSize:13,color:allGood?"#86efac":"#fca5a5",fontWeight:700,letterSpacing:0.5}}>{allGood?"Conditions clear":"Conditions choppy"}</span>
+      </div>
+      <span style={{fontSize:11,color:"#64748b",textAlign:"left"}}>{allGood?"All checks clear — tap to flag any.":(warnings.length+" check"+(warnings.length===1?"":"s")+" active — tap to clear all.")}</span>
     </button>
   );
 }
@@ -3611,7 +3613,14 @@ function TradesTab(props){
   return (
     <div style={{paddingTop:16}}>
       {isToday&&<EventWarningBanner windowMin={60}/>}
-      {phase!=="closed"&&<CommitmentPanel state={props.state} setState={props.setState} phase={phase} settings={settings}/>}
+      {/* CHANGED: Commitment + Session in a single row on laptop — neither has so much content
+         that it justifies a full-width row, and pairing them eliminates the empty-space waste
+         from before. The standalone Conditions chip is dropped; the same state is already
+         surfaced as the disabled-looking "Conditions Choppy" button in the Journal header. */}
+      <div style={{display:"flex",flexDirection:props.mobile?"column":"row",gap:props.mobile?0:12,alignItems:"stretch",marginBottom:props.mobile?0:14}}>
+        {phase!=="closed"&&<div style={{flex:1,minWidth:0,display:"flex"}}><CommitmentPanel state={props.state} setState={props.setState} phase={phase} settings={settings} hideMargin/></div>}
+        {phase!=="closed"&&<div style={{flex:1,minWidth:0,display:"flex"}}><SessionStrategy phase={phase} preCheckComplete={preCheckComplete} settings={settings} hideMargin/></div>}
+      </div>
       {/* CHANGED: Discipline lockout banner — date-aware. When viewing today, shows the active lock
           (if any). When viewing a past day that had a lock event saved on its journal row, shows
           the historical lock summary. Otherwise hidden. */}
@@ -3715,23 +3724,7 @@ function TradesTab(props){
         }
         return null;
       })()}
-      {/* CHANGED: On non-mobile, render Conditions chip + Session banner in a single row so the
-         wide Conditions strip doesn't waste vertical space. Stacks on mobile as before. */}
-      <div style={{display:"flex",flexDirection:props.mobile?"column":"row",gap:props.mobile?0:10,alignItems:"stretch"}}>
-        {phase!=="closed"&&(function(){
-          var condItems=loadConditionsItems();
-          if(condItems.length===0)return null;
-          var conditionsChecked=props.state.conditionsChecked||{};
-          var warnings=condItems.filter(function(it){return !!conditionsChecked[it.key];});
-          var allGood=warnings.length===0;
-          return (
-            <div style={{flex:props.mobile?"none":"0 0 auto",minWidth:props.mobile?"auto":220}}>
-              <CompactConditions allGood={allGood} condItems={condItems} warnings={warnings} conditionsChecked={conditionsChecked} setState={props.setState}/>
-            </div>
-          );
-        })()}
-        {phase!=="closed"&&<div style={{flex:1,minWidth:0}}><SessionStrategy phase={phase} preCheckComplete={preCheckComplete} settings={settings}/></div>}
-      </div>
+      {/* CHANGED: Position/Risk strip removed from journal — shown in the New Trade form instead. */}
       {phase!=="closed"&&isToday&&props.liveTrades&&props.liveTrades.length>0&&(
         <div style={CS({marginBottom:16,border:"1px solid #ea580c",background:"#1c1108"})}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
