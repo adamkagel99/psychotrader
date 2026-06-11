@@ -6680,7 +6680,7 @@ function SettingsTab(props){
         </div>
         {transfers.length===0&&<div style={{fontSize:12,color:"#64748b",fontStyle:"italic",padding:"6px 0"}}>No transfers logged.</div>}
         {transfers.slice().sort(function(a,b){return new Date(b.date)-new Date(a.date);}).map(function(t){
-          var typ=t.type||(t.amount>=0?"withdrawal":"deposit");
+          var typ=t.type||(t.amount>=0?"deposit":"withdrawal");
           var isWith=typ==="withdrawal";
           return (
             <div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",marginBottom:4,background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:6}}>

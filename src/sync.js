@@ -376,7 +376,10 @@ async function handleSet(key) {
       client_id: String(t.id != null ? t.id : (t.date + "-" + t.amount)),
       date: t.date || null,
       amount: numOrNull(t.amount) || 0,
-      type: t.type || "deposit",
+      // CHANGED: When `type` is missing, derive from amount SIGN per the app's convention
+      // (deposit = positive amount, withdrawal = negative). Previously the default was always
+      // "deposit", which mislabeled withdrawals on round-trip if they lacked a type field.
+      type: t.type || ((numOrNull(t.amount) || 0) >= 0 ? "deposit" : "withdrawal"),
     }));
     if (rows.length) {
       await supabase.from("transfers").upsert(rows, { onConflict: "user_id,client_id" });
