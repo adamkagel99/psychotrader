@@ -6480,7 +6480,11 @@ function SettingsTab(props){
       for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k)dump[k]=localStorage.getItem(k);}
     }catch(e){alert("Could not read storage: "+(e.message||e));return;}
     var json=JSON.stringify(dump,null,2);
-    var filename="tf-backup-"+new Date().toISOString().slice(0,10)+".json";
+    // CHANGED: Filename uses LOCAL date, not UTC. toISOString() returns UTC, which silently
+    // rolls to "tomorrow" anytime after ~4pm Pacific — confusing when exporting in the evening.
+    var nowL=new Date();
+    var ymd=nowL.getFullYear()+"-"+String(nowL.getMonth()+1).padStart(2,"0")+"-"+String(nowL.getDate()).padStart(2,"0");
+    var filename="tf-backup-"+ymd+".json";
     // Try the standard download path first.
     try{
       var blob=new Blob([json],{type:"application/json"});
