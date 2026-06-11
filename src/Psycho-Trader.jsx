@@ -3611,21 +3611,7 @@ function TradesTab(props){
   return (
     <div style={{paddingTop:16}}>
       {isToday&&<EventWarningBanner windowMin={60}/>}
-      {/* CHANGED: Slim Conditions chip as a full-width strip at top, then Commitment + Session
-         side-by-side below. alignItems:flex-start lets each banner be its natural height —
-         neither stretches to match a taller sibling, killing the empty-space problem. */}
-      {phase!=="closed"&&(function(){
-        var condItems=loadConditionsItems();
-        if(condItems.length===0)return null;
-        var conditionsChecked=props.state.conditionsChecked||{};
-        var warnings=condItems.filter(function(it){return !!conditionsChecked[it.key];});
-        var allGood=warnings.length===0;
-        return <CompactConditions allGood={allGood} condItems={condItems} warnings={warnings} conditionsChecked={conditionsChecked} setState={props.setState}/>;
-      })()}
-      <div style={{display:"flex",flexDirection:props.mobile?"column":"row",gap:props.mobile?0:12,alignItems:"flex-start",marginBottom:props.mobile?0:14}}>
-        {phase!=="closed"&&<div style={{flex:1,minWidth:0,display:"flex"}}><CommitmentPanel state={props.state} setState={props.setState} phase={phase} settings={settings} hideMargin/></div>}
-        {phase!=="closed"&&<div style={{flex:1,minWidth:0,display:"flex"}}><SessionStrategy phase={phase} preCheckComplete={preCheckComplete} settings={settings} hideMargin/></div>}
-      </div>
+      {phase!=="closed"&&<CommitmentPanel state={props.state} setState={props.setState} phase={phase} settings={settings}/>}
       {/* CHANGED: Discipline lockout banner — date-aware. When viewing today, shows the active lock
           (if any). When viewing a past day that had a lock event saved on its journal row, shows
           the historical lock summary. Otherwise hidden. */}
@@ -3729,7 +3715,19 @@ function TradesTab(props){
         }
         return null;
       })()}
+      {/* CHANGED: Conditions banner — collapsed to a single-line chip when all clear; full panel only on warnings. */}
+      {phase!=="closed"&&(function(){
+        var condItems=loadConditionsItems();
+        if(condItems.length===0)return null;
+        var conditionsChecked=props.state.conditionsChecked||{};
+        var warnings=condItems.filter(function(it){return !!conditionsChecked[it.key];});
+        var allGood=warnings.length===0;
+        return (
+          <CompactConditions allGood={allGood} condItems={condItems} warnings={warnings} conditionsChecked={conditionsChecked} setState={props.setState}/>
+        );
+      })()}
       {/* CHANGED: Position/Risk strip removed from journal — shown in the New Trade form instead. */}
+      {phase!=="closed"&&<SessionStrategy phase={phase} preCheckComplete={preCheckComplete} settings={settings}/>}
       {phase!=="closed"&&isToday&&props.liveTrades&&props.liveTrades.length>0&&(
         <div style={CS({marginBottom:16,border:"1px solid #ea580c",background:"#1c1108"})}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
