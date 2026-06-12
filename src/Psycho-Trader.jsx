@@ -499,6 +499,8 @@ function calcDiscipline(trades,riskMaxArg,opts){
     rTerm=Math.max(-cap,Math.min(cap,raw));
   }
   var combined=processScore+rTerm;
+  // CHANGED: Temporary diagnostic — log the score breakdown so we can see why repeated saves drift.
+  try{if(typeof window!=="undefined"&&window.__disciplineDebug)console.log("[disc]",{trades:trades.length,processScore:processScore,rTerm:rTerm,anyViolation:anyViolation,dayPnL:dayPnL,combined:combined,perTrade:trades.map(function(t){return {id:t.id,grade:t.grade,violations:t.violations,emotions:t.emotions,pos:t.positionSize,posMaxAtEntry:t.posMaxAtEntry,pnl:t.pnl,pctPnl:t.pctPnl,sizeFraction:t.sizeFraction};})});}catch(e){}
   // CRITICAL CLAMP: the outcome term must never lift a failing process day above the lock
   // threshold. If process alone is below threshold, the R bonus cannot rescue it — at most it
   // brings the score up to (threshold - 1), so the lock still fires. Losing-R penalties are
