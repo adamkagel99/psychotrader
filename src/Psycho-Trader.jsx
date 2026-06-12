@@ -453,12 +453,18 @@ function calcDiscipline(trades,riskMaxArg,opts){
     var pos=parseFloat(t.positionSize)||0;
     // CHANGED: Prefer the position max stamped on the trade at save time; fall back to current settings.
     var effPosMax=(parseFloat(t.posMaxAtEntry)>0)?parseFloat(t.posMaxAtEntry):posMax;
-    if(effPosMax>0&&pos>effPosMax&&vs.indexOf("Oversized entry")<0)vs.push("Oversized entry");
+    // CHANGED: Symmetric add/remove — stale "Oversized entry" violations from before an edit get
+    // dropped here too, not just by autoAddViolations. Same idea for "Max risk exceeded" below.
+    var overIdx=vs.indexOf("Oversized entry");
+    if(effPosMax>0&&pos>effPosMax){if(overIdx<0)vs.push("Oversized entry");}
+    else if(overIdx>=0){vs.splice(overIdx,1);}
     // CHANGED: Recompute "Max risk exceeded" — loss % worse than session-scaled risk cap.
     // Prefer the threshold stamped at entry; else derive from current riskMaxPct × the trade's sizeFraction.
     var slPnl=parseFloat(t.pnl),slPct=parseFloat(t.pctPnl);
     var effStopThresh=(parseFloat(t.stopThreshPctAtEntry)>0)?parseFloat(t.stopThreshPctAtEntry):(riskMaxPctSetting>0?riskMaxPctSetting*((t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))?parseFloat(t.sizeFraction):1):0);
-    if(!isNaN(slPnl)&&slPnl<0&&!isNaN(slPct)&&effStopThresh>0&&slPct<-effStopThresh&&vs.indexOf("Max risk exceeded")<0)vs.push("Max risk exceeded");
+    var maxRiskIdx=vs.indexOf("Max risk exceeded");
+    if(!isNaN(slPnl)&&slPnl<0&&!isNaN(slPct)&&effStopThresh>0&&slPct<-effStopThresh){if(maxRiskIdx<0)vs.push("Max risk exceeded");}
+    else if(maxRiskIdx>=0){vs.splice(maxRiskIdx,1);}
     if(vs.length>0)anyViolation=true;
     processScore-=vs.length*(ds.violationPenalty||15);
     processScore-=(t.emotions||[]).filter(function(x){return getEmotionSentiment(x,sentiments)==="negative";}).length*(ds.negEmotionPenalty||10);
