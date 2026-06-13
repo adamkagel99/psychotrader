@@ -6241,7 +6241,8 @@ function PerformanceTab(props){
             function computeLR(slice){var l=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status==="open"||parseFloat(t.pnl)===0)return;n++;if(parseFloat(t.pnl)<0)l++;});});return n>0?(l/n*100):null;}
             function computeBE(slice){var b=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status==="open")return;n++;if(parseFloat(t.pnl)===0)b++;});});return n>0?(b/n*100):null;}
             function computePF(slice){var w=0,l=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){var p=parseFloat(t.pnl);if(isNaN(p)||t.status==="open")return;if(p>0)w+=p;else if(p<0)l+=Math.abs(p);});});if(l===0)return w>0?10:null;return w/l;}
-            function computeTradeCount(slice){var n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status!=="open")n++;});});return n;}
+            // CHANGED: Trades chart plots PER-DAY counts (last entry in slice), not cumulative.
+            function computeTradeCount(slice){if(slice.length===0)return 0;var r=slice[slice.length-1];var n=0;(r.trades||[]).forEach(function(t){if(t.status!=="open")n++;});return n;}
             function computeAvgWin(slice){var w=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){var p=parseFloat(t.pnl);if(!isNaN(p)&&p>0&&t.status!=="open"){w+=p;n++;}});});return n>0?(w/n):null;}
             function computeAvgLoss(slice){var l=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){var p=parseFloat(t.pnl);if(!isNaN(p)&&p<0&&t.status!=="open"){l+=p;n++;}});});return n>0?(l/n):null;}
             function computeExp(slice){var sum=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){var p=parseFloat(t.pnl);if(!isNaN(p)&&t.status!=="open"){sum+=p;n++;}});});return n>0?(sum/n):null;}
@@ -6263,7 +6264,7 @@ function PerformanceTab(props){
                 // CHANGED: Total trading time displayed to the right of the Trades value in the chart readout.
                 var ttMs=0;filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(t&&t.status!=="open"){var d=tradeDurationMs(t);if(d>0)ttMs+=d;}});});
                 var ttMeta=ttMs>0?(fmtDurationMs(ttMs)+" trading"):"";
-                return <MetricChart entries={filtered} label="Cumulative Trades" color="#a5b4fc" compute={computeTradeCount} format={fmtCount} meta={ttMeta}/>;
+                return <MetricChart entries={filtered} label="Trades per Day" color="#a5b4fc" compute={computeTradeCount} format={fmtCount} meta={ttMeta}/>;
               }
               if(selectedMetric==="profitFactor")return <MetricChart entries={filtered} minTrades={20} label="Profit Factor" color={pfColor} compute={computePF} format={fmtNum}/>;
               if(selectedMetric==="winRate")return <MetricChart entries={filtered} minTrades={20} label="Win Rate" color="#22c55e" compute={computeWR} format={fmtPct}/>;
