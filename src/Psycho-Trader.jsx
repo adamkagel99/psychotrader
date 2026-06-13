@@ -5352,7 +5352,9 @@ function MetricChart(props){
           {/* CHANGED: Removed the manual "+" prefix — fmt() now owns its own sign for $/% formats,
              so prepending here produced "++2.85%". For raw-number formats fmt won't have a sign,
              so handle that case explicitly. */}
-          <div style={{fontSize:13,fontWeight:700,color:delta>=0?"#22c55e":"#ef4444",marginTop:4,fontVariantNumeric:"tabular-nums"}}>{(function(){var s=fmt(delta);if(/^[+\-]/.test(s))return s;return (delta>=0?"+":"")+s;})()}</div>
+          {/* CHANGED: Change color can be inverted (loss rate, avg loss — where a rising value is
+             BAD). With invertChange, a positive delta colors red and a negative delta green. */}
+          <div style={{fontSize:13,fontWeight:700,color:(props.invertChange?delta<=0:delta>=0)?"#22c55e":"#ef4444",marginTop:4,fontVariantNumeric:"tabular-nums"}}>{(function(){var s=fmt(delta);if(/^[+\-]/.test(s))return s;return (delta>=0?"+":"")+s;})()}</div>
         </div>
       </div>
       <svg ref={svgRef} viewBox={"0 0 "+W+" "+H} style={{display:"block",width:"100%",height:"100%",flex:1,minHeight:120,touchAction:"none",cursor:"crosshair"}} preserveAspectRatio="none" onMouseMove={handleMove} onMouseLeave={handleLeave} onTouchStart={handleMove} onTouchMove={handleMove} onTouchEnd={handleLeave}>
@@ -6275,7 +6277,7 @@ function PerformanceTab(props){
               }
               if(selectedMetric==="profitFactor")return <MetricChart entries={filtered} minTrades={20} label="Profit Factor" color={pfColor} compute={computePF} format={fmtNum}/>;
               if(selectedMetric==="winRate")return <MetricChart entries={filtered} minTrades={20} label="Win Rate" color="#22c55e" compute={computeWR} format={fmtPct}/>;
-              if(selectedMetric==="lossRate")return <MetricChart entries={filtered} minTrades={20} label="Loss Rate" color="#ef4444" compute={computeLR} format={fmtPct}/>;
+              if(selectedMetric==="lossRate")return <MetricChart entries={filtered} minTrades={20} label="Loss Rate" color="#ef4444" compute={computeLR} format={fmtPct} invertChange/>;
               if(selectedMetric==="breakeven")return <MetricChart entries={filtered} minTrades={20} label="Breakeven Rate" color="#94a3b8" compute={computeBE} format={fmtPct}/>;
               if(selectedMetric==="avgWin")return <MetricChart entries={filtered} minTrades={20} label="Avg Win" color="#22c55e" compute={HIDE_DOLLAR_PNL?computeAvgWinPct:computeAvgWin} format={fmtDollar}/>;
               if(selectedMetric==="avgLoss")return <MetricChart entries={filtered} minTrades={20} label="Avg Loss" color="#ef4444" compute={HIDE_DOLLAR_PNL?computeAvgLossPct:computeAvgLoss} format={fmtDollar}/>;
