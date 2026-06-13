@@ -8081,7 +8081,14 @@ function App(props){
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,gap:12}}>
             <div style={{flex:1,minWidth:0}}>
               {/* CHANGED: brand only shows in mobile (no sidebar there); laptop shows date/session prominently. */}
-              {mobile&&<div style={{fontSize:13,fontWeight:800,color:"#a5b4fc",letterSpacing:-0.2,marginBottom:2}}>Psycho Trader</div>}
+              {mobile&&(
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
+                  <div style={{fontSize:13,fontWeight:800,color:"#a5b4fc",letterSpacing:-0.2}}>Psycho Trader</div>
+                  {/* CHANGED: Hide-$ toggle — on laptop it lives in the sidebar (hidden on mobile),
+                     so surface it here next to the brand. Same toggle action, same styling cues. */}
+                  <button onClick={function(){setSettings(function(s){return Object.assign({},s,{hideDollarPnL:!s.hideDollarPnL});});}} aria-label={settings.hideDollarPnL?"Show $ amounts":"Hide $ amounts"} style={{width:24,height:24,flexShrink:0,background:settings.hideDollarPnL?"#1e1b4b":"#0a0a0f",border:"1px solid "+(settings.hideDollarPnL?"#4338ca":"#334155"),borderRadius:6,color:settings.hideDollarPnL?"#a5b4fc":"#94a3b8",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",padding:0,lineHeight:1}}>{settings.hideDollarPnL?"%":"$"}</button>
+                </div>
+              )}
               <div style={{fontSize:18,fontWeight:700,color:"#e2e8f0",letterSpacing:-0.3}}>{todayDisplay()}</div>
               <div style={{fontSize:18,fontWeight:700,color:"#e2e8f0",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{fmtClock(headerNow)}</div>
             </div>
