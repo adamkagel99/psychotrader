@@ -5242,16 +5242,25 @@ function MetricChart(props){
     if(v!=null&&!isNaN(v))pts.push({date:sorted[i].date,v:v});
   }
   if(pts.length<1)return <div style={{padding:24,textAlign:"center",fontSize:12,color:"#64748b"}}>{minTrades>0?("Need at least "+minTrades+" trades for a meaningful trend."):"Not enough data to chart."}</div>;
-  var W=600,H=200,pad=28;
+  // CHANGED: Geometry + visuals match EquityCurve — same viewBox, area fill, dashed baseline,
+  // footer with first/last/peak labels — so all charts in the Overview block read consistently.
+  var W=320,H=80,padX=4,padY=6;
   var minV=Math.min.apply(null,pts.map(function(p){return p.v;}));
   var maxV=Math.max.apply(null,pts.map(function(p){return p.v;}));
+  // Anchor baseline to 0 when the data straddles or is near 0 (rates, expectancy). When all values
+  // are far from 0 (e.g. cumulative trade count), keep the range tight to maximize resolution.
+  var anchorZero=(minV<=0&&maxV>=0)||(minV>=0&&minV<(maxV-minV)*0.25);
+  if(anchorZero){if(minV>0)minV=0;if(maxV<0)maxV=0;}
   if(minV===maxV){minV-=1;maxV+=1;}
-  var span=maxV-minV;
-  function x(i){return pad+(pts.length<=1?(W-2*pad)/2:(i/(pts.length-1))*(W-2*pad));}
-  function y(v){return H-pad-((v-minV)/span)*(H-2*pad);}
-  var path=pts.map(function(p,i){return (i===0?"M":"L")+x(i).toFixed(1)+","+y(p.v).toFixed(1);}).join(" ");
+  function xFor(i){return padX+(pts.length<=1?W/2:(i/(pts.length-1))*(W-padX*2));}
+  function yFor(v){return H-padY-((v-minV)/(maxV-minV))*(H-padY*2);}
+  var linePath=pts.map(function(p,i){return (i===0?"M":"L")+xFor(i).toFixed(1)+","+yFor(p.v).toFixed(1);}).join("");
+  // Area fill back down to the baseline (0 if anchored there, else minV).
+  var baselineV=anchorZero?0:minV;
+  var areaPath=linePath+"L"+xFor(pts.length-1).toFixed(1)+","+yFor(baselineV).toFixed(1)+"L"+xFor(0).toFixed(1)+","+yFor(baselineV).toFixed(1)+"Z";
   var first=pts[0];
   var last=pts[pts.length-1];
+  var peak=pts.reduce(function(m,p){return p.v>m.v?p:m;},pts[0]);
   var display=hoverIdx!=null?pts[hoverIdx]:last;
   var delta=display.v-first.v;
   var fmt=props.format||function(v){return v.toFixed(2);};
@@ -5267,30 +5276,31 @@ function MetricChart(props){
   }
   function handleLeave(){setHoverIdx(null);}
   return (
-    <div style={{padding:"4px 0"}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8,padding:"0 4px"}}>
+    <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid #1e293b",borderRadius:10,display:"flex",flexDirection:"column",height:"100%",boxSizing:"border-box"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8,gap:8}}>
         <div>
           {hoverIdx!=null&&<div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{display.date}</div>}
-          <div style={{fontSize:22,fontWeight:700,color:color,marginTop:hoverIdx!=null?2:0,fontVariantNumeric:"tabular-nums"}}>{fmt(display.v)}</div>
+          <div style={{fontSize:20,fontWeight:700,color:color,marginTop:hoverIdx!=null?2:0,fontVariantNumeric:"tabular-nums"}}>{fmt(display.v)}</div>
         </div>
-        <div style={{textAlign:"right",fontSize:11,color:"#94a3b8",fontVariantNumeric:"tabular-nums"}}>
-          <div>start {fmt(first.v)}</div>
-          <div style={{color:delta>=0?"#22c55e":"#ef4444",fontWeight:600,marginTop:2}}>{(delta>=0?"+":"")}{fmt(delta)}</div>
+        <div style={{textAlign:"right"}}>
+          <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Change</div>
+          <div style={{fontSize:13,fontWeight:700,color:delta>=0?"#22c55e":"#ef4444",marginTop:4,fontVariantNumeric:"tabular-nums"}}>{(delta>=0?"+":"")}{fmt(delta)}</div>
         </div>
       </div>
-      <svg ref={svgRef} viewBox={"0 0 "+W+" "+H} preserveAspectRatio="none" style={{width:"100%",height:200,display:"block",touchAction:"none",cursor:"crosshair"}} onMouseMove={handleMove} onMouseLeave={handleLeave} onTouchStart={handleMove} onTouchMove={handleMove} onTouchEnd={handleLeave}>
-        <line x1={pad} x2={W-pad} y1={H-pad} y2={H-pad} stroke="#1e293b" strokeWidth="1"/>
-        <path d={path} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"/>
+      <svg ref={svgRef} viewBox={"0 0 "+W+" "+H} style={{display:"block",width:"100%",height:"100%",flex:1,minHeight:120,touchAction:"none",cursor:"crosshair"}} preserveAspectRatio="none" onMouseMove={handleMove} onMouseLeave={handleLeave} onTouchStart={handleMove} onTouchMove={handleMove} onTouchEnd={handleLeave}>
+        {anchorZero&&<line x1={padX} x2={W-padX} y1={yFor(0)} y2={yFor(0)} stroke="#334155" strokeWidth="0.5" strokeDasharray="2,2"/>}
+        <path d={areaPath} fill={color+"22"} stroke="none"/>
+        <path d={linePath} fill="none" stroke={color} strokeWidth="1.5"/>
         {hoverIdx!=null&&(
           <g>
-            <line x1={x(hoverIdx)} x2={x(hoverIdx)} y1={pad} y2={H-pad} stroke="#cbd5e1" strokeWidth="0.8" strokeDasharray="3,3"/>
-            <circle cx={x(hoverIdx)} cy={y(display.v)} r="4" fill={color} stroke="#fff" strokeWidth="1"/>
+            <line x1={xFor(hoverIdx)} x2={xFor(hoverIdx)} y1={padY} y2={H-padY} stroke="#cbd5e1" strokeWidth="0.6" strokeDasharray="2,2"/>
+            <circle cx={xFor(hoverIdx)} cy={yFor(display.v)} r="2.5" fill={color} stroke="#fff" strokeWidth="0.8"/>
           </g>
         )}
-        {hoverIdx==null&&<circle cx={x(pts.length-1)} cy={y(last.v)} r="3.5" fill={color}/>}
       </svg>
-      <div style={{display:"flex",justifyContent:"space-between",marginTop:6,fontSize:10,color:"#64748b",fontWeight:600,padding:"0 4px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",marginTop:6,fontSize:10,color:"#64748b",fontWeight:600}}>
         <span>{first.date}</span>
+        <span>peak {fmt(peak.v)}</span>
         <span>{last.date}</span>
       </div>
     </div>
