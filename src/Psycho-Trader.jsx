@@ -2625,10 +2625,13 @@ function NotebookPanel(props){
       return {instrument:t.instrument||"",direction:t.direction||"",time:t.time||"",pnl:t.pnl,note:t.notes.trim(),screenshots:(t.screenshots||[]).slice()};
     });
     var dayNote=(r.note||"").trim();
+    // CHANGED: Half-size lock reflection (`lockNote`) saved from the discipline lock banner also
+    // belongs in the Notebook — it's a written note like any other.
+    var lockNote=(r.lockNote||"").trim();
     // Day P&L from all closed trades (for the P&L sort), independent of which trades have notes.
     var dayPnl=(r.trades||[]).reduce(function(s,t){return s+((t&&t.status!=="open")?(parseFloat(t.pnl)||0):0);},0);
-    return {date:d,tradeNotes:tradeNotes,dayNote:dayNote,dayPnl:dayPnl};
-  }).filter(function(e){return e.tradeNotes.length>0||e.dayNote;});
+    return {date:d,tradeNotes:tradeNotes,dayNote:dayNote,lockNote:lockNote,dayPnl:dayPnl};
+  }).filter(function(e){return e.tradeNotes.length>0||e.dayNote||e.lockNote;});
   // CHANGED: Apply the chosen sort — by date or by day P&L, asc or desc.
   entries.sort(function(a,b){
     if(sortMode==="pnl_desc")return b.dayPnl-a.dayPnl;
@@ -2636,7 +2639,7 @@ function NotebookPanel(props){
     if(sortMode==="date_asc")return new Date(a.date)-new Date(b.date);
     return new Date(b.date)-new Date(a.date); // date_desc default
   });
-  var totalNotes=entries.reduce(function(s,e){return s+e.tradeNotes.length+(e.dayNote?1:0);},0);
+  var totalNotes=entries.reduce(function(s,e){return s+e.tradeNotes.length+(e.dayNote?1:0)+(e.lockNote?1:0);},0);
   function fmtDate(ds){try{var d=new Date(ds);return d.toLocaleDateString([],{weekday:"short",month:"short",day:"numeric"});}catch(e){return ds;}}
   return (
     <div style={{marginTop:16,marginBottom:16,border:"1px solid #1e293b",borderRadius:12,background:"#0d0d12",overflow:"hidden"}}>
@@ -2682,6 +2685,12 @@ function NotebookPanel(props){
                   <div style={{marginTop:e.tradeNotes.length>0?10:0,padding:"8px 11px",background:"#0a0a0f",borderLeft:"3px solid #4338ca",borderRadius:"0 5px 5px 0"}}>
                     <div style={{fontSize:10,color:"#64748b",textTransform:"uppercase",letterSpacing:0.5,marginBottom:3,fontWeight:600}}>End-of-day</div>
                     <div style={{fontSize:13,color:"#cbd5e1",lineHeight:1.5}}>{e.dayNote}</div>
+                  </div>
+                )}
+                {e.lockNote&&(
+                  <div style={{marginTop:(e.tradeNotes.length>0||e.dayNote)?10:0,padding:"8px 11px",background:"#0a0a0f",borderLeft:"3px solid #7f1d1d",borderRadius:"0 5px 5px 0"}}>
+                    <div style={{fontSize:10,color:"#fca5a5",textTransform:"uppercase",letterSpacing:0.5,marginBottom:3,fontWeight:600}}>Half-size reflection</div>
+                    <div style={{fontSize:13,color:"#cbd5e1",lineHeight:1.5,whiteSpace:"pre-wrap"}}>{e.lockNote}</div>
                   </div>
                 )}
               </div>
@@ -5041,14 +5050,20 @@ function StatRow(props){return <div style={{display:"flex",justifyContent:"space
 
 // CHANGED: StatTile — compact stat card used in grid layouts (e.g. Overview). Same visual language
 // as the summary panels at the top of the page (small uppercase label, big colored number).
+// Now optionally clickable (props.onClick) with an `active` outline state.
 function StatTile(props){
-  return (
-    <div style={{padding:"8px 10px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:6,minWidth:0,overflow:"hidden"}}>
-      <div style={{fontSize:9,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{props.label}</div>
+  var clickable=typeof props.onClick==="function";
+  var active=!!props.active;
+  var base={padding:"8px 10px",background:active?"#1a1830":"#0a0a0f",border:"1px solid "+(active?"#6366f1":"#1e293b"),borderRadius:6,minWidth:0,overflow:"hidden",fontFamily:"inherit",textAlign:"left",cursor:clickable?"pointer":"default",transition:"background 80ms, border-color 80ms"};
+  var inner=(
+    <>
+      <div style={{fontSize:9,color:active?"#a5b4fc":"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{props.label}</div>
       <div style={{fontSize:17,fontWeight:700,color:props.color||"#e2e8f0",marginTop:2,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{props.value}</div>
       {props.sub&&<div style={{fontSize:10,color:"#94a3b8",marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{props.sub}</div>}
-    </div>
+    </>
   );
+  if(clickable)return <button onClick={props.onClick} style={Object.assign(base,{width:"100%",display:"block"})}>{inner}</button>;
+  return <div style={base}>{inner}</div>;
 }
 
 // CHANGED: HBar — horizontal bar row for ranked breakdowns (setups, patterns, indicators). The bar
@@ -5199,6 +5214,57 @@ function AICoach(props){
 }
 // CHANGED: Equity curve summary — running cumulative P&L over the filtered period plus a
 // high-water-mark line. Shows current value, max drawdown, and best peak inline.
+// CHANGED: MetricChart — small SVG line chart used by the combined Overview block to plot any
+// metric over time (running win rate, profit factor, expectancy, trade count, etc). Total P&L
+// gets its own richer EquityCurve component; everything else routes here.
+function MetricChart(props){
+  var entries=props.entries||[];
+  var label=props.label||"";
+  var color=props.color||"#a5b4fc";
+  // compute is (rowsUpToHere) => number; called cumulatively
+  var compute=props.compute;
+  if(entries.length===0||typeof compute!=="function")return null;
+  var sorted=entries.slice().sort(function(a,b){return new Date(a.date)-new Date(b.date);});
+  var pts=[];
+  for(var i=0;i<sorted.length;i++){
+    var slice=sorted.slice(0,i+1);
+    var v=compute(slice);
+    if(v!=null&&!isNaN(v))pts.push({date:sorted[i].date,v:v});
+  }
+  if(pts.length<1)return <div style={{padding:24,textAlign:"center",fontSize:12,color:"#64748b"}}>Not enough data to chart {label}.</div>;
+  var W=600,H=200,pad=28;
+  var minV=Math.min.apply(null,pts.map(function(p){return p.v;}));
+  var maxV=Math.max.apply(null,pts.map(function(p){return p.v;}));
+  if(minV===maxV){minV-=1;maxV+=1;}
+  var span=maxV-minV;
+  function x(i){return pad+(pts.length<=1?(W-2*pad)/2:(i/(pts.length-1))*(W-2*pad));}
+  function y(v){return H-pad-((v-minV)/span)*(H-2*pad);}
+  var path=pts.map(function(p,i){return (i===0?"M":"L")+x(i).toFixed(1)+","+y(p.v).toFixed(1);}).join(" ");
+  var last=pts[pts.length-1];
+  var first=pts[0];
+  var delta=last.v-first.v;
+  var fmt=props.format||function(v){return v.toFixed(2);};
+  return (
+    <div style={{padding:"4px 0"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8,padding:"0 4px"}}>
+        <div>
+          <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{label}</div>
+          <div style={{fontSize:22,fontWeight:700,color:color,marginTop:2,fontVariantNumeric:"tabular-nums"}}>{fmt(last.v)}</div>
+        </div>
+        <div style={{textAlign:"right",fontSize:11,color:"#94a3b8",fontVariantNumeric:"tabular-nums"}}>
+          <div>start {fmt(first.v)}</div>
+          <div style={{color:delta>=0?"#22c55e":"#ef4444",fontWeight:600,marginTop:2}}>{(delta>=0?"+":"")}{fmt(delta)}</div>
+        </div>
+      </div>
+      <svg viewBox={"0 0 "+W+" "+H} preserveAspectRatio="none" style={{width:"100%",height:200,display:"block"}}>
+        <line x1={pad} x2={W-pad} y1={H-pad} y2={H-pad} stroke="#1e293b" strokeWidth="1"/>
+        <path d={path} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"/>
+        <circle cx={x(pts.length-1)} cy={y(last.v)} r="3.5" fill={color}/>
+      </svg>
+    </div>
+  );
+}
+
 function EquityCurve(props){
   var entries=props.entries||[];
   if(entries.length===0)return null;
@@ -5671,7 +5737,7 @@ function SessionDayHeatmap(props){
         <div>
           <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{hp?(hp.s.name+" · "+hp.d):"Session × Day"}</div>
           {hp?(
-            <div style={{fontSize:18,fontWeight:700,color:hp.c.pnl>=0?"#22c55e":"#ef4444",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{HIDE_DOLLAR_PNL?((hp.c.n>0?((hp.c.rSum/hp.c.n>=0?"+":"")+(hp.c.rSum/hp.c.n).toFixed(2)):"0.00")+"R avg"):fmt(hp.c.pnl)}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:6}}>{hp.c.n}t · {hp.c.n>0?Math.round(hp.c.wins/hp.c.n*100):0}% wr</span></div>
+            <div style={{fontSize:18,fontWeight:700,color:hp.c.n>0?(hp.c.wins/hp.c.n>=0.5?"#22c55e":"#ef4444"):"#94a3b8",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{hp.c.n>0?Math.round(hp.c.wins/hp.c.n*100):0}% wr<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:6}}>{hp.c.n}t · {HIDE_DOLLAR_PNL?((hp.c.n>0?((hp.c.rSum/hp.c.n>=0?"+":"")+(hp.c.rSum/hp.c.n).toFixed(2)):"0.00")+"R"):fmt(hp.c.pnl)}</span></div>
           ):(
             <div style={{fontSize:14,fontWeight:600,color:"#94a3b8",marginTop:2}}>Tap a cell to inspect</div>
           )}
@@ -5685,11 +5751,16 @@ function SessionDayHeatmap(props){
           dayLabels.forEach(function(d,di){
             var c=grid[si][di];
             var isHover=hover&&hover.s===si&&hover.d===di;
-            var alpha=c.n===0?0:Math.max(0.15,Math.min(1,Math.abs(c.pnl)/maxAbs));
-            var bg=c.n===0?"#0a0a0f":(c.pnl>=0?"rgba(34,197,94,"+alpha+")":"rgba(239,68,68,"+alpha+")");
+            // CHANGED: Color intensity now driven by WIN RATE distance from 50%, not P&L magnitude.
+            // 50% wr → neutral; 100% → full green; 0% → full red. Sample size still gates display.
+            var wr=c.n>0?(c.wins/c.n):0.5;
+            var dev=Math.abs(wr-0.5)*2; // 0 at 50%, 1 at 0% or 100%
+            var alpha=c.n===0?0:Math.max(0.18,dev);
+            var bg=c.n===0?"#0a0a0f":(wr>=0.5?"rgba(34,197,94,"+alpha+")":"rgba(239,68,68,"+alpha+")");
             children.push(
-              <button key={si+"-"+di} onClick={function(){setHover(isHover?null:{s:si,d:di});}} onMouseEnter={function(){if(c.n>0)setHover({s:si,d:di});}} onMouseLeave={function(){setHover(null);}} style={{height:32,background:bg,border:isHover?"1.5px solid #fff":"1px solid "+(c.n===0?"#1e293b":"#334155"),borderRadius:4,cursor:c.n>0?"pointer":"default",fontFamily:"inherit",padding:0,display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}>
-                {c.n>0&&<span style={{fontSize:10,fontWeight:700,color:"#fff",fontVariantNumeric:"tabular-nums",textShadow:"0 1px 2px rgba(0,0,0,0.6)"}}>{c.n}</span>}
+              <button key={si+"-"+di} onClick={function(){setHover(isHover?null:{s:si,d:di});}} onMouseEnter={function(){if(c.n>0)setHover({s:si,d:di});}} onMouseLeave={function(){setHover(null);}} style={{height:36,background:bg,border:isHover?"1.5px solid #fff":"1px solid "+(c.n===0?"#1e293b":"#334155"),borderRadius:4,cursor:c.n>0?"pointer":"default",fontFamily:"inherit",padding:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",position:"relative"}}>
+                {c.n>0&&<span style={{fontSize:11,fontWeight:700,color:"#fff",fontVariantNumeric:"tabular-nums",textShadow:"0 1px 2px rgba(0,0,0,0.6)",lineHeight:1}}>{Math.round(c.wins/c.n*100)}%</span>}
+                {c.n>0&&<span style={{fontSize:8,fontWeight:600,color:"#ffffffcc",fontVariantNumeric:"tabular-nums",lineHeight:1,marginTop:2}}>{c.n}t</span>}
               </button>
             );
           });
@@ -5761,6 +5832,8 @@ function PerformanceTab(props){
   var [rows,setRows]=useState([]);
   // CHANGED: Persist the time-range selection across tab switches (matches scalingTarget below).
   var [range,setRange]=useState(function(){try{var r=localStorage.getItem("tf-stats-range")||"all";return r==="custom"?"all":r;}catch(e){return "all";}});
+  // CHANGED: Selected metric for the combined Overview / chart block. Default = totalPnl (equity curve).
+  var [selectedMetric,setSelectedMetric]=useState("totalPnl");
   // CHANGED: Custom mode tracks whether the Custom pill's date inputs are revealed. The actual
   // `range` value stays on the previously-selected preset until the user picks at least one
   // date — so the displayed data doesn't change the moment Custom is tapped.
@@ -6019,9 +6092,36 @@ function PerformanceTab(props){
             var eq=[],c=0;filtered.forEach(function(r){c+=parseFloat(r.pnl)||0;eq.push(c);});
             var pfn=parseFloat(pf);
             var pfColor=pf==="∞"||pfn>1?"#22c55e":pfn<1?"#ef4444":"#94a3b8";
+            // CHANGED: Helpers for running metrics — each compute(slice) returns a single value
+            // representing the metric value as of the END of `slice`. Used by MetricChart.
+            function computeWR(slice){var w=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status==="open"||parseFloat(t.pnl)===0)return;n++;if(parseFloat(t.pnl)>0)w++;});});return n>0?(w/n*100):null;}
+            function computeLR(slice){var l=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status==="open"||parseFloat(t.pnl)===0)return;n++;if(parseFloat(t.pnl)<0)l++;});});return n>0?(l/n*100):null;}
+            function computeBE(slice){var b=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status==="open")return;n++;if(parseFloat(t.pnl)===0)b++;});});return n>0?(b/n*100):null;}
+            function computePF(slice){var w=0,l=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){var p=parseFloat(t.pnl);if(isNaN(p)||t.status==="open")return;if(p>0)w+=p;else if(p<0)l+=Math.abs(p);});});if(l===0)return w>0?10:null;return w/l;}
+            function computeTradeCount(slice){var n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status!=="open")n++;});});return n;}
+            function computeAvgWin(slice){var w=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){var p=parseFloat(t.pnl);if(!isNaN(p)&&p>0&&t.status!=="open"){w+=p;n++;}});});return n>0?(w/n):null;}
+            function computeAvgLoss(slice){var l=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){var p=parseFloat(t.pnl);if(!isNaN(p)&&p<0&&t.status!=="open"){l+=p;n++;}});});return n>0?(l/n):null;}
+            function computeExp(slice){var sum=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){var p=parseFloat(t.pnl);if(!isNaN(p)&&t.status!=="open"){sum+=p;n++;}});});return n>0?(sum/n):null;}
+            var fmtPct=function(v){return v.toFixed(1)+"%";};
+            var fmtNum=function(v){return v.toFixed(2);};
+            var fmtCount=function(v){return Math.round(v).toString();};
+            var fmtDollar=function(v){return (v>=0?"+":"-")+"$"+Math.abs(v).toFixed(0);};
+            // Chart shown based on selectedMetric.
+            function renderChart(){
+              if(selectedMetric==="totalPnl")return <EquityCurve entries={filtered} range={range}/>;
+              if(selectedMetric==="trades")return <MetricChart entries={filtered} label="Cumulative Trades" color="#a5b4fc" compute={computeTradeCount} format={fmtCount}/>;
+              if(selectedMetric==="profitFactor")return <MetricChart entries={filtered} label="Profit Factor" color={pfColor} compute={computePF} format={fmtNum}/>;
+              if(selectedMetric==="winRate")return <MetricChart entries={filtered} label="Win Rate" color="#22c55e" compute={computeWR} format={fmtPct}/>;
+              if(selectedMetric==="lossRate")return <MetricChart entries={filtered} label="Loss Rate" color="#ef4444" compute={computeLR} format={fmtPct}/>;
+              if(selectedMetric==="breakeven")return <MetricChart entries={filtered} label="Breakeven Rate" color="#94a3b8" compute={computeBE} format={fmtPct}/>;
+              if(selectedMetric==="avgWin")return <MetricChart entries={filtered} label="Avg Win" color="#22c55e" compute={computeAvgWin} format={fmtDollar}/>;
+              if(selectedMetric==="avgLoss")return <MetricChart entries={filtered} label="Avg Loss" color="#ef4444" compute={computeAvgLoss} format={fmtDollar}/>;
+              if(selectedMetric==="expectancy")return <MetricChart entries={filtered} label="Expectancy / Trade" color={expValue>=0?"#22c55e":"#ef4444"} compute={computeExp} format={fmtDollar}/>;
+              return <EquityCurve entries={filtered} range={range}/>;
+            }
             return <StatSec title="Overview" colSpan={props.mobile?1:6}>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:6,padding:"4px 0"}}>
-                <StatTile label="Total P&L" value={HIDE_DOLLAR_PNL?(function(){
+                <StatTile label="Total P&L" active={selectedMetric==="totalPnl"} onClick={function(){setSelectedMetric("totalPnl");}} value={HIDE_DOLLAR_PNL?(function(){
                   // CHANGED: For all-time / long ranges, % return is computed against total deposits
                   // (cumulative invested capital), not summed daily %s — much more meaningful.
                   if(range==="all"||range==="year"||range==="3month"){
@@ -6030,19 +6130,20 @@ function PerformanceTab(props){
                   }
                   var s=0;filtered.forEach(function(r){var sb=0;try{sb=getAccountBalanceAtDate(r.date);}catch(x){}s+=(sb>0?((parseFloat(r.pnl)||0)/sb*100):0);});return (s>=0?"+":"")+s.toFixed(2)+"%";
                 })():((totalPnl>=0?"+":"-")+"$"+Math.abs(totalPnl).toFixed(2))} color={totalPnl>=0?"#22c55e":"#ef4444"}/>
-                <StatTile label="Trades" value={totalTradesCount} sub={tradingDays>0?(Math.ceil(totalTradesCount/tradingDays)+"/day · "+tradingDays+"d"):""}/>
-                <StatTile label="Profit Factor" value={pf} color={pfColor}/>
-                <StatTile label="Win Rate" value={winRate+"%"} color="#22c55e" sub={wins.length+" wins"}/>
-                <StatTile label="Loss Rate" value={(100-winRate-breakevenRate)+"%"} color="#ef4444" sub={losses.length+" losses"}/>
-                <StatTile label="Breakeven" value={breakevenRate+"%"} color="#94a3b8" sub={breakevens.length+" BE"}/>
-                <StatTile label="Avg Win" value={HIDE_DOLLAR_PNL?avgWinPct():("+$"+avgWin.toFixed(0))} color="#22c55e" sub={HIDE_DOLLAR_PNL?"":(avgWinPct())}/>
-                <StatTile label="Avg Loss" value={HIDE_DOLLAR_PNL?avgLossPct():("-$"+Math.abs(avgLoss).toFixed(0))} color="#ef4444" sub={HIDE_DOLLAR_PNL?"":(avgLossPct())}/>
-                <StatTile label="Expectancy" value={HIDE_DOLLAR_PNL?expPct():((expValue>=0?"+":"-")+"$"+Math.abs(expValue).toFixed(2))} color={expValue>=0?"#22c55e":"#ef4444"} sub={HIDE_DOLLAR_PNL?"":expPct()}/>
+                <StatTile label="Trades" active={selectedMetric==="trades"} onClick={function(){setSelectedMetric("trades");}} value={totalTradesCount} sub={tradingDays>0?(Math.ceil(totalTradesCount/tradingDays)+"/day · "+tradingDays+"d"):""}/>
+                <StatTile label="Profit Factor" active={selectedMetric==="profitFactor"} onClick={function(){setSelectedMetric("profitFactor");}} value={pf} color={pfColor}/>
+                <StatTile label="Win Rate" active={selectedMetric==="winRate"} onClick={function(){setSelectedMetric("winRate");}} value={winRate+"%"} color="#22c55e" sub={wins.length+" wins"}/>
+                <StatTile label="Loss Rate" active={selectedMetric==="lossRate"} onClick={function(){setSelectedMetric("lossRate");}} value={(100-winRate-breakevenRate)+"%"} color="#ef4444" sub={losses.length+" losses"}/>
+                <StatTile label="Breakeven" active={selectedMetric==="breakeven"} onClick={function(){setSelectedMetric("breakeven");}} value={breakevenRate+"%"} color="#94a3b8" sub={breakevens.length+" BE"}/>
+                <StatTile label="Avg Win" active={selectedMetric==="avgWin"} onClick={function(){setSelectedMetric("avgWin");}} value={HIDE_DOLLAR_PNL?avgWinPct():("+$"+avgWin.toFixed(0))} color="#22c55e" sub={HIDE_DOLLAR_PNL?"":(avgWinPct())}/>
+                <StatTile label="Avg Loss" active={selectedMetric==="avgLoss"} onClick={function(){setSelectedMetric("avgLoss");}} value={HIDE_DOLLAR_PNL?avgLossPct():("-$"+Math.abs(avgLoss).toFixed(0))} color="#ef4444" sub={HIDE_DOLLAR_PNL?"":(avgLossPct())}/>
+                <StatTile label="Expectancy" active={selectedMetric==="expectancy"} onClick={function(){setSelectedMetric("expectancy");}} value={HIDE_DOLLAR_PNL?expPct():((expValue>=0?"+":"-")+"$"+Math.abs(expValue).toFixed(2))} color={expValue>=0?"#22c55e":"#ef4444"} sub={HIDE_DOLLAR_PNL?"":expPct()}/>
               </div>
+              {/* CHANGED: Chart embedded directly under Overview tiles — clicking a tile swaps the chart. */}
+              <div style={{marginTop:14,paddingTop:12,borderTop:"1px solid #1e293b"}}>{renderChart()}</div>
             </StatSec>;
           })()}
           {/* CHANGED: Order per user spec — EquityCurve, then Daily P&L (under it), then Heatmap. */}
-          <div style={{breakInside:"avoid",WebkitColumnBreakInside:"avoid",marginBottom:16}}><EquityCurve entries={filtered} range={range}/></div>
           <StatSec title="Daily P&L">
             <DailyPnLBar entries={filtered}/>
           </StatSec>
