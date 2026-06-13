@@ -1464,25 +1464,29 @@ function DailyPnLBar(props){
               {isHov&&<line x1={bx+barW/2} y1={PT} x2={bx+barW/2} y2={PT+chartH} stroke="#334155" strokeWidth="1" strokeDasharray="3,2"/>}
               {/* Date label */}
               {(sorted.length<=10||(i%(Math.ceil(sorted.length/8))===0))&&<text x={bx+barW/2} y={PT+chartH+16} textAnchor="middle" fontSize="8" fill={isHov?"#e2e8f0":"#94a3b8"}>{fmtDate(e.date)}</text>}
-              {/* Tooltip */}
-              {isHov&&(function(){
-                var tx=bx+barW/2,ty=pnl>=0?by-6:by+bh+14;
-                var dateStr=fmtDate(e.date),pnlStr=HIDE_DOLLAR_PNL?((function(){var sb=getAccountBalanceAtDate(e.date);var p=sb>0?(pnl/sb*100):0;return (p>=0?"+":"")+p.toFixed(2)+"%";})()):(fmtPnl(pnl));
-                var trades=(e.trades||[]).length;
-                var label=dateStr+" · "+pnlStr+(trades>0?" · "+trades+"t":"");
-                var tw=label.length*5.5+14;
-                var tx2=Math.max(PL+tw/2,Math.min(PL+chartW-tw/2,tx));
-                var ty2=pnl>=0?Math.max(PT+14,ty):Math.min(PT+chartH-4,ty);
-                return (
-                  <g>
-                    <rect x={tx2-tw/2} y={ty2-13} width={tw} height={18} fill="#1e293b" rx="4" style={{filter:"drop-shadow(0 2px 4px rgba(0,0,0,0.5))"}}/>
-                    <text x={tx2} y={ty2} textAnchor="middle" fontSize="9" fontWeight="700" fill={color}>{label}</text>
-                  </g>
-                );
-              })()}
             </g>
           );
         })}
+        {/* CHANGED: Tooltip moved OUT of the per-bar loop and rendered last so later bars can't
+           paint over it. Also given an opaque fill + border so it's readable against any bar. */}
+        {hoverIdx!=null&&(function(){
+          var e=sorted[hoverIdx];if(!e)return null;
+          var pnl=parseFloat(e.pnl)||0,bx=barX(hoverIdx),bh=barH(pnl,pcts[hoverIdx]),by=barY(pnl,pcts[hoverIdx]);
+          var color=pnl>=0?"#22c55e":"#ef4444";
+          var tx=bx+barW/2,ty=pnl>=0?by-6:by+bh+14;
+          var dateStr=fmtDate(e.date),pnlStr=HIDE_DOLLAR_PNL?((function(){var sb=getAccountBalanceAtDate(e.date);var p=sb>0?(pnl/sb*100):0;return (p>=0?"+":"")+p.toFixed(2)+"%";})()):(fmtPnl(pnl));
+          var trades=(e.trades||[]).length;
+          var label=dateStr+" · "+pnlStr+(trades>0?" · "+trades+"t":"");
+          var tw=label.length*5.5+16;
+          var tx2=Math.max(PL+tw/2,Math.min(PL+chartW-tw/2,tx));
+          var ty2=pnl>=0?Math.max(PT+14,ty):Math.min(PT+chartH-4,ty);
+          return (
+            <g style={{pointerEvents:"none"}}>
+              <rect x={tx2-tw/2} y={ty2-13} width={tw} height={18} fill="#0f172a" stroke="#334155" strokeWidth="0.75" rx="4" style={{filter:"drop-shadow(0 2px 6px rgba(0,0,0,0.7))"}}/>
+              <text x={tx2} y={ty2} textAnchor="middle" fontSize="9" fontWeight="700" fill={color}>{label}</text>
+            </g>
+          );
+        })()}
         <line x1={PL} y1={PT} x2={PL} y2={PT+chartH} stroke="#1e293b" strokeWidth="1"/>
         <line x1={PL} y1={PT+chartH} x2={PL+chartW} y2={PT+chartH} stroke="#1e293b" strokeWidth="1"/>
       </svg>
