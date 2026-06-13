@@ -5400,10 +5400,10 @@ function EquityCurve(props){
   var areaPath=pts.map(function(p,i){return (i===0?"M":"L")+xFor(i).toFixed(1)+","+yFor(p.cum).toFixed(1);}).join("")+"L"+xFor(pts.length-1).toFixed(1)+","+yFor(0).toFixed(1)+"L"+xFor(0).toFixed(1)+","+yFor(0).toFixed(1)+"Z";
   var linePath=pts.map(function(p,i){return (i===0?"M":"L")+xFor(i).toFixed(1)+","+yFor(p.cum).toFixed(1);}).join("");
   var peakPath=pts.map(function(p,i){return (i===0?"M":"L")+xFor(i).toFixed(1)+","+yFor(p.peak).toFixed(1);}).join("");
-  // CHANGED: when $ is hidden, equity is expressed in R (cumulative P&L ÷ risk-per-trade).
-  var eqRisk=0;try{var _s=localStorage.getItem(SETTINGS_KEY);if(_s)eqRisk=parseFloat(JSON.parse(_s).riskMax)||0;}catch(e){}
+  // CHANGED: When $ is hidden, equity is expressed as % return off the starting balance — keeps
+  // the readout in the same unit as the Total P&L stat tile instead of switching to R-multiples.
   var positive=cum>=0;
-  var fmt=function(n){if(HIDE_DOLLAR_PNL){var r=eqRisk>0?n/eqRisk:0;return (r>=0?"+":"-")+Math.abs(r).toFixed(1)+"R";}return (n>=0?"+":"-")+"$"+Math.abs(n).toFixed(2);};
+  var fmt=function(n){if(HIDE_DOLLAR_PNL){var pct=startBal>0?(n/startBal*100):0;return (pct>=0?"+":"")+pct.toFixed(2)+"%";}return (n>=0?"+":"-")+"$"+Math.abs(n).toFixed(2);};
   // CHANGED: Interactive hover/drag — readout switches to the value at the hovered point.
   var [hoverIdx,setHoverIdx]=useState(null);
   var svgRef=React.useRef(null);
@@ -5430,7 +5430,7 @@ function EquityCurve(props){
         </div>
         <div style={{textAlign:"right"}}>
           <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Max Drawdown</div>
-          <div style={{fontSize:13,fontWeight:700,color:"#ef4444",marginTop:4,fontVariantNumeric:"tabular-nums"}}>{maxDD<0?(HIDE_DOLLAR_PNL?((eqRisk>0?(maxDD/eqRisk):0).toFixed(1)+"R"):fmt(maxDD)):"—"}</div>
+          <div style={{fontSize:13,fontWeight:700,color:"#ef4444",marginTop:4,fontVariantNumeric:"tabular-nums"}}>{maxDD<0?(HIDE_DOLLAR_PNL?(maxDDPct.toFixed(2)+"%"):fmt(maxDD)):"—"}</div>
         </div>
       </div>
       <svg ref={svgRef} viewBox={"0 0 "+W+" "+H} style={{display:"block",width:"100%",height:"100%",flex:1,minHeight:120,touchAction:"none",cursor:"crosshair"}} preserveAspectRatio="none" onMouseMove={handleMove} onMouseLeave={handleLeave} onTouchStart={handleMove} onTouchMove={handleMove} onTouchEnd={handleLeave}>
@@ -6196,11 +6196,18 @@ function PerformanceTab(props){
             function computeAvgWin(slice){var w=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){var p=parseFloat(t.pnl);if(!isNaN(p)&&p>0&&t.status!=="open"){w+=p;n++;}});});return n>0?(w/n):null;}
             function computeAvgLoss(slice){var l=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){var p=parseFloat(t.pnl);if(!isNaN(p)&&p<0&&t.status!=="open"){l+=p;n++;}});});return n>0?(l/n):null;}
             function computeExp(slice){var sum=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){var p=parseFloat(t.pnl);if(!isNaN(p)&&t.status!=="open"){sum+=p;n++;}});});return n>0?(sum/n):null;}
+            // CHANGED: % variants — used when HIDE_DOLLAR_PNL is on. Average the per-trade pctPnl
+            // values, which already reflect each trade's % return — that's the meaningful "avg %".
+            function computeAvgWinPct(slice){var w=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){var pp=parseFloat(t.pctPnl),pl=parseFloat(t.pnl);if(!isNaN(pp)&&!isNaN(pl)&&pl>0&&t.status!=="open"){w+=pp;n++;}});});return n>0?(w/n):null;}
+            function computeAvgLossPct(slice){var l=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){var pp=parseFloat(t.pctPnl),pl=parseFloat(t.pnl);if(!isNaN(pp)&&!isNaN(pl)&&pl<0&&t.status!=="open"){l+=pp;n++;}});});return n>0?(l/n):null;}
+            function computeExpPct(slice){var s=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){var pp=parseFloat(t.pctPnl);if(!isNaN(pp)&&t.status!=="open"){s+=pp;n++;}});});return n>0?(s/n):null;}
             var fmtPct=function(v){return v.toFixed(1)+"%";};
             var fmtNum=function(v){return v.toFixed(2);};
             var fmtCount=function(v){return Math.round(v).toString();};
-            var fmtDollar=function(v){return (v>=0?"+":"-")+"$"+Math.abs(v).toFixed(0);};
-            // Chart shown based on selectedMetric.
+            // CHANGED: fmtDollar now respects the global HIDE_DOLLAR_PNL toggle — returns % when on.
+            var fmtDollar=function(v){if(HIDE_DOLLAR_PNL)return (v>=0?"+":"")+v.toFixed(2)+"%";return (v>=0?"+":"-")+"$"+Math.abs(v).toFixed(0);};
+            // CHANGED: Chart shown based on selectedMetric. For Avg Win/Loss/Expectancy, swap to the
+            // % compute when HIDE_DOLLAR_PNL is on so the line reflects what the format shows.
             function renderChart(){
               if(selectedMetric==="totalPnl")return <EquityCurve entries={filtered} range={range}/>;
               if(selectedMetric==="trades")return <MetricChart entries={filtered} label="Cumulative Trades" color="#a5b4fc" compute={computeTradeCount} format={fmtCount}/>;
@@ -6208,9 +6215,9 @@ function PerformanceTab(props){
               if(selectedMetric==="winRate")return <MetricChart entries={filtered} minTrades={20} label="Win Rate" color="#22c55e" compute={computeWR} format={fmtPct}/>;
               if(selectedMetric==="lossRate")return <MetricChart entries={filtered} minTrades={20} label="Loss Rate" color="#ef4444" compute={computeLR} format={fmtPct}/>;
               if(selectedMetric==="breakeven")return <MetricChart entries={filtered} minTrades={20} label="Breakeven Rate" color="#94a3b8" compute={computeBE} format={fmtPct}/>;
-              if(selectedMetric==="avgWin")return <MetricChart entries={filtered} minTrades={20} label="Avg Win" color="#22c55e" compute={computeAvgWin} format={fmtDollar}/>;
-              if(selectedMetric==="avgLoss")return <MetricChart entries={filtered} minTrades={20} label="Avg Loss" color="#ef4444" compute={computeAvgLoss} format={fmtDollar}/>;
-              if(selectedMetric==="expectancy")return <MetricChart entries={filtered} minTrades={20} label="Expectancy / Trade" color={expValue>=0?"#22c55e":"#ef4444"} compute={computeExp} format={fmtDollar}/>;
+              if(selectedMetric==="avgWin")return <MetricChart entries={filtered} minTrades={20} label="Avg Win" color="#22c55e" compute={HIDE_DOLLAR_PNL?computeAvgWinPct:computeAvgWin} format={fmtDollar}/>;
+              if(selectedMetric==="avgLoss")return <MetricChart entries={filtered} minTrades={20} label="Avg Loss" color="#ef4444" compute={HIDE_DOLLAR_PNL?computeAvgLossPct:computeAvgLoss} format={fmtDollar}/>;
+              if(selectedMetric==="expectancy")return <MetricChart entries={filtered} minTrades={20} label="Expectancy / Trade" color={expValue>=0?"#22c55e":"#ef4444"} compute={HIDE_DOLLAR_PNL?computeExpPct:computeExp} format={fmtDollar}/>;
               return <EquityCurve entries={filtered} range={range}/>;
             }
             return <StatSec title="Overview" colSpan={props.mobile?1:6}>
