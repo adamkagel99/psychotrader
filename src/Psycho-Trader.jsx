@@ -3259,15 +3259,16 @@ function PerfProgressCard(props){
         <span style={{fontSize:13,color:"#c7d2fe",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700}}>Performance &amp; Progress</span>
         <svg width="13" height="13" viewBox="0 0 12 12" fill="none" style={{transition:"transform 0.2s",transform:open?"rotate(180deg)":"rotate(0deg)"}}><path d="M2 4l4 4 4-4" stroke="#a5b4fc" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
       </button>
-      {/* CHANGED: KPI tiles (the first line of data) always show, even collapsed. Shrink to fit in mobile. */}
-      <div style={{display:"grid",gridTemplateColumns:props.mobile?"repeat(5,1fr)":"repeat(auto-fit,minmax(132px,1fr))",gap:1,background:"#1e293b"}}>
+      {/* CHANGED: On mobile, KPI tiles wrap to a 2-column grid so labels aren't truncated and
+         each value has room to breathe. Desktop unchanged. */}
+      <div style={{display:"grid",gridTemplateColumns:props.mobile?"repeat(2,1fr)":"repeat(auto-fit,minmax(132px,1fr))",gap:1,background:"#1e293b"}}>
         {kpis.map(function(k){return (
-          <div key={k.label} style={{padding:props.mobile?"9px 5px":"14px 14px 13px",background:"#111118",display:"flex",flexDirection:"column",gap:props.mobile?3:6,minWidth:0}}>
-            <div style={{display:"flex",alignItems:"center",gap:props.mobile?3:6,minWidth:0}}>
-              <span style={{fontSize:props.mobile?10:13,flexShrink:0}}>{k.icon}</span>
-              <span style={{fontSize:props.mobile?8:10,color:"#64748b",letterSpacing:props.mobile?0.2:0.6,textTransform:"uppercase",fontWeight:700,lineHeight:1.1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{k.label}</span>
+          <div key={k.label} style={{padding:props.mobile?"11px 12px":"14px 14px 13px",background:"#111118",display:"flex",flexDirection:"column",gap:props.mobile?5:6,minWidth:0}}>
+            <div style={{display:"flex",alignItems:"center",gap:props.mobile?6:6,minWidth:0}}>
+              <span style={{fontSize:props.mobile?12:13,flexShrink:0}}>{k.icon}</span>
+              <span style={{fontSize:props.mobile?10:10,color:"#64748b",letterSpacing:0.6,textTransform:"uppercase",fontWeight:700,lineHeight:1.1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{k.label}</span>
             </div>
-            <div style={{fontSize:props.mobile?14:24,fontWeight:800,color:k.color,fontVariantNumeric:"tabular-nums",lineHeight:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.value}{k.suffix&&<span style={{fontSize:props.mobile?8:12,color:"#64748b",fontWeight:500}}>{k.suffix}</span>}</div>
+            <div style={{fontSize:props.mobile?20:24,fontWeight:800,color:k.color,fontVariantNumeric:"tabular-nums",lineHeight:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.value}{k.suffix&&<span style={{fontSize:props.mobile?10:12,color:"#64748b",fontWeight:500}}>{k.suffix}</span>}</div>
           </div>
         );})}
       </div>
@@ -3804,19 +3805,22 @@ function TradesTab(props){
       )}
       {/* CHANGED: Sticky Journal controls — date picker, add trade, sort, filter stay pinned while scrolling. */}
       <div style={{position:"sticky",top:66,zIndex:200,background:"#0a0a0f",paddingTop:8,marginBottom:14,borderBottom:"1px solid #1e293b"}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,position:"relative",gap:12}}>
-        <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}>
+      {/* CHANGED: On mobile, the action button (which may be a long "Complete pre-market
+         checklist first" label) wraps to its own row so it can't overlap the Today pill /
+         All trades button. Desktop stays as a single row. */}
+      <div style={{display:"flex",flexDirection:props.mobile?"column":"row",justifyContent:"space-between",alignItems:props.mobile?"stretch":"center",marginBottom:10,position:"relative",gap:props.mobile?8:12}}>
+        <div style={{display:"flex",alignItems:"center",gap:props.mobile?8:10,minWidth:0,flexWrap:"wrap"}}>
           <div style={{fontSize:18,fontWeight:700,color:"#e2e8f0"}}>Journal</div>
           <button onClick={function(){setGalleryScope("session");setPickerOpen(function(o){return !o;});}} style={{padding:"6px 12px",background:galleryScope==="session"?"#1e1b4b":"#111118",border:"1px solid "+(galleryScope==="session"?"#4338ca":"#334155"),borderRadius:6,color:galleryScope==="session"?"#a5b4fc":"#cbd5e1",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:6,whiteSpace:"nowrap"}}>📅 {isToday?"Today":selectedDate}<span style={{fontSize:11,opacity:0.7}}>▾</span></button>
           <button onClick={function(){setGalleryScope("all");}} style={{padding:"6px 12px",background:galleryScope==="all"?"#1e1b4b":"#111118",border:"1px solid "+(galleryScope==="all"?"#4338ca":"#334155"),borderRadius:6,color:galleryScope==="all"?"#a5b4fc":"#cbd5e1",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>All trades</button>
         </div>
-        <div style={{display:"flex",gap:8}}>
-          {/* CHANGED: Show disabled button with reason rather than hiding it, so user knows why they can't trade. */}
+        <div style={{display:"flex",gap:8,width:props.mobile?"100%":"auto"}}>
+          {/* CHANGED: On mobile, the action button stretches to the full row width below the header pills. */}
           {isToday&&(tradeStatus.ok
-            ?<button onClick={function(){var t=mkTrade();t.sessionId=phase!=="closed"?phase:null;setTrade(t);setShowForm(true);}} style={{padding:props.mobile?"6px 10px":"8px 16px",background:"#4f46e5",color:"#fff",border:"none",borderRadius:6,fontSize:props.mobile?12:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>+ {props.mobile?"Trade":"New Trade"}</button>
-            :<button disabled title={tradeStatus.reason||"Not available"} style={{padding:props.mobile?"6px 10px":"8px 16px",background:"#1e293b",color:"#475569",border:"1px solid #334155",borderRadius:6,fontSize:props.mobile?12:14,fontWeight:600,cursor:"not-allowed",fontFamily:"inherit",whiteSpace:"nowrap"}}>{tradeStatus.reason||"Unavailable"}</button>
+            ?<button onClick={function(){var t=mkTrade();t.sessionId=phase!=="closed"?phase:null;setTrade(t);setShowForm(true);}} style={{padding:props.mobile?"10px 12px":"8px 16px",background:"#4f46e5",color:"#fff",border:"none",borderRadius:6,fontSize:props.mobile?13:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flex:props.mobile?1:"none"}}>+ New Trade</button>
+            :<button disabled title={tradeStatus.reason||"Not available"} style={{padding:props.mobile?"10px 12px":"8px 16px",background:"#1e293b",color:"#475569",border:"1px solid #334155",borderRadius:6,fontSize:props.mobile?12:14,fontWeight:600,cursor:"not-allowed",fontFamily:"inherit",whiteSpace:"normal",flex:props.mobile?1:"none",lineHeight:1.2}}>{tradeStatus.reason||"Unavailable"}</button>
           )}
-          {!isToday&&<button onClick={function(){var t=mkTrade();setPastNewTrade(Object.assign({},t,{time:new Date().toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"})}));}} style={{padding:props.mobile?"6px 10px":"8px 16px",background:"#4f46e5",color:"#fff",border:"none",borderRadius:6,fontSize:props.mobile?12:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>+ {props.mobile?"Trade":"Add Trade"}</button>}
+          {!isToday&&<button onClick={function(){var t=mkTrade();setPastNewTrade(Object.assign({},t,{time:new Date().toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"})}));}} style={{padding:props.mobile?"10px 12px":"8px 16px",background:"#4f46e5",color:"#fff",border:"none",borderRadius:6,fontSize:props.mobile?13:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flex:props.mobile?1:"none"}}>+ Add Trade</button>}
         </div>
         {pickerOpen&&<CalendarPicker selectedDate={selectedDate} onSelect={function(d){setSelectedDate(d);setPickerOpen(false);}} onClose={function(){setPickerOpen(false);}} todayPnL={totalPnL} riskMax={parseFloat(settings.riskMax)||0} settings={settings} todayTrades={state.trades}/>}
       </div>
@@ -6252,8 +6256,9 @@ function PerformanceTab(props){
                 // CHANGED: Carry raw pnl + pcts forward — totalContrib computation downstream needs them.
                 return {k:k,n:g.n,wr:wr,avgPct:avgPct,exp:exp,pnl:g.pnl,pcts:g.pcts};
               });
-              // Sort by expectancy descending.
-              rows.sort(function(a,b){return b.exp-a.exp;});
+              // CHANGED: Sort by trade count desc — most-traded patterns surface first, since
+              // they carry the most signal. Expectancy is shown on each row for context.
+              rows.sort(function(a,b){return b.n-a.n;});
               var max=Math.max.apply(null,rows.map(function(r){return Math.abs(HIDE_DOLLAR_PNL?r.avgPct:r.exp);}).concat([0.0001]));
               // CHANGED: Bar length now represents TOTAL contribution (sum across trades) instead
                // of per-trade expectancy, so frequently-traded patterns get more visual weight
