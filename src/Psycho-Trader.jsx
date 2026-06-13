@@ -1313,7 +1313,7 @@ function PnLChart(props){
     <div style={{marginTop:12,background:"#0a0a0f",borderRadius:8,padding:"8px 4px 4px"}}>
       <div style={{fontSize:12,color:"#64748b",letterSpacing:1,textTransform:"uppercase",marginBottom:4,paddingLeft:PL+"px",display:"flex",alignItems:"center",gap:8}}>
         P&L Over Session
-        {hoverPnL!==null&&<span style={{fontWeight:700,color:hc,fontSize:13}}>{hoverPnL>=0?"+":""}{$fmt(hoverPnL)}{hoverTime&&<span style={{fontWeight:400,color:"#64748b"}}> ({hoverTime})</span>}</span>}
+        {hoverPnL!==null&&<span style={{fontWeight:700,color:hc,fontSize:13}}>{hoverPnL>=0?"+":""}{$fmt(hoverPnL)}</span>}
       </div>
       <svg ref={svgRef} width="100%" viewBox={"0 0 "+W+" "+H} style={{overflow:"visible",cursor:"crosshair",userSelect:"none"}}
         onMouseMove={function(e){handleMove(e.clientX);}} onMouseLeave={function(){setHoverPnL(null);setHoverX(null);setHoverY(null);setHoverTime(null);}}
@@ -1324,10 +1324,11 @@ function PnLChart(props){
         {segs.map(function(s,i){return <path key={"l"+i} d={linePath(s.pts)} fill="none" stroke={s.pos?"#22c55e":"#ef4444"} strokeWidth="2" strokeLinejoin="round"/>;})}
         {points.slice(1,-1).map(function(p,i){return <circle key={i} cx={xPx(p.min)} cy={yPx(p.pnl)} r="3" fill={p.pnl>=0?"#22c55e":"#ef4444"} stroke="#0a0a0f" strokeWidth="1.5"/>;})}
         {yTicks.map(function(v,i){var y=yPx(v);if(y<PT||y>PT+chartH)return null;if(HIDE_DOLLAR_PNL)return null;return <text key={i} x={PL-4} y={y+4} textAnchor="end" fontSize="8" fill="#475569">{v>=0?"+$"+v:"-$"+Math.abs(v)}</text>;})}
-        {xLabels.map(function(xl){return <text key={xl.min} x={xPx(xl.min)} y={PT+chartH+16} textAnchor="middle" fontSize="8" fill="#475569">{xl.l}</text>;})}
+        {/* CHANGED: When hovering, hide the static x-axis tick labels (they'd overlap with the cursor time label). */}
+        {hoverX===null&&xLabels.map(function(xl){return <text key={xl.min} x={xPx(xl.min)} y={PT+chartH+16} textAnchor="middle" fontSize="8" fill="#475569">{xl.l}</text>;})}
         <line x1={PL} y1={PT} x2={PL} y2={PT+chartH} stroke="#1e293b" strokeWidth="1"/>
         <line x1={PL} y1={PT+chartH} x2={PL+chartW} y2={PT+chartH} stroke="#1e293b" strokeWidth="1"/>
-        {hoverX!==null&&<g><line x1={hoverX} y1={PT} x2={hoverX} y2={PT+chartH} stroke="#475569" strokeWidth="1" strokeDasharray="3,3"/><circle cx={hoverX} cy={hoverY} r="5" fill={hc} stroke="#0a0a0f" strokeWidth="2"/></g>}
+        {hoverX!==null&&<g><line x1={hoverX} y1={PT} x2={hoverX} y2={PT+chartH} stroke="#475569" strokeWidth="1" strokeDasharray="3,3"/><circle cx={hoverX} cy={hoverY} r="5" fill={hc} stroke="#0a0a0f" strokeWidth="2"/>{/* CHANGED: Time label pinned under the cursor line at the bottom. */}{hoverTime&&<text x={hoverX} y={PT+chartH+16} textAnchor="middle" fontSize="9" fontWeight="700" fill="#cbd5e1">{hoverTime}</text>}</g>}
       </svg>
     </div>
   );
@@ -2803,6 +2804,26 @@ function PhotoGallery(props){
     </div>
   );
 }
+// CHANGED: Scroll-window for the scale milestones grid. Shows ~7 rows at once; on mount,
+// scrolls so the current tier sits centered within the visible band. Sticky header stays put.
+function ScaleMilestonesScroller(props){
+  var ref=useRef(null);
+  useEffect(function(){
+    var c=ref.current;if(!c)return;
+    var el=c.querySelector('[data-tier="'+props.currentTier+'"]');
+    if(!el)return;
+    // Center the current tier inside the scroll container.
+    var elTop=el.offsetTop;
+    var elH=el.offsetHeight;
+    c.scrollTop=Math.max(0,elTop-(c.clientHeight/2)+(elH/2));
+  },[props.currentTier]);
+  return (
+    <div ref={ref} style={{maxHeight:198,overflowY:"auto",border:"1px solid #1e293b",borderRadius:4,padding:"2px 4px",background:"#0a0a0f"}}>
+      {props.children}
+    </div>
+  );
+}
+
 // CHANGED: Standalone scaling/account balance card. Was previously inline in PerformanceTab;
 // moved here so it can render in the Progress widget on the dashboard instead.
 function ScalingTargetCard(props){
@@ -5279,8 +5300,7 @@ function MetricChart(props){
     <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid #1e293b",borderRadius:10,display:"flex",flexDirection:"column",height:"100%",boxSizing:"border-box"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8,gap:8}}>
         <div>
-          {hoverIdx!=null&&<div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{display.date}</div>}
-          <div style={{fontSize:20,fontWeight:700,color:color,marginTop:hoverIdx!=null?2:0,fontVariantNumeric:"tabular-nums"}}>{fmt(display.v)}</div>
+          <div style={{fontSize:20,fontWeight:700,color:color,fontVariantNumeric:"tabular-nums"}}>{fmt(display.v)}</div>
         </div>
         <div style={{textAlign:"right"}}>
           <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Change</div>
@@ -5298,11 +5318,18 @@ function MetricChart(props){
           </g>
         )}
       </svg>
-      <div style={{display:"flex",justifyContent:"space-between",marginTop:6,fontSize:10,color:"#64748b",fontWeight:600}}>
-        <span>{first.date}</span>
-        <span>peak {fmt(peak.v)}</span>
-        <span>{last.date}</span>
-      </div>
+      {/* CHANGED: Hovered date pinned under the cursor line at the bottom. */}
+      {hoverIdx!=null?(
+        <div style={{position:"relative",height:14,marginTop:6}}>
+          <span style={{position:"absolute",left:((xFor(hoverIdx)/W)*100)+"%",transform:"translateX(-50%)",fontSize:10,color:"#cbd5e1",fontWeight:700,letterSpacing:0.5,whiteSpace:"nowrap"}}>{display.date}</span>
+        </div>
+      ):(
+        <div style={{display:"flex",justifyContent:"space-between",marginTop:6,fontSize:10,color:"#64748b",fontWeight:600}}>
+          <span>{first.date}</span>
+          <span>peak {fmt(peak.v)}</span>
+          <span>{last.date}</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -5659,9 +5686,11 @@ function DisciplineScatter(props){
     <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid #1e293b",borderRadius:10,display:"flex",flexDirection:"column",height:"100%",boxSizing:"border-box"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10,gap:8}}>
         <div>
-          <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{hp?hp.date:"Discipline × Performance"}</div>
+          {/* CHANGED: Top-left stays on the static summary; the hovered-date label is rendered
+             next to the dot itself inside the SVG (see <text> below) so the eye stays put. */}
+          <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{hp?("R · score "+Math.round(hp.score)):"Discipline × Performance"}</div>
           {hp?(
-            <div style={{fontSize:20,fontWeight:700,color:hp.r>=0?"#22c55e":"#ef4444",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{fmtR(hp.r)}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:6}}>score {Math.round(hp.score)} · {hp.n}t</span></div>
+            <div style={{fontSize:20,fontWeight:700,color:hp.r>=0?"#22c55e":"#ef4444",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{fmtR(hp.r)}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:6}}>{hp.n}t</span></div>
           ):(
             <div style={{fontSize:20,fontWeight:700,color:pts.length<30?"#475569":(r<-0.2?"#22c55e":r>0.2?"#ef4444":"#94a3b8"),marginTop:2,fontVariantNumeric:"tabular-nums"}}>r = {r.toFixed(2)}<span style={{fontSize:10,color:pts.length<30?"#64748b":"#94a3b8",fontWeight:500,marginLeft:6,fontStyle:pts.length<30?"italic":"normal"}}>{pts.length<30?("low sample · "+pts.length+"/30"):(Math.abs(r)<0.2?"weak":Math.abs(r)<0.5?"moderate":"strong")+" link"}</span></div>
           )}
@@ -5689,6 +5718,17 @@ function DisciplineScatter(props){
           // CHANGED: Click a dot to jump to that date in the Journal.
           return <circle key={i} cx={xFor(p.score)} cy={yFor(p.r)} r={isH?4:2.5} fill={col} opacity={hover==null||isH?0.95:0.5} stroke={isH?"#fff":"none"} strokeWidth="0.6" style={{cursor:props.onNavigateToTrade?"pointer":"default"}} onClick={function(){if(props.onNavigateToTrade&&p.date)props.onNavigateToTrade(p.date);}}/>;
         })}
+        {/* CHANGED: Floating date label next to the hovered dot — pinned to the dot's position
+           so the user sees the date right where their cursor already is. Offset above the dot,
+           or below if the dot is near the top edge. */}
+        {hp&&(function(){
+          var cx=xFor(hp.score);
+          var cy=yFor(hp.r);
+          var above=cy>(padT+12);
+          var ty=above?(cy-7):(cy+12);
+          var anchor=cx>(W-padR-30)?"end":(cx<(padL+30)?"start":"middle");
+          return <text x={cx} y={ty} fontSize="8" fontWeight="700" fill="#cbd5e1" textAnchor={anchor} style={{pointerEvents:"none"}}>{hp.date}</text>;
+        })()}
       </svg>
       {/* CHANGED: Brief explanation of the headline correlation (r). */}
       <div style={{fontSize:10,color:"#64748b",fontStyle:"italic",marginTop:6,lineHeight:1.4}}>r is the correlation between discipline score and R-multiple. Positive r means higher discipline pairs with higher R; negative means they diverge.</div>
@@ -6227,11 +6267,14 @@ function PerformanceTab(props){
                 <StatSec key={title} title={title} colSpan={props.mobile?1:6}>
                   {rowsTotal.length===0&&<div style={{fontSize:13,color:"#64748b",fontStyle:"italic",padding:"4px 0"}}>No data yet.</div>}
                   {rowsTotal.map(function(r,i){
-                    // CHANGED: WR + trade count are primary; avg return is secondary.
-                    var valueLabel=r.wr+"% wr";
-                    var subLabel=" · "+r.n+"t · "+(HIDE_DOLLAR_PNL?((r.avgPct>=0?"+":"")+r.avgPct.toFixed(1)+"%"):((r.exp>=0?"+":"-")+"$"+Math.abs(r.exp).toFixed(0)));
+                    // CHANGED: Bars removed — they were noisy and not informative once WR + count + dollar value are shown. Plain rows now.
+                    var wrColor=r.wr>=50?"#22c55e":r.wr>=33?"#fbbf24":"#ef4444";
+                    var pnlText=HIDE_DOLLAR_PNL?((r.avgPct>=0?"+":"")+r.avgPct.toFixed(1)+"%"):((r.exp>=0?"+":"-")+"$"+Math.abs(r.exp).toFixed(0));
                     return (
-                      <HBar key={r.k} label={r.k} value={r.totalContrib} max={maxTotal} valueLabel={valueLabel} sub={subLabel} last={i===rowsTotal.length-1}/>
+                      <div key={r.k} style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:"7px 0",borderBottom:i===rowsTotal.length-1?"none":"1px solid #1e293b",gap:8}}>
+                        <span style={{fontSize:13,color:"#e2e8f0",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,minWidth:0}}>{r.k}</span>
+                        <span style={{fontSize:12,fontWeight:700,color:wrColor,fontVariantNumeric:"tabular-nums",flexShrink:0}}>{r.wr}% wr<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:6}}>· {r.n}t · {pnlText}</span></span>
+                      </div>
                     );
                   })}
                 </StatSec>
@@ -6956,23 +6999,28 @@ function SettingsTab(props){
                       </div>
                     )}
                   </div>
-                  <div style={{display:"grid",gridTemplateColumns:"auto 1fr 1fr",gap:6,fontSize:11,alignItems:"center"}}>
-                    <div style={{fontSize:9,color:"#64748b",letterSpacing:0.5,textTransform:"uppercase",fontWeight:600}}>Tier</div>
-                    <div style={{fontSize:9,color:"#64748b",letterSpacing:0.5,textTransform:"uppercase",fontWeight:600}}>Position (min–max)</div>
-                    <div style={{fontSize:9,color:"#64748b",letterSpacing:0.5,textTransform:"uppercase",fontWeight:600}}>Risk (min–max)</div>
-                    {milestones.map(function(m){
-                      var sizes=calcPosSizes(m,{useDirect:true,sizingMode:settings.sizingMode,slippagePct:slip,positionMaxPct:posMaxPct,riskMaxPct:riskMaxPct,positionMaxDollar:settings.positionMaxDollar,riskMaxDollar:settings.riskMaxDollar});
-                      var isCurrent=m===currentTier;
-                      var isReached=balance>m*1.05;
-                      var color=isCurrent?"#86efac":(isReached?"#64748b":"#cbd5e1");
-                      var bg=isCurrent?"#0a1f10":"transparent";
-                      return [
-                        <div key={m+"-t"} style={{padding:"4px 6px",background:bg,borderRadius:3,fontWeight:isCurrent?700:500,color:color}}>${m.toLocaleString()}{isCurrent?" ←":""}</div>,
-                        <div key={m+"-p"} style={{padding:"4px 6px",background:bg,borderRadius:3,color:color}}>${sizes.positionMin}–${sizes.positionMax}</div>,
-                        <div key={m+"-r"} style={{padding:"4px 6px",background:bg,borderRadius:3,color:color}}>${sizes.riskMin}–${sizes.riskMax}</div>
-                      ];
-                    })}
-                  </div>
+                  {/* CHANGED: Show 7 tiers at a time in a scroll window; current tier auto-centers
+                     when the section opens via a ref-and-scroll effect. User can scroll the
+                     window itself to see milestones above/below the visible band. */}
+                  <ScaleMilestonesScroller currentTier={currentTier}>
+                    <div style={{display:"grid",gridTemplateColumns:"auto 1fr 1fr",gap:6,fontSize:11,alignItems:"center"}}>
+                      <div style={{fontSize:9,color:"#64748b",letterSpacing:0.5,textTransform:"uppercase",fontWeight:600,position:"sticky",top:0,background:"#0a0a0f",zIndex:1,padding:"2px 6px"}}>Tier</div>
+                      <div style={{fontSize:9,color:"#64748b",letterSpacing:0.5,textTransform:"uppercase",fontWeight:600,position:"sticky",top:0,background:"#0a0a0f",zIndex:1,padding:"2px 6px"}}>Position (min–max)</div>
+                      <div style={{fontSize:9,color:"#64748b",letterSpacing:0.5,textTransform:"uppercase",fontWeight:600,position:"sticky",top:0,background:"#0a0a0f",zIndex:1,padding:"2px 6px"}}>Risk (min–max)</div>
+                      {milestones.map(function(m){
+                        var sizes=calcPosSizes(m,{useDirect:true,sizingMode:settings.sizingMode,slippagePct:slip,positionMaxPct:posMaxPct,riskMaxPct:riskMaxPct,positionMaxDollar:settings.positionMaxDollar,riskMaxDollar:settings.riskMaxDollar});
+                        var isCurrent=m===currentTier;
+                        var isReached=balance>m*1.05;
+                        var color=isCurrent?"#86efac":(isReached?"#64748b":"#cbd5e1");
+                        var bg=isCurrent?"#0a1f10":"transparent";
+                        return [
+                          <div key={m+"-t"} data-tier={m} style={{padding:"4px 6px",background:bg,borderRadius:3,fontWeight:isCurrent?700:500,color:color}}>${m.toLocaleString()}{isCurrent?" ←":""}</div>,
+                          <div key={m+"-p"} style={{padding:"4px 6px",background:bg,borderRadius:3,color:color}}>${sizes.positionMin}–${sizes.positionMax}</div>,
+                          <div key={m+"-r"} style={{padding:"4px 6px",background:bg,borderRadius:3,color:color}}>${sizes.riskMin}–${sizes.riskMax}</div>
+                        ];
+                      })}
+                    </div>
+                  </ScaleMilestonesScroller>
                 </div>
               )}
             </div>
