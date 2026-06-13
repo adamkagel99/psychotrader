@@ -6275,7 +6275,16 @@ function PerformanceTab(props){
                   }
                   var s=0;filtered.forEach(function(r){var sb=0;try{sb=getAccountBalanceAtDate(r.date);}catch(x){}s+=(sb>0?((parseFloat(r.pnl)||0)/sb*100):0);});return (s>=0?"+":"")+s.toFixed(2)+"%";
                 })():((totalPnl>=0?"+":"-")+"$"+Math.abs(totalPnl).toFixed(2))} color={totalPnl>=0?"#22c55e":"#ef4444"}/>
-                <StatTile label="Trades" active={selectedMetric==="trades"} onClick={function(){setSelectedMetric("trades");}} value={totalTradesCount} sub={tradingDays>0?(Math.ceil(totalTradesCount/tradingDays)+"/day · "+tradingDays+"d"):""}/>
+                <StatTile label="Trades" active={selectedMetric==="trades"} onClick={function(){setSelectedMetric("trades");}} value={totalTradesCount} sub={(function(){
+                  // CHANGED: Append total time-in-trade to the Trades tile's sub-line so it sits
+                  // inside an existing slot — no new row, no aesthetic disruption. Format:
+                  // "5/day · 22d · 63h trading".
+                  var base=tradingDays>0?(Math.ceil(totalTradesCount/tradingDays)+"/day · "+tradingDays+"d"):"";
+                  var totalMs=0;
+                  filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(t&&t.status!=="open"){var d=tradeDurationMs(t);if(d>0)totalMs+=d;}});});
+                  if(totalMs>0){var t=fmtDurationMs(totalMs);return base?(base+" · "+t+" trading"):(t+" trading");}
+                  return base;
+                })()}/>
                 <StatTile label="Profit Factor" active={selectedMetric==="profitFactor"} onClick={function(){setSelectedMetric("profitFactor");}} value={pf} color={pfColor}/>
                 <StatTile label="Win Rate" active={selectedMetric==="winRate"} onClick={function(){setSelectedMetric("winRate");}} value={winRate+"%"} color="#22c55e" sub={wins.length+" wins"}/>
                 <StatTile label="Loss Rate" active={selectedMetric==="lossRate"} onClick={function(){setSelectedMetric("lossRate");}} value={(100-winRate-breakevenRate)+"%"} color="#ef4444" sub={losses.length+" losses"}/>
@@ -6283,13 +6292,6 @@ function PerformanceTab(props){
                 <StatTile label="Avg Win" active={selectedMetric==="avgWin"} onClick={function(){setSelectedMetric("avgWin");}} value={HIDE_DOLLAR_PNL?avgWinPct():("+$"+avgWin.toFixed(0))} color="#22c55e" sub={HIDE_DOLLAR_PNL?"":(avgWinPct())}/>
                 <StatTile label="Avg Loss" active={selectedMetric==="avgLoss"} onClick={function(){setSelectedMetric("avgLoss");}} value={HIDE_DOLLAR_PNL?avgLossPct():("-$"+Math.abs(avgLoss).toFixed(0))} color="#ef4444" sub={HIDE_DOLLAR_PNL?"":(avgLossPct())}/>
                 <StatTile label="Expectancy" active={selectedMetric==="expectancy"} onClick={function(){setSelectedMetric("expectancy");}} value={HIDE_DOLLAR_PNL?expPct():((expValue>=0?"+":"-")+"$"+Math.abs(expValue).toFixed(2))} color={expValue>=0?"#22c55e":"#ef4444"} sub={HIDE_DOLLAR_PNL?"":expPct()}/>
-                {/* CHANGED: Time Trading tile — sums each closed trade's duration (first entry → last exit). */}
-                {(function(){
-                  var totalMs=0,nWithTime=0;
-                  filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(t&&t.status!=="open"){var d=tradeDurationMs(t);if(d>0){totalMs+=d;nWithTime++;}}});});
-                  var avgMs=nWithTime>0?(totalMs/nWithTime):0;
-                  return <StatTile label="Time Trading" value={fmtDurationMs(totalMs)} color="#a5b4fc" sub={nWithTime>0?("avg "+fmtDurationMs(avgMs)+"/trade"):"no timing data"}/>;
-                })()}
               </div>
               {/* CHANGED: Chart embedded directly under Overview tiles — clicking a tile swaps the chart. */}
               <div style={{marginTop:14,paddingTop:12,borderTop:"1px solid #1e293b"}}>{renderChart()}</div>
