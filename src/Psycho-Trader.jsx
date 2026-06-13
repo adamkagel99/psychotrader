@@ -163,6 +163,38 @@ function parseTimeToMinsOfDay(str){
   else if(ap==="AM"&&h===12)h=0;
   return h*60+mm;
 }
+// CHANGED: Compute time-in-trade for a single trade in milliseconds. Uses the timestamps stored
+// on each entry/exit leg (already numeric ms). Falls back to openedAt/closedAt or to parsing
+// entryTime/exitTime strings against the trade's date if leg-level timestamps aren't present.
+function tradeDurationMs(t){
+  if(!t||t.status==="open")return 0;
+  var ents=t.entries||[],exs=t.exits||[];
+  var entryT=ents.map(function(e){return Number(e.time);}).filter(function(n){return !isNaN(n)&&n>0;});
+  var exitT=exs.map(function(e){return Number(e.time);}).filter(function(n){return !isNaN(n)&&n>0;});
+  if(entryT.length>0&&exitT.length>0){
+    var first=Math.min.apply(null,entryT);
+    var last=Math.max.apply(null,exitT);
+    if(last>first)return last-first;
+  }
+  // Fallback: openedAt/closedAt numeric timestamps.
+  var op=Number(t.openedAt),cl=Number(t.closedAt);
+  if(!isNaN(op)&&!isNaN(cl)&&cl>op)return cl-op;
+  // Fallback: parse entryTime/exitTime strings against the trade's date.
+  var em=parseTimeToMinsOfDay(t.entryTime||t.time);
+  var xm=parseTimeToMinsOfDay(t.exitTime);
+  if(em!=null&&xm!=null&&xm>em)return (xm-em)*60*1000;
+  return 0;
+}
+// CHANGED: Format a duration in ms as "Hh Mm" / "Mm" / "Ss" — used by the Performance "Time Trading" tile.
+function fmtDurationMs(ms){
+  if(!ms||ms<=0)return "0m";
+  var s=Math.round(ms/1000);
+  if(s<60)return s+"s";
+  var m=Math.round(s/60);
+  if(m<60)return m+"m";
+  var h=Math.floor(m/60),rm=m%60;
+  return rm>0?(h+"h "+rm+"m"):(h+"h");
+}
 // CHANGED: Derive sessionId from a trade's actual start time (first entry time, falling back to t.time, then openedAt).
 // Day-of-week comes from openedAt so a back-entered trade gets the right weekday.
 function getSessionForTrade(t){
@@ -5400,10 +5432,22 @@ function EquityCurve(props){
   var areaPath=pts.map(function(p,i){return (i===0?"M":"L")+xFor(i).toFixed(1)+","+yFor(p.cum).toFixed(1);}).join("")+"L"+xFor(pts.length-1).toFixed(1)+","+yFor(0).toFixed(1)+"L"+xFor(0).toFixed(1)+","+yFor(0).toFixed(1)+"Z";
   var linePath=pts.map(function(p,i){return (i===0?"M":"L")+xFor(i).toFixed(1)+","+yFor(p.cum).toFixed(1);}).join("");
   var peakPath=pts.map(function(p,i){return (i===0?"M":"L")+xFor(i).toFixed(1)+","+yFor(p.peak).toFixed(1);}).join("");
-  // CHANGED: When $ is hidden, equity is expressed as % return off the starting balance — keeps
-  // the readout in the same unit as the Total P&L stat tile instead of switching to R-multiples.
+  // CHANGED: When $ is hidden, equity is expressed as % return. Denominator = starting balance
+  // at the range's first entry. If that's 0 (e.g. the user's first deposit lands on the same day
+  // as their first entry), fall back to total lifetime deposits so the % is still meaningful
+  // instead of collapsing to 0.00%.
+  var pctDenom=startBal;
+  if(!(pctDenom>0)){
+    try{
+      var dep=0;
+      (loadTransfers()||[]).forEach(function(tf){var a=parseFloat(tf.amount)||0;if(a>0)dep+=a;});
+      if(dep>0)pctDenom=dep;
+    }catch(e){}
+  }
   var positive=cum>=0;
-  var fmt=function(n){if(HIDE_DOLLAR_PNL){var pct=startBal>0?(n/startBal*100):0;return (pct>=0?"+":"")+pct.toFixed(2)+"%";}return (n>=0?"+":"-")+"$"+Math.abs(n).toFixed(2);};
+  var fmt=function(n){if(HIDE_DOLLAR_PNL){var pct=pctDenom>0?(n/pctDenom*100):0;return (pct>=0?"+":"")+pct.toFixed(2)+"%";}return (n>=0?"+":"-")+"$"+Math.abs(n).toFixed(2);};
+  // CHANGED: Drawdown also reframed to use the same denominator so it's apples-to-apples with the headline %.
+  var fmtDD=function(){if(maxDD>=0)return "—";if(HIDE_DOLLAR_PNL){var pct=pctDenom>0?(maxDD/pctDenom*100):maxDDPct;return pct.toFixed(2)+"%";}return fmt(maxDD);};
   // CHANGED: Interactive hover/drag — readout switches to the value at the hovered point.
   var [hoverIdx,setHoverIdx]=useState(null);
   var svgRef=React.useRef(null);
@@ -5430,7 +5474,7 @@ function EquityCurve(props){
         </div>
         <div style={{textAlign:"right"}}>
           <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Max Drawdown</div>
-          <div style={{fontSize:13,fontWeight:700,color:"#ef4444",marginTop:4,fontVariantNumeric:"tabular-nums"}}>{maxDD<0?(HIDE_DOLLAR_PNL?(maxDDPct.toFixed(2)+"%"):fmt(maxDD)):"—"}</div>
+          <div style={{fontSize:13,fontWeight:700,color:"#ef4444",marginTop:4,fontVariantNumeric:"tabular-nums"}}>{fmtDD()}</div>
         </div>
       </div>
       <svg ref={svgRef} viewBox={"0 0 "+W+" "+H} style={{display:"block",width:"100%",height:"100%",flex:1,minHeight:120,touchAction:"none",cursor:"crosshair"}} preserveAspectRatio="none" onMouseMove={handleMove} onMouseLeave={handleLeave} onTouchStart={handleMove} onTouchMove={handleMove} onTouchEnd={handleLeave}>
@@ -6239,6 +6283,13 @@ function PerformanceTab(props){
                 <StatTile label="Avg Win" active={selectedMetric==="avgWin"} onClick={function(){setSelectedMetric("avgWin");}} value={HIDE_DOLLAR_PNL?avgWinPct():("+$"+avgWin.toFixed(0))} color="#22c55e" sub={HIDE_DOLLAR_PNL?"":(avgWinPct())}/>
                 <StatTile label="Avg Loss" active={selectedMetric==="avgLoss"} onClick={function(){setSelectedMetric("avgLoss");}} value={HIDE_DOLLAR_PNL?avgLossPct():("-$"+Math.abs(avgLoss).toFixed(0))} color="#ef4444" sub={HIDE_DOLLAR_PNL?"":(avgLossPct())}/>
                 <StatTile label="Expectancy" active={selectedMetric==="expectancy"} onClick={function(){setSelectedMetric("expectancy");}} value={HIDE_DOLLAR_PNL?expPct():((expValue>=0?"+":"-")+"$"+Math.abs(expValue).toFixed(2))} color={expValue>=0?"#22c55e":"#ef4444"} sub={HIDE_DOLLAR_PNL?"":expPct()}/>
+                {/* CHANGED: Time Trading tile — sums each closed trade's duration (first entry → last exit). */}
+                {(function(){
+                  var totalMs=0,nWithTime=0;
+                  filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(t&&t.status!=="open"){var d=tradeDurationMs(t);if(d>0){totalMs+=d;nWithTime++;}}});});
+                  var avgMs=nWithTime>0?(totalMs/nWithTime):0;
+                  return <StatTile label="Time Trading" value={fmtDurationMs(totalMs)} color="#a5b4fc" sub={nWithTime>0?("avg "+fmtDurationMs(avgMs)+"/trade"):"no timing data"}/>;
+                })()}
               </div>
               {/* CHANGED: Chart embedded directly under Overview tiles — clicking a tile swaps the chart. */}
               <div style={{marginTop:14,paddingTop:12,borderTop:"1px solid #1e293b"}}>{renderChart()}</div>
