@@ -5216,13 +5216,15 @@ function AICoach(props){
 // high-water-mark line. Shows current value, max drawdown, and best peak inline.
 // CHANGED: MetricChart — small SVG line chart used by the combined Overview block to plot any
 // metric over time (running win rate, profit factor, expectancy, trade count, etc). Total P&L
-// gets its own richer EquityCurve component; everything else routes here.
+// gets its own richer EquityCurve component; everything else routes here. Supports the same
+// hover/drag crosshair as EquityCurve so the readout updates as the user scrubs across.
 function MetricChart(props){
   var entries=props.entries||[];
   var label=props.label||"";
   var color=props.color||"#a5b4fc";
-  // compute is (rowsUpToHere) => number; called cumulatively
   var compute=props.compute;
+  var [hoverIdx,setHoverIdx]=useState(null);
+  var svgRef=React.useRef(null);
   if(entries.length===0||typeof compute!=="function")return null;
   var sorted=entries.slice().sort(function(a,b){return new Date(a.date)-new Date(b.date);});
   var pts=[];
@@ -5240,27 +5242,49 @@ function MetricChart(props){
   function x(i){return pad+(pts.length<=1?(W-2*pad)/2:(i/(pts.length-1))*(W-2*pad));}
   function y(v){return H-pad-((v-minV)/span)*(H-2*pad);}
   var path=pts.map(function(p,i){return (i===0?"M":"L")+x(i).toFixed(1)+","+y(p.v).toFixed(1);}).join(" ");
-  var last=pts[pts.length-1];
   var first=pts[0];
-  var delta=last.v-first.v;
+  var last=pts[pts.length-1];
+  var display=hoverIdx!=null?pts[hoverIdx]:last;
+  var delta=display.v-first.v;
   var fmt=props.format||function(v){return v.toFixed(2);};
+  function handleMove(e){
+    if(!svgRef.current)return;
+    var rect=svgRef.current.getBoundingClientRect();
+    var clientX=e.touches?e.touches[0].clientX:e.clientX;
+    var px=clientX-rect.left;
+    var ratio=Math.max(0,Math.min(1,px/rect.width));
+    var idx=Math.round(ratio*(pts.length-1));
+    if(idx<0)idx=0;if(idx>pts.length-1)idx=pts.length-1;
+    setHoverIdx(idx);
+  }
+  function handleLeave(){setHoverIdx(null);}
   return (
     <div style={{padding:"4px 0"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8,padding:"0 4px"}}>
         <div>
-          <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{label}</div>
-          <div style={{fontSize:22,fontWeight:700,color:color,marginTop:2,fontVariantNumeric:"tabular-nums"}}>{fmt(last.v)}</div>
+          <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{hoverIdx!=null?display.date:label}</div>
+          <div style={{fontSize:22,fontWeight:700,color:color,marginTop:2,fontVariantNumeric:"tabular-nums"}}>{fmt(display.v)}</div>
         </div>
         <div style={{textAlign:"right",fontSize:11,color:"#94a3b8",fontVariantNumeric:"tabular-nums"}}>
           <div>start {fmt(first.v)}</div>
           <div style={{color:delta>=0?"#22c55e":"#ef4444",fontWeight:600,marginTop:2}}>{(delta>=0?"+":"")}{fmt(delta)}</div>
         </div>
       </div>
-      <svg viewBox={"0 0 "+W+" "+H} preserveAspectRatio="none" style={{width:"100%",height:200,display:"block"}}>
+      <svg ref={svgRef} viewBox={"0 0 "+W+" "+H} preserveAspectRatio="none" style={{width:"100%",height:200,display:"block",touchAction:"none",cursor:"crosshair"}} onMouseMove={handleMove} onMouseLeave={handleLeave} onTouchStart={handleMove} onTouchMove={handleMove} onTouchEnd={handleLeave}>
         <line x1={pad} x2={W-pad} y1={H-pad} y2={H-pad} stroke="#1e293b" strokeWidth="1"/>
         <path d={path} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"/>
-        <circle cx={x(pts.length-1)} cy={y(last.v)} r="3.5" fill={color}/>
+        {hoverIdx!=null&&(
+          <g>
+            <line x1={x(hoverIdx)} x2={x(hoverIdx)} y1={pad} y2={H-pad} stroke="#cbd5e1" strokeWidth="0.8" strokeDasharray="3,3"/>
+            <circle cx={x(hoverIdx)} cy={y(display.v)} r="4" fill={color} stroke="#fff" strokeWidth="1"/>
+          </g>
+        )}
+        {hoverIdx==null&&<circle cx={x(pts.length-1)} cy={y(last.v)} r="3.5" fill={color}/>}
       </svg>
+      <div style={{display:"flex",justifyContent:"space-between",marginTop:6,fontSize:10,color:"#64748b",fontWeight:600,padding:"0 4px"}}>
+        <span>{first.date}</span>
+        <span>{last.date}</span>
+      </div>
     </div>
   );
 }
@@ -5352,7 +5376,7 @@ function EquityCurve(props){
     <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid #1e293b",borderRadius:10,display:"flex",flexDirection:"column",height:"100%",boxSizing:"border-box"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8,gap:8}}>
         <div>
-          <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{displayDate?displayDate:"Equity Curve"}</div>
+          <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{displayDate?displayDate:"Total P&L"}</div>
           <div style={{fontSize:20,fontWeight:700,color:displayVal>=0?"#22c55e":"#ef4444",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{fmt(displayVal)}</div>
         </div>
         <div style={{textAlign:"right"}}>
