@@ -1403,12 +1403,19 @@ function DailyPnLBar(props){
   var avgPct=pcts.reduce(function(s,v){return s+v;},0)/pcts.length;
   // CHANGED: fmt now takes both $ and % so it can return the % when dollars are hidden.
   var fmt=function(n,pct){if(HIDE_DOLLAR_PNL)return (pct>=0?"+":"")+pct.toFixed(2)+"%";return (n>=0?"+":"-")+"$"+Math.abs(n).toFixed(0);};
-  var maxAbs=Math.max.apply(null,pnls.map(function(v){return Math.abs(v);}))||1;
-  var W=460,H=160,PL=44,PR=12,PT=12,PB=32,chartW=W-PL-PR,chartH=H-PT-PB;
+  // CHANGED: When dollars are hidden, scale bar heights by per-day % so the visible bar size
+  // matches the unit shown in the tooltip. Otherwise a small-$-but-big-% day got squashed into
+  // an invisible sliver by a single large-$ outlier.
+  var vals=HIDE_DOLLAR_PNL?pcts:pnls;
+  var maxAbs=Math.max.apply(null,vals.map(function(v){return Math.abs(v);}))||1;
+  // CHANGED: PL (left padding) was reserved for $-axis tick labels. When dollars are hidden,
+  // those labels don't render, so the reserved space showed as a blank gutter on the chart's
+  // left side. Collapse PL in that case so the chart fills its container.
+  var W=460,H=160,PL=HIDE_DOLLAR_PNL?8:44,PR=12,PT=12,PB=32,chartW=W-PL-PR,chartH=H-PT-PB;
   var barW=Math.max(4,Math.floor((chartW/sorted.length)*0.7)),gap=chartW/sorted.length,zeroY=PT+chartH/2;
   function barX(i){return PL+i*gap+gap/2-barW/2;}
-  function barH(pnl){return Math.abs(pnl)/maxAbs*(chartH/2-4);}
-  function barY(pnl){return pnl>=0?zeroY-barH(pnl):zeroY;}
+  function barH(pnl,pct){var v=HIDE_DOLLAR_PNL?pct:pnl;return Math.abs(v)/maxAbs*(chartH/2-4);}
+  function barY(pnl,pct){return (HIDE_DOLLAR_PNL?pct:pnl)>=0?zeroY-barH(pnl,pct):zeroY;}
   function fmtDate(ds){var d=new Date(ds);return (d.getMonth()+1)+"/"+(d.getDate());}
   function fmtPnl(v){return (v>=0?"+":"")+"$"+v.toFixed(2);}
   var yTicks=[-maxAbs,0,maxAbs].map(function(v){return Math.round(v);});
@@ -1447,7 +1454,7 @@ function DailyPnLBar(props){
         onMouseLeave={function(){setHoverIdx(null);}}>
         {yTicks.map(function(v,i){var y=zeroY-(v/maxAbs)*(chartH/2);return <g key={i}><line x1={PL} y1={y} x2={PL+chartW} y2={y} stroke={v===0?"#334155":"#1e293b"} strokeWidth="1" strokeDasharray={v===0?"":"3,3"}/>{!HIDE_DOLLAR_PNL&&<text x={PL-4} y={y+4} textAnchor="end" fontSize="8" fill="#94a3b8">{v>=0?"+$"+Math.abs(v):"-$"+Math.abs(v)}</text>}</g>;})}
         {sorted.map(function(e,i){
-          var pnl=parseFloat(e.pnl)||0,bx=barX(i),bh=barH(pnl),by=barY(pnl),isHov=hoverIdx===i;
+          var pnl=parseFloat(e.pnl)||0,pct=pcts[i],bx=barX(i),bh=barH(pnl,pct),by=barY(pnl,pct),isHov=hoverIdx===i;
           var color=pnl>=0?"#22c55e":"#ef4444",hc2=pnl>=0?"#4ade80":"#f87171";
           return (
             <g key={i}>
