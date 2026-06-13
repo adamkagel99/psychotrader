@@ -1437,7 +1437,7 @@ function DailyPnLBar(props){
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:8}}>
         <div style={{padding:"6px 9px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:6}}>
           <div style={{fontSize:9,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Green / Red</div>
-          <div style={{fontSize:12,fontWeight:700,marginTop:2,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}><span style={{color:"#22c55e"}}>{greenN}</span><span style={{color:"#94a3b8",fontWeight:500}}> / </span><span style={{color:"#ef4444"}}>{redN}</span>{flatN>0&&<span style={{color:"#94a3b8",marginLeft:5,fontWeight:500}}>· {flatN}f</span>}</div>
+          <div style={{fontSize:12,fontWeight:700,marginTop:2,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}><span style={{color:"#22c55e"}}>{greenN}</span><span style={{color:"#94a3b8",fontWeight:500}}> / </span><span style={{color:"#ef4444"}}>{redN}</span>{flatN>0&&<span style={{color:"#94a3b8",marginLeft:5,fontWeight:500}}>· {flatN} flat</span>}</div>
         </div>
         <div style={{padding:"6px 9px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:6}}>
           <div style={{fontSize:9,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Best / Worst</div>
