@@ -7063,10 +7063,14 @@ function SettingsTab(props){
           var slip=settings.slippagePct!=null?settings.slippagePct:20;
           var posMaxPct=settings.positionMaxPct!=null?settings.positionMaxPct:7.5;
           var riskMaxPct=settings.riskMaxPct!=null?settings.riskMaxPct:33;
-          // Build milestones: $500 starter, $1k–$15k by $1k, then $5k increments up to $100k.
+          // CHANGED: Tier schedule — $1k steps up to $10k, then $5k steps to $20k (so $15k and
+          // $20k are included), then $10k steps to $100k. Keeps early scaling fine-grained where
+          // it matters and stretches out the larger bands.
           var milestones=[500];
-          for(var k=1;k<=15;k++)milestones.push(k*1000);
-          for(var m5=20000;m5<=100000;m5+=5000)milestones.push(m5);
+          for(var k=1;k<=10;k++)milestones.push(k*1000);
+          milestones.push(15000);
+          milestones.push(20000);
+          for(var m10=30000;m10<=100000;m10+=10000)milestones.push(m10);
           // Find current tier (highest milestone where balance > tier*1.05).
           var currentTier=500;milestones.forEach(function(m){if(balance>m*1.05)currentTier=m;});
           return (
@@ -7082,7 +7086,7 @@ function SettingsTab(props){
                 <div>
                   <div style={{fontSize:10,color:"#94a3b8",marginBottom:8,lineHeight:1.5,padding:"6px 8px",background:"#0f0f17",border:"1px solid #1e293b",borderRadius:4}}>
                     <div style={{color:"#cbd5e1",fontWeight:600,marginBottom:3}}>Formula (current settings):</div>
-                    <div style={{color:"#64748b",marginBottom:4,fontSize:9.5,lineHeight:1.4}}>Tiers step by $1k up to $15k, then by $5k — size holds steady across each $5k band so you don't scale up too soon.</div>
+                    <div style={{color:"#64748b",marginBottom:4,fontSize:9.5,lineHeight:1.4}}>Tiers step by $1k up to $10k, then $5k up to $20k, then $10k after — size holds steady across each band so you don't scale up too soon.</div>
                     {(settings.sizingMode||"pct")==="pct"?(
                       <div>
                         Pos Max = Tier × <span style={{color:"#a5b4fc"}}>{posMaxPct}%</span> · Pos Min = Pos Max × (1 − <span style={{color:"#a5b4fc"}}>{slip}%</span>)<br/>
