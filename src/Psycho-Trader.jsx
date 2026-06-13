@@ -5335,12 +5335,17 @@ function MetricChart(props){
   return (
     <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid #1e293b",borderRadius:10,display:"flex",flexDirection:"column",height:"100%",boxSizing:"border-box"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8,gap:8}}>
-        <div>
+        <div style={{display:"flex",alignItems:"baseline",gap:8,flexWrap:"wrap"}}>
           <div style={{fontSize:20,fontWeight:700,color:color,fontVariantNumeric:"tabular-nums"}}>{fmt(display.v)}</div>
+          {/* CHANGED: Optional meta label to the right of the value (e.g. total trading time on the Trades chart). */}
+          {props.meta&&<div style={{fontSize:11,color:"#94a3b8",fontWeight:600,fontVariantNumeric:"tabular-nums"}}>{props.meta}</div>}
         </div>
         <div style={{textAlign:"right"}}>
           <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Change</div>
-          <div style={{fontSize:13,fontWeight:700,color:delta>=0?"#22c55e":"#ef4444",marginTop:4,fontVariantNumeric:"tabular-nums"}}>{(delta>=0?"+":"")}{fmt(delta)}</div>
+          {/* CHANGED: Removed the manual "+" prefix — fmt() now owns its own sign for $/% formats,
+             so prepending here produced "++2.85%". For raw-number formats fmt won't have a sign,
+             so handle that case explicitly. */}
+          <div style={{fontSize:13,fontWeight:700,color:delta>=0?"#22c55e":"#ef4444",marginTop:4,fontVariantNumeric:"tabular-nums"}}>{(function(){var s=fmt(delta);if(/^[+\-]/.test(s))return s;return (delta>=0?"+":"")+s;})()}</div>
         </div>
       </div>
       <svg ref={svgRef} viewBox={"0 0 "+W+" "+H} style={{display:"block",width:"100%",height:"100%",flex:1,minHeight:120,touchAction:"none",cursor:"crosshair"}} preserveAspectRatio="none" onMouseMove={handleMove} onMouseLeave={handleLeave} onTouchStart={handleMove} onTouchMove={handleMove} onTouchEnd={handleLeave}>
@@ -6254,7 +6259,12 @@ function PerformanceTab(props){
             // % compute when HIDE_DOLLAR_PNL is on so the line reflects what the format shows.
             function renderChart(){
               if(selectedMetric==="totalPnl")return <EquityCurve entries={filtered} range={range}/>;
-              if(selectedMetric==="trades")return <MetricChart entries={filtered} label="Cumulative Trades" color="#a5b4fc" compute={computeTradeCount} format={fmtCount}/>;
+              if(selectedMetric==="trades"){
+                // CHANGED: Total trading time displayed to the right of the Trades value in the chart readout.
+                var ttMs=0;filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(t&&t.status!=="open"){var d=tradeDurationMs(t);if(d>0)ttMs+=d;}});});
+                var ttMeta=ttMs>0?(fmtDurationMs(ttMs)+" trading"):"";
+                return <MetricChart entries={filtered} label="Cumulative Trades" color="#a5b4fc" compute={computeTradeCount} format={fmtCount} meta={ttMeta}/>;
+              }
               if(selectedMetric==="profitFactor")return <MetricChart entries={filtered} minTrades={20} label="Profit Factor" color={pfColor} compute={computePF} format={fmtNum}/>;
               if(selectedMetric==="winRate")return <MetricChart entries={filtered} minTrades={20} label="Win Rate" color="#22c55e" compute={computeWR} format={fmtPct}/>;
               if(selectedMetric==="lossRate")return <MetricChart entries={filtered} minTrades={20} label="Loss Rate" color="#ef4444" compute={computeLR} format={fmtPct}/>;
@@ -6275,16 +6285,7 @@ function PerformanceTab(props){
                   }
                   var s=0;filtered.forEach(function(r){var sb=0;try{sb=getAccountBalanceAtDate(r.date);}catch(x){}s+=(sb>0?((parseFloat(r.pnl)||0)/sb*100):0);});return (s>=0?"+":"")+s.toFixed(2)+"%";
                 })():((totalPnl>=0?"+":"-")+"$"+Math.abs(totalPnl).toFixed(2))} color={totalPnl>=0?"#22c55e":"#ef4444"}/>
-                <StatTile label="Trades" active={selectedMetric==="trades"} onClick={function(){setSelectedMetric("trades");}} value={totalTradesCount} sub={(function(){
-                  // CHANGED: Append total time-in-trade to the Trades tile's sub-line so it sits
-                  // inside an existing slot — no new row, no aesthetic disruption. Format:
-                  // "5/day · 22d · 63h trading".
-                  var base=tradingDays>0?(Math.ceil(totalTradesCount/tradingDays)+"/day · "+tradingDays+"d"):"";
-                  var totalMs=0;
-                  filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(t&&t.status!=="open"){var d=tradeDurationMs(t);if(d>0)totalMs+=d;}});});
-                  if(totalMs>0){var t=fmtDurationMs(totalMs);return base?(base+" · "+t+" trading"):(t+" trading");}
-                  return base;
-                })()}/>
+                <StatTile label="Trades" active={selectedMetric==="trades"} onClick={function(){setSelectedMetric("trades");}} value={totalTradesCount} sub={tradingDays>0?(Math.ceil(totalTradesCount/tradingDays)+"/day · "+tradingDays+"d"):""}/>
                 <StatTile label="Profit Factor" active={selectedMetric==="profitFactor"} onClick={function(){setSelectedMetric("profitFactor");}} value={pf} color={pfColor}/>
                 <StatTile label="Win Rate" active={selectedMetric==="winRate"} onClick={function(){setSelectedMetric("winRate");}} value={winRate+"%"} color="#22c55e" sub={wins.length+" wins"}/>
                 <StatTile label="Loss Rate" active={selectedMetric==="lossRate"} onClick={function(){setSelectedMetric("lossRate");}} value={(100-winRate-breakevenRate)+"%"} color="#ef4444" sub={losses.length+" losses"}/>
