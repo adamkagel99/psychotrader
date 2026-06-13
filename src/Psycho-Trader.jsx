@@ -1106,9 +1106,12 @@ var ACHIEVEMENTS=[
   {id:"streak7",icon:"⚡",name:"Iron Hands",desc:"7-day green streak",check:function(r,s){return s>=7;}},
   {id:"streak14",icon:"🏔",name:"Unstoppable",desc:"14-day green streak",check:function(r,s){return s>=14;}},
   {id:"streak30",icon:"👑",name:"The Legend",desc:"30-day green streak",check:function(r,s){return s>=30;}},
-  {id:"withdrawal_d5",icon:"💰",name:"First Cashout",desc:function(){var d=getWithdrawalThreshold(5);return d?"Withdraw "+d:"Withdraw 5 days of target";},check:function(r,s,w){return w>=getWithdrawalDollarTarget(5);}},
-  {id:"withdrawal_d25",icon:"🏦",name:"Stacking Up",desc:function(){var d=getWithdrawalThreshold(25);return d?"Withdraw "+d:"Withdraw 25 days of target";},check:function(r,s,w){return w>=getWithdrawalDollarTarget(25);}},
-  {id:"withdrawal_d100",icon:"🚀",name:"Pro Withdrawer",desc:function(){var d=getWithdrawalThreshold(100);return d?"Withdraw "+d:"Withdraw 100 days of target";},check:function(r,s,w){return w>=getWithdrawalDollarTarget(100);}},
+  // CHANGED: Withdrawal achievements are now count-based at clean round numbers (5, 10, 25) rather
+  // than tied to a multiple of the daily target. Rewards the HABIT of withdrawing regularly, not
+  // the total $ amount — and the thresholds are immediately readable.
+  {id:"withdrawal_n5",icon:"💰",name:"Stacking Up",desc:"5 withdrawals logged",check:function(){try{return (loadTransfers()||[]).filter(function(t){return (parseFloat(t.amount)||0)<0;}).length>=5;}catch(e){return false;}}},
+  {id:"withdrawal_n10",icon:"🏦",name:"Routine",desc:"10 withdrawals logged",check:function(){try{return (loadTransfers()||[]).filter(function(t){return (parseFloat(t.amount)||0)<0;}).length>=10;}catch(e){return false;}}},
+  {id:"withdrawal_n25",icon:"🚀",name:"Pro Withdrawer",desc:"25 withdrawals logged",check:function(){try{return (loadTransfers()||[]).filter(function(t){return (parseFloat(t.amount)||0)<0;}).length>=25;}catch(e){return false;}}},
   {id:"winrate60",icon:"🎖",name:"Sharp Eye",desc:"60%+ win rate (20+ trades)",check:function(r){var tot=r.reduce(function(s,d){return s+(d.wins||0)+(d.losses||0);},0);var wins=r.reduce(function(s,d){return s+(d.wins||0);},0);return tot>=20&&wins/tot>=0.6;}},
   {id:"winrate70",icon:"🔭",name:"Sniper",desc:"70%+ win rate (20+ trades)",check:function(r){var tot=r.reduce(function(s,d){return s+(d.wins||0)+(d.losses||0);},0);var wins=r.reduce(function(s,d){return s+(d.wins||0);},0);return tot>=20&&wins/tot>=0.7;}},
   {id:"disc90",icon:"🧘",name:"Iron Mind",desc:"90%+ avg discipline (10+ days)",check:function(r){var days=r.filter(function(d){return d.disciplineScore!=null;});if(days.length<10)return false;return days.reduce(function(s,d){return s+(parseFloat(d.disciplineScore)||0);},0)/days.length>=90;}},
@@ -2848,21 +2851,34 @@ function PhotoGallery(props){
   );
 }
 // CHANGED: Scroll-window for the scale milestones grid. Shows ~7 rows at once; on mount,
-// scrolls so the current tier sits centered within the visible band. Sticky header stays put.
+// scrolls so the current tier sits centered within the visible band. The sticky header is
+// rendered outside the scrollable grid so it fully covers anything scrolling behind it.
 function ScaleMilestonesScroller(props){
-  var ref=useRef(null);
+  var scrollRef=useRef(null);
+  var headerH=22; // px — height of the sticky header bar; subtracted when centering.
   useEffect(function(){
-    var c=ref.current;if(!c)return;
+    var c=scrollRef.current;if(!c)return;
     var el=c.querySelector('[data-tier="'+props.currentTier+'"]');
     if(!el)return;
-    // Center the current tier inside the scroll container.
-    var elTop=el.offsetTop;
-    var elH=el.offsetHeight;
-    c.scrollTop=Math.max(0,elTop-(c.clientHeight/2)+(elH/2));
+    // Use bounding-rect math — robust against offsetParent surprises and grid layout.
+    var cRect=c.getBoundingClientRect();
+    var eRect=el.getBoundingClientRect();
+    var offsetWithinScroller=(eRect.top-cRect.top)+c.scrollTop;
+    var visibleH=c.clientHeight-headerH;
+    c.scrollTop=Math.max(0,offsetWithinScroller-headerH-(visibleH/2)+(eRect.height/2));
   },[props.currentTier]);
   return (
-    <div ref={ref} style={{maxHeight:198,overflowY:"auto",border:"1px solid #1e293b",borderRadius:4,padding:"2px 4px",background:"#0a0a0f"}}>
-      {props.children}
+    <div style={{position:"relative",border:"1px solid #1e293b",borderRadius:4,background:"#0a0a0f"}}>
+      {/* CHANGED: Sticky header rendered OUTSIDE the scroll container as a single solid bar so
+         no tier rows can ever leak through the gap between cells. */}
+      <div style={{display:"grid",gridTemplateColumns:"auto 1fr 1fr",gap:6,background:"#0a0a0f",borderBottom:"1px solid #1e293b",padding:"4px 4px"}}>
+        <div style={{fontSize:9,color:"#64748b",letterSpacing:0.5,textTransform:"uppercase",fontWeight:600,padding:"2px 6px"}}>Tier</div>
+        <div style={{fontSize:9,color:"#64748b",letterSpacing:0.5,textTransform:"uppercase",fontWeight:600,padding:"2px 6px"}}>Position (min–max)</div>
+        <div style={{fontSize:9,color:"#64748b",letterSpacing:0.5,textTransform:"uppercase",fontWeight:600,padding:"2px 6px"}}>Risk (min–max)</div>
+      </div>
+      <div ref={scrollRef} style={{maxHeight:176,overflowY:"auto",padding:"2px 4px",position:"relative"}}>
+        {props.children}
+      </div>
     </div>
   );
 }
@@ -7084,9 +7100,6 @@ function SettingsTab(props){
                      window itself to see milestones above/below the visible band. */}
                   <ScaleMilestonesScroller currentTier={currentTier}>
                     <div style={{display:"grid",gridTemplateColumns:"auto 1fr 1fr",gap:6,fontSize:11,alignItems:"center"}}>
-                      <div style={{fontSize:9,color:"#64748b",letterSpacing:0.5,textTransform:"uppercase",fontWeight:600,position:"sticky",top:0,background:"#0a0a0f",zIndex:1,padding:"2px 6px"}}>Tier</div>
-                      <div style={{fontSize:9,color:"#64748b",letterSpacing:0.5,textTransform:"uppercase",fontWeight:600,position:"sticky",top:0,background:"#0a0a0f",zIndex:1,padding:"2px 6px"}}>Position (min–max)</div>
-                      <div style={{fontSize:9,color:"#64748b",letterSpacing:0.5,textTransform:"uppercase",fontWeight:600,position:"sticky",top:0,background:"#0a0a0f",zIndex:1,padding:"2px 6px"}}>Risk (min–max)</div>
                       {milestones.map(function(m){
                         var sizes=calcPosSizes(m,{useDirect:true,sizingMode:settings.sizingMode,slippagePct:slip,positionMaxPct:posMaxPct,riskMaxPct:riskMaxPct,positionMaxDollar:settings.positionMaxDollar,riskMaxDollar:settings.riskMaxDollar});
                         var isCurrent=m===currentTier;
