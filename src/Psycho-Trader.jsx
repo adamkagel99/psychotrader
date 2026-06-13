@@ -5227,13 +5227,21 @@ function MetricChart(props){
   var svgRef=React.useRef(null);
   if(entries.length===0||typeof compute!=="function")return null;
   var sorted=entries.slice().sort(function(a,b){return new Date(a.date)-new Date(b.date);});
+  // CHANGED: minTrades prop gates the chart until enough trades have accumulated. For rate-based
+  // metrics (WR, PF, expectancy, etc.) early data is meaningless — a 1-trade WR is either 0% or
+  // 100%. Default 20 is a common floor for stat-noise reduction.
+  var minTrades=props.minTrades!=null?props.minTrades:0;
   var pts=[];
   for(var i=0;i<sorted.length;i++){
     var slice=sorted.slice(0,i+1);
+    if(minTrades>0){
+      var nT=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){if(t&&t.status!=="open")nT++;});});
+      if(nT<minTrades)continue;
+    }
     var v=compute(slice);
     if(v!=null&&!isNaN(v))pts.push({date:sorted[i].date,v:v});
   }
-  if(pts.length<1)return <div style={{padding:24,textAlign:"center",fontSize:12,color:"#64748b"}}>Not enough data to chart {label}.</div>;
+  if(pts.length<1)return <div style={{padding:24,textAlign:"center",fontSize:12,color:"#64748b"}}>{minTrades>0?("Need at least "+minTrades+" trades for a meaningful trend."):"Not enough data to chart."}</div>;
   var W=600,H=200,pad=28;
   var minV=Math.min.apply(null,pts.map(function(p){return p.v;}));
   var maxV=Math.max.apply(null,pts.map(function(p){return p.v;}));
@@ -5262,8 +5270,8 @@ function MetricChart(props){
     <div style={{padding:"4px 0"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8,padding:"0 4px"}}>
         <div>
-          <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{hoverIdx!=null?display.date:label}</div>
-          <div style={{fontSize:22,fontWeight:700,color:color,marginTop:2,fontVariantNumeric:"tabular-nums"}}>{fmt(display.v)}</div>
+          {hoverIdx!=null&&<div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{display.date}</div>}
+          <div style={{fontSize:22,fontWeight:700,color:color,marginTop:hoverIdx!=null?2:0,fontVariantNumeric:"tabular-nums"}}>{fmt(display.v)}</div>
         </div>
         <div style={{textAlign:"right",fontSize:11,color:"#94a3b8",fontVariantNumeric:"tabular-nums"}}>
           <div>start {fmt(first.v)}</div>
@@ -5376,8 +5384,8 @@ function EquityCurve(props){
     <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid #1e293b",borderRadius:10,display:"flex",flexDirection:"column",height:"100%",boxSizing:"border-box"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8,gap:8}}>
         <div>
-          <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{displayDate?displayDate:"Total P&L"}</div>
-          <div style={{fontSize:20,fontWeight:700,color:displayVal>=0?"#22c55e":"#ef4444",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{fmt(displayVal)}</div>
+          {displayDate&&<div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{displayDate}</div>}
+          <div style={{fontSize:20,fontWeight:700,color:displayVal>=0?"#22c55e":"#ef4444",marginTop:displayDate?2:0,fontVariantNumeric:"tabular-nums"}}>{fmt(displayVal)}</div>
         </div>
         <div style={{textAlign:"right"}}>
           <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Max Drawdown</div>
@@ -5782,9 +5790,8 @@ function SessionDayHeatmap(props){
             var alpha=c.n===0?0:Math.max(0.18,dev);
             var bg=c.n===0?"#0a0a0f":(wr>=0.5?"rgba(34,197,94,"+alpha+")":"rgba(239,68,68,"+alpha+")");
             children.push(
-              <button key={si+"-"+di} onClick={function(){setHover(isHover?null:{s:si,d:di});}} onMouseEnter={function(){if(c.n>0)setHover({s:si,d:di});}} onMouseLeave={function(){setHover(null);}} style={{height:36,background:bg,border:isHover?"1.5px solid #fff":"1px solid "+(c.n===0?"#1e293b":"#334155"),borderRadius:4,cursor:c.n>0?"pointer":"default",fontFamily:"inherit",padding:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",position:"relative"}}>
+              <button key={si+"-"+di} onClick={function(){setHover(isHover?null:{s:si,d:di});}} onMouseEnter={function(){if(c.n>0)setHover({s:si,d:di});}} onMouseLeave={function(){setHover(null);}} style={{height:36,background:bg,border:isHover?"1.5px solid #fff":"1px solid "+(c.n===0?"#1e293b":"#334155"),borderRadius:4,cursor:c.n>0?"pointer":"default",fontFamily:"inherit",padding:0,display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}>
                 {c.n>0&&<span style={{fontSize:11,fontWeight:700,color:"#fff",fontVariantNumeric:"tabular-nums",textShadow:"0 1px 2px rgba(0,0,0,0.6)",lineHeight:1}}>{Math.round(c.wins/c.n*100)}%</span>}
-                {c.n>0&&<span style={{fontSize:8,fontWeight:600,color:"#ffffffcc",fontVariantNumeric:"tabular-nums",lineHeight:1,marginTop:2}}>{c.n}t</span>}
               </button>
             );
           });
@@ -6134,13 +6141,13 @@ function PerformanceTab(props){
             function renderChart(){
               if(selectedMetric==="totalPnl")return <EquityCurve entries={filtered} range={range}/>;
               if(selectedMetric==="trades")return <MetricChart entries={filtered} label="Cumulative Trades" color="#a5b4fc" compute={computeTradeCount} format={fmtCount}/>;
-              if(selectedMetric==="profitFactor")return <MetricChart entries={filtered} label="Profit Factor" color={pfColor} compute={computePF} format={fmtNum}/>;
-              if(selectedMetric==="winRate")return <MetricChart entries={filtered} label="Win Rate" color="#22c55e" compute={computeWR} format={fmtPct}/>;
-              if(selectedMetric==="lossRate")return <MetricChart entries={filtered} label="Loss Rate" color="#ef4444" compute={computeLR} format={fmtPct}/>;
-              if(selectedMetric==="breakeven")return <MetricChart entries={filtered} label="Breakeven Rate" color="#94a3b8" compute={computeBE} format={fmtPct}/>;
-              if(selectedMetric==="avgWin")return <MetricChart entries={filtered} label="Avg Win" color="#22c55e" compute={computeAvgWin} format={fmtDollar}/>;
-              if(selectedMetric==="avgLoss")return <MetricChart entries={filtered} label="Avg Loss" color="#ef4444" compute={computeAvgLoss} format={fmtDollar}/>;
-              if(selectedMetric==="expectancy")return <MetricChart entries={filtered} label="Expectancy / Trade" color={expValue>=0?"#22c55e":"#ef4444"} compute={computeExp} format={fmtDollar}/>;
+              if(selectedMetric==="profitFactor")return <MetricChart entries={filtered} minTrades={20} label="Profit Factor" color={pfColor} compute={computePF} format={fmtNum}/>;
+              if(selectedMetric==="winRate")return <MetricChart entries={filtered} minTrades={20} label="Win Rate" color="#22c55e" compute={computeWR} format={fmtPct}/>;
+              if(selectedMetric==="lossRate")return <MetricChart entries={filtered} minTrades={20} label="Loss Rate" color="#ef4444" compute={computeLR} format={fmtPct}/>;
+              if(selectedMetric==="breakeven")return <MetricChart entries={filtered} minTrades={20} label="Breakeven Rate" color="#94a3b8" compute={computeBE} format={fmtPct}/>;
+              if(selectedMetric==="avgWin")return <MetricChart entries={filtered} minTrades={20} label="Avg Win" color="#22c55e" compute={computeAvgWin} format={fmtDollar}/>;
+              if(selectedMetric==="avgLoss")return <MetricChart entries={filtered} minTrades={20} label="Avg Loss" color="#ef4444" compute={computeAvgLoss} format={fmtDollar}/>;
+              if(selectedMetric==="expectancy")return <MetricChart entries={filtered} minTrades={20} label="Expectancy / Trade" color={expValue>=0?"#22c55e":"#ef4444"} compute={computeExp} format={fmtDollar}/>;
               return <EquityCurve entries={filtered} range={range}/>;
             }
             return <StatSec title="Overview" colSpan={props.mobile?1:6}>
