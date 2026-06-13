@@ -5394,8 +5394,8 @@ function EquityCurve(props){
     <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid #1e293b",borderRadius:10,display:"flex",flexDirection:"column",height:"100%",boxSizing:"border-box"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8,gap:8}}>
         <div>
-          {displayDate&&<div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{displayDate}</div>}
-          <div style={{fontSize:20,fontWeight:700,color:displayVal>=0?"#22c55e":"#ef4444",marginTop:displayDate?2:0,fontVariantNumeric:"tabular-nums"}}>{fmt(displayVal)}</div>
+          {/* CHANGED: Date is now rendered at the bottom of the chart under the cursor line, not above the readout. */}
+          <div style={{fontSize:20,fontWeight:700,color:displayVal>=0?"#22c55e":"#ef4444",fontVariantNumeric:"tabular-nums"}}>{fmt(displayVal)}</div>
         </div>
         <div style={{textAlign:"right"}}>
           <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Max Drawdown</div>
@@ -5414,11 +5414,20 @@ function EquityCurve(props){
           </g>
         )}
       </svg>
-      <div style={{display:"flex",justifyContent:"space-between",marginTop:6,fontSize:10,color:"#64748b",fontWeight:600}}>
-        <span>{entries[0].date}</span>
-        <span>peak {fmt(peak)}</span>
-        <span>{entries[entries.length-1].date}</span>
-      </div>
+      {/* CHANGED: Bottom row — when hovering, replace start/peak/end with a single centered date
+         pinned to the cursor column, so the reader's eye stays on the cursor instead of darting
+         up to a top-corner label. */}
+      {hoverIdx!=null?(
+        <div style={{position:"relative",height:14,marginTop:6}}>
+          <span style={{position:"absolute",left:((xFor(hoverIdx)/W)*100)+"%",transform:"translateX(-50%)",fontSize:10,color:"#cbd5e1",fontWeight:700,letterSpacing:0.5,whiteSpace:"nowrap"}}>{displayDate}</span>
+        </div>
+      ):(
+        <div style={{display:"flex",justifyContent:"space-between",marginTop:6,fontSize:10,color:"#64748b",fontWeight:600}}>
+          <span>{entries[0].date}</span>
+          <span>peak {fmt(peak)}</span>
+          <span>{entries[entries.length-1].date}</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -6200,7 +6209,8 @@ function PerformanceTab(props){
                 var wr=g.n>0?Math.round((g.w/g.n)*100):0;
                 var avgPct=g.pcts.length>0?(g.pcts.reduce(function(s,v){return s+v;},0)/g.pcts.length):0;
                 var exp=g.n>0?g.pnl/g.n:0;
-                return {k:k,n:g.n,wr:wr,avgPct:avgPct,exp:exp};
+                // CHANGED: Carry raw pnl + pcts forward — totalContrib computation downstream needs them.
+                return {k:k,n:g.n,wr:wr,avgPct:avgPct,exp:exp,pnl:g.pnl,pcts:g.pcts};
               });
               // Sort by expectancy descending.
               rows.sort(function(a,b){return b.exp-a.exp;});
