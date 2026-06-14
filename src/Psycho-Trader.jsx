@@ -4997,10 +4997,30 @@ function GoalsTab(props){
               </div></div>
             </div>
             <div><label style={lbl}>Deadline (optional)</label><input type="date" onMouseDown={function(e){var inp=e.currentTarget;setTimeout(function(){try{inp.focus();if(inp.showPicker)inp.showPicker();}catch(err){}},0);}} value={customDraft.deadline||""} onChange={function(e){var v=e.target.value;setCustomDraft(function(d){return Object.assign({},d,{deadline:v});});}} style={Object.assign({},fld,{colorScheme:"dark",color:"#e2e8f0"})}/></div>
+            {/* CHANGED: Section selector in EDIT mirrors the new-goal form — file the goal under
+               a default section, the Custom bucket, an existing named section, or a brand-new one. */}
+            <div>
+              <label style={lbl}>Section</label>
+              <Dropdown value={(function(){var sec=customDraft.section;if(sec==="namedCustom"&&customDraft.sectionName)return "existing:"+customDraft.sectionName;return sec||"custom";})()} onChange={function(v){setCustomDraft(function(d){
+                if(v==="newCustom")return Object.assign({},d,{section:"newCustom",sectionName:""});
+                if(v.indexOf("existing:")===0)return Object.assign({},d,{section:"namedCustom",sectionName:v.slice("existing:".length)});
+                return Object.assign({},d,{section:v,sectionName:null});
+              });}} options={[{v:"custom",l:"Custom Goals (default)"},{v:"performance",l:"Performance"},{v:"pnl",l:"P&L"},{v:"account",l:"Account"}].concat(Array.from(new Set((goals.custom||[]).filter(function(g){return g.section==="namedCustom"&&g.sectionName;}).map(function(g){return g.sectionName;}))).map(function(name){return {v:"existing:"+name,l:name};})).concat([{v:"newCustom",l:"＋ Create new section…"}])}/>
+              {customDraft.section==="newCustom"&&(
+                <input value={customDraft.sectionName||""} onChange={function(e){var v=e.target.value;setCustomDraft(function(d){return Object.assign({},d,{sectionName:v});});}} placeholder="New section name" style={Object.assign({},fld,{marginTop:6})}/>
+              )}
+            </div>
           </div>
           <div style={{display:"flex",gap:8,marginTop:12}}>
             <button onClick={function(){setEditingCustomId(null);setCustomDraft(null);}} style={{flex:1,padding:"9px",background:"none",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Cancel</button>
-            <button onClick={function(){if(!editCanSave)return;updateCustom(cg.id,{title:customDraft.title.trim(),target:customDraft.target,metric:customDraft.metric,period:customDraft.period,prefix:customDraft.prefix||"",suffix:customDraft.suffix||"",deadline:customDraft.deadline||null,customName:customDraft.metric==="custom"?(customDraft.customName||"").trim():null,filterField:customDraft.filterField||"",filterValue:customDraft.filterValue||""});setEditingCustomId(null);setCustomDraft(null);}} disabled={!editCanSave} style={{flex:2,padding:"9px",background:editCanSave?"#4f46e5":"#1e293b",border:"none",borderRadius:6,color:editCanSave?"#fff":"#475569",fontSize:13,cursor:editCanSave?"pointer":"not-allowed",fontFamily:"inherit",fontWeight:700}}>Save</button>
+            <button onClick={function(){if(!editCanSave)return;
+              // CHANGED: Normalize section — a freshly-named new section becomes "namedCustom" with sectionName.
+              var sec=customDraft.section||"custom";var sname=customDraft.sectionName||null;
+              if(sec==="newCustom"){if(sname&&sname.trim().length>0){sec="namedCustom";sname=sname.trim();}else{sec="custom";sname=null;}}
+              if(sec!=="namedCustom")sname=null;
+              updateCustom(cg.id,{title:customDraft.title.trim(),target:customDraft.target,metric:customDraft.metric,period:customDraft.period,prefix:customDraft.prefix||"",suffix:customDraft.suffix||"",deadline:customDraft.deadline||null,customName:customDraft.metric==="custom"?(customDraft.customName||"").trim():null,filterField:customDraft.filterField||"",filterValue:customDraft.filterValue||"",section:sec,sectionName:sname});
+              setEditingCustomId(null);setCustomDraft(null);
+            }} disabled={!editCanSave} style={{flex:2,padding:"9px",background:editCanSave?"#4f46e5":"#1e293b",border:"none",borderRadius:6,color:editCanSave?"#fff":"#475569",fontSize:13,cursor:editCanSave?"pointer":"not-allowed",fontFamily:"inherit",fontWeight:700}}>Save</button>
           </div>
         </div>
       );
@@ -6014,7 +6034,7 @@ function SessionDayHeatmap(props){
     <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid #1e293b",borderRadius:10,display:"flex",flexDirection:"column",height:"100%",boxSizing:"border-box"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10,gap:8}}>
         <div>
-          <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{hp?(hp.s.name+" · "+hp.d):"Session × Day"}</div>
+          <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{hp?(hp.s.name+" · "+hp.d):"Session × Day (WR)"}</div>
           {hp?(
             <div style={{fontSize:18,fontWeight:700,color:hp.c.n>0?(hp.c.wins/hp.c.n>=0.5?"#22c55e":"#ef4444"):"#94a3b8",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{hp.c.n>0?Math.round(hp.c.wins/hp.c.n*100):0}% wr<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:6}}>{hp.c.n}t · {HIDE_DOLLAR_PNL?((hp.c.n>0?((hp.c.rSum/hp.c.n>=0?"+":"")+(hp.c.rSum/hp.c.n).toFixed(2)):"0.00")+"R"):fmt(hp.c.pnl)}</span></div>
           ):(
