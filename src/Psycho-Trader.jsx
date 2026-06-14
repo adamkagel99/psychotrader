@@ -1112,8 +1112,13 @@ function getLastDayR(){
   try{
     var rows=loadJournalRows().filter(function(r){return (r.trades||[]).length>0;}).sort(function(a,b){return new Date(b.date)-new Date(a.date);});
     if(rows.length===0)return {date:null,r:0,pnl:0};
-    var s=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}");var risk=parseFloat(s.riskMax)||0;
-    var r=rows[0];var pnl=parseFloat(r.pnl)||0;var rMult=risk>0?(pnl/risk):0;
+    var r=rows[0];var pnl=parseFloat(r.pnl)||0;
+    // CHANGED: Prefer the entry's STORED riskMax (the value at save time) over the current
+    // settings — keeps the banner's R math identical to what the calendar / day tiles show.
+    // Falls back to current settings only if the entry is missing it.
+    var risk=parseFloat(r.riskMax);
+    if(isNaN(risk)||risk<=0){try{var s=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}");risk=parseFloat(s.riskMax)||0;}catch(e){risk=0;}}
+    var rMult=risk>0?(pnl/risk):0;
     return {date:r.date,r:rMult,pnl:pnl};
   }catch(e){return {date:null,r:0,pnl:0};}
 }
