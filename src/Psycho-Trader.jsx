@@ -63,10 +63,14 @@ function getImminentEvents(windowMin){
 }
 
 // CHANGED: Today's events under the user's currency/impact filters — used by the session banner in Journal.
-function getTodaysFilteredEvents(){
+function getTodaysFilteredEvents(){return getFilteredEventsForDate(getPT());}
+// CHANGED: Filtered events for any specific calendar date. Used both by the live session banner
+// (today) and by the journal write so each journal day can store the events that were relevant
+// that day at the time it was saved.
+function getFilteredEventsForDate(d){
+  if(!d)return [];
   var f=loadEventFilters();
-  var now=getPT();
-  var dayStart=new Date(now.getFullYear(),now.getMonth(),now.getDate());dayStart.setHours(0,0,0,0);
+  var dayStart=new Date(d.getFullYear(),d.getMonth(),d.getDate());dayStart.setHours(0,0,0,0);
   var dayEnd=new Date(dayStart.getTime()+24*60*60*1000);
   return loadEvents().map(function(e){return Object.assign({},e,{_d:parseEventDate(e)});}).filter(function(e){
     if(!e._d)return false;
@@ -77,6 +81,13 @@ function getTodaysFilteredEvents(){
     if(f.impact.length>0&&f.impact.indexOf(imp)<0)return false;
     return true;
   }).sort(function(a,b){return a._d-b._d;});
+}
+// CHANGED: Strip the live Date object before persisting an event onto a journal entry — the raw
+// timestamp/date/currency/title/impact suffices for replay and is safely JSON-serializable.
+function eventToStorable(e){
+  if(!e)return null;
+  var t=null;try{t=(e._d&&e._d.getTime)?e._d.getTime():(parseEventDate(e)||new Date()).getTime();}catch(_){t=Date.now();}
+  return {ts:t,title:e.title||e.name||"",impact:normalizeImpact(e.impact),currency:eventCurrency(e),date:e.date||null,time:e.time||null};
 }
 
 var USER_TIMEZONE=(function(){try{var s=localStorage.getItem("tf-tz");return s||"America/Los_Angeles";}catch(e){return "America/Los_Angeles";}})();
@@ -4174,6 +4185,29 @@ function TradesTab(props){
             })()}
             <div style={{fontSize:11,color:"#64748b",letterSpacing:1,textTransform:"uppercase",marginBottom:6,fontWeight:600}}>Daily Note</div>
             <textarea value={entry.note||""} onChange={function(e){var v=e.target.value;var updated=Object.assign({},entry,{note:v});var dateKey=isToday?todayStr():selectedDate;try{localStorage.setItem("journal:"+dateKey.replace(/\//g,"-"),JSON.stringify(updated));}catch(err){}if(isToday){setTodayJournalEntry(updated);}else{setPastSessions(function(arr){return arr.map(function(x){return x.date===selectedDate?updated:x;});});}if(props.bumpReloadKey)props.bumpReloadKey();}} placeholder="What worked? What didn't? Any rules to remember tomorrow?" style={Object.assign({},fld,{minHeight:80,resize:"vertical",fontFamily:"inherit",lineHeight:1.5})}/>
+            {/* CHANGED: Render the snapshot of economic events that matched the user's filters
+               on this day. Helps re-read past sessions with the macro context they were traded in. */}
+            {(function(){
+              var ev=(entry.events||[]).slice().sort(function(a,b){return (a.ts||0)-(b.ts||0);});
+              if(ev.length===0)return null;
+              function impColor(imp){if(imp==="high")return "#ef4444";if(imp==="medium")return "#fbbf24";return "#64748b";}
+              function fmtTime(ts){if(!ts)return "";var d=new Date(ts);var h=d.getHours();var m=d.getMinutes();var ap=h>=12?"PM":"AM";var hh=h%12||12;return hh+":"+String(m).padStart(2,"0")+" "+ap;}
+              return (
+                <div style={{marginTop:14,paddingTop:12,borderTop:"1px solid #1e293b"}}>
+                  <div style={{fontSize:11,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600,marginBottom:8}}>Economic Events · {ev.length}</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                    {ev.map(function(e,i){return (
+                      <div key={i} style={{display:"flex",alignItems:"center",gap:8,fontSize:12}}>
+                        <span style={{width:6,height:6,borderRadius:"50%",background:impColor(e.impact),flexShrink:0}}/>
+                        <span style={{color:"#94a3b8",fontVariantNumeric:"tabular-nums",minWidth:60}}>{fmtTime(e.ts)}</span>
+                        <span style={{color:"#64748b",fontSize:10,fontWeight:700,letterSpacing:0.5}}>{e.currency||""}</span>
+                        <span style={{color:"#e2e8f0",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.title||""}</span>
+                      </div>
+                    );})}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         );
       })()}
@@ -7692,7 +7726,11 @@ function App(props){
           wins:closedT.filter(function(t){return parseFloat(t.pnl)>0;}).length,
           losses:closedT.filter(function(t){return parseFloat(t.pnl)<0;}).length,
           riskMax:riskMaxN,
-          disciplineScore:discScore
+          disciplineScore:discScore,
+          // CHANGED: Snapshot today's filtered economic events into the journal entry so the day
+          // is self-contained — viewing it later shows what events were relevant when traded,
+          // even if the event cache or user's filters change.
+          events:(function(){try{return getTodaysFilteredEvents().map(eventToStorable).filter(Boolean);}catch(e){return [];}})()
         };
         // Preserve lock-side fields if they exist on the saved entry.
         if(existing){
@@ -7922,7 +7960,10 @@ function App(props){
           wins:closedTrades.filter(function(x){return parseFloat(x.pnl)>0;}).length,
           losses:closedTrades.filter(function(x){return parseFloat(x.pnl)<0;}).length,
           pnl:closedTrades.reduce(function(sum,x){return sum+(parseFloat(x.pnl)||0);},0),
-          disciplineScore:calcDiscipline(closedTrades,(entry.riskMax!=null&&parseFloat(entry.riskMax)>0)?parseFloat(entry.riskMax):(parseFloat(settings.riskMax)||0),{commitment:entry.commitment||null})
+          disciplineScore:calcDiscipline(closedTrades,(entry.riskMax!=null&&parseFloat(entry.riskMax)>0)?parseFloat(entry.riskMax):(parseFloat(settings.riskMax)||0),{commitment:entry.commitment||null}),
+          // CHANGED: Snapshot the day's filtered economic events into the journal entry. For
+          // edits to today, refreshes the snapshot. For past-day edits, keeps the existing snapshot.
+          events:(entry.events&&entry.events.length>0)?entry.events:(function(){try{var d=(function(s){if(!s)return null;var m=String(s).match(/^(\d+)[\/\-](\d+)[\/\-](\d+)\$/);if(!m)return null;return new Date(parseInt(m[3],10),parseInt(m[1],10)-1,parseInt(m[2],10));})(entry.date)||(dateKey===todayStr()?getPT():null);return getFilteredEventsForDate(d).map(eventToStorable).filter(Boolean);}catch(e){return [];}})()
         });
         // CHANGED: If this entry was originally a No-Trade Day but trades have now been logged,
         // convert it to a regular day — but preserve the original sit-out reasons as historical
@@ -7970,7 +8011,10 @@ function App(props){
           wins:closedTrades.filter(function(x){return parseFloat(x.pnl)>0;}).length,
           losses:closedTrades.filter(function(x){return parseFloat(x.pnl)<0;}).length,
           pnl:closedTrades.reduce(function(sum,x){return sum+(parseFloat(x.pnl)||0);},0),
-          disciplineScore:calcDiscipline(closedTrades,(entry.riskMax!=null&&parseFloat(entry.riskMax)>0)?parseFloat(entry.riskMax):(parseFloat(settings.riskMax)||0),{commitment:entry.commitment||null})
+          disciplineScore:calcDiscipline(closedTrades,(entry.riskMax!=null&&parseFloat(entry.riskMax)>0)?parseFloat(entry.riskMax):(parseFloat(settings.riskMax)||0),{commitment:entry.commitment||null}),
+          // CHANGED: Snapshot the day's filtered economic events into the journal entry. For
+          // edits to today, refreshes the snapshot. For past-day edits, keeps the existing snapshot.
+          events:(entry.events&&entry.events.length>0)?entry.events:(function(){try{var d=(function(s){if(!s)return null;var m=String(s).match(/^(\d+)[\/\-](\d+)[\/\-](\d+)\$/);if(!m)return null;return new Date(parseInt(m[3],10),parseInt(m[1],10)-1,parseInt(m[2],10));})(entry.date)||(dateKey===todayStr()?getPT():null);return getFilteredEventsForDate(d).map(eventToStorable).filter(Boolean);}catch(e){return [];}})()
         });
         localStorage.setItem(key,JSON.stringify(updated));
       }
