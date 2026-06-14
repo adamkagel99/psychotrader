@@ -1644,7 +1644,10 @@ function CalendarGrid(props){
 }
 
 function DashboardCalendar(props){
-  var [open,setOpen]=useState(props.defaultOpen||false);
+  // CHANGED: Persist open/closed across re-renders so a resync (which can re-mount widgets) doesn't
+  // collapse the user's chosen view.
+  var [open,setOpen]=useState(function(){try{var v=localStorage.getItem("tf-dash-cal-open");return v===null?(props.defaultOpen||false):v==="1";}catch(e){return props.defaultOpen||false;}});
+  useEffect(function(){try{localStorage.setItem("tf-dash-cal-open",open?"1":"0");}catch(e){}},[open]);
   var sessionMap=buildSessionMap(props.totalPnL,props.riskMax,(props.todayTrades||[]).filter(function(t){return t&&t.status!=="open";}).length);
   var todayDateStr=todayStr();
   // CHANGED: Week strip starts on Sunday to match the calendar grid (S M T W T F S).
@@ -2528,7 +2531,9 @@ function EconomicEvents(props){
   var currencyFilter=props.currencyFilter,setCurrencyFilter=props.setCurrencyFilter;
   var impactFilter=props.impactFilter,setImpactFilter=props.setImpactFilter;
   var [events,setEvents]=useState([]);
-  var [expanded,setExpanded]=useState(false);
+  // CHANGED: Persist expanded state across re-renders so resync doesn't collapse the panel.
+  var [expanded,setExpanded]=useState(function(){try{return localStorage.getItem("tf-events-expanded")==="1";}catch(e){return false;}});
+  useEffect(function(){try{localStorage.setItem("tf-events-expanded",expanded?"1":"0");}catch(e){}},[expanded]);
   var [showAll,setShowAll]=useState(false);
   var [currencyOpen,setCurrencyOpen]=useState(false);
   var [impactOpen,setImpactOpen]=useState(false);
@@ -2688,7 +2693,9 @@ function EconomicEvents(props){
 // CHANGED: Notebook — collates every written note across the journal: each trade's notes plus the
 // end-of-day note, grouped by date (newest first). A readable log of your thinking over time.
 function NotebookPanel(props){
-  var [open,setOpen]=useState(false);
+  // CHANGED: Persist open state — survives re-renders / resyncs.
+  var [open,setOpen]=useState(function(){try{return localStorage.getItem("tf-notebook-open")==="1";}catch(e){return false;}});
+  useEffect(function(){try{localStorage.setItem("tf-notebook-open",open?"1":"0");}catch(e){}},[open]);
   var [viewer,setViewer]=useState(null);
   var [sortMode,setSortMode]=useState("date_desc"); // CHANGED: date_desc | date_asc | pnl_desc | pnl_asc
   // Build dated entries. props.todayState lets today's in-progress notes appear before the day is saved.
@@ -2925,15 +2932,14 @@ function ScaleMilestonesScroller(props){
 function ScalingTargetCard(props){
   var settings=props.settings||{};
   var liveTotalPnL=props.liveTotalPnL||0;
-  var [scalingTarget,setScalingTarget]=useState(function(){try{return localStorage.getItem("tf-stats-scaling-target")||"auto";}catch(e){return "auto";}});
-  useEffect(function(){try{localStorage.setItem("tf-stats-scaling-target",scalingTarget);}catch(e){}},[scalingTarget]);
   var balance=computeAccountBalance(liveTotalPnL);
-  var targetVal;
-  if(scalingTarget==="auto"){
-    targetVal=(balance>0&&balance%1000===0)?balance:Math.floor(balance/1000)*1000+1000;
-  }else if(scalingTarget==="next5"){targetVal=(balance>0&&balance%5000===0)?balance:Math.floor(balance/5000)*5000+5000;}
-  else if(scalingTarget==="next10"){targetVal=(balance>0&&balance%10000===0)?balance:Math.floor(balance/10000)*10000+10000;}
-  else targetVal=parseFloat(scalingTarget)||0;
+  // CHANGED: Target is auto-derived as the next tier in the scaling-milestone schedule (matches
+  // Settings → Auto-Sizing Parameters → Scale Milestones). No dropdown, nothing to configure.
+  var milestones=[500];
+  for(var k=1;k<=10;k++)milestones.push(k*1000);
+  milestones.push(15000);milestones.push(20000);
+  for(var m10=30000;m10<=100000;m10+=10000)milestones.push(m10);
+  var targetVal=milestones.find(function(m){return m>balance;})||milestones[milestones.length-1];
   var pctToTarget=targetVal>0?Math.min(100,Math.max(0,(balance/targetVal)*100)):0;
   var reached=targetVal>0&&balance>=targetVal;
   var slip=settings.slippagePct!=null?settings.slippagePct:20;
@@ -2947,7 +2953,7 @@ function ScalingTargetCard(props){
     <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid "+(reached?"#166534":"#1e293b"),borderRadius:10}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,gap:8,flexWrap:"wrap"}}>
         <div style={{fontSize:10,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Account Balance</div>
-        <Dropdown value={scalingTarget} onChange={function(v){setScalingTarget(v);}} options={[{v:"auto",l:"Scale to next $1k"},{v:"next5",l:"Next $5k milestone"},{v:"next10",l:"Next $10k milestone"},{v:"5000",l:"$5,000"},{v:"10000",l:"$10,000"},{v:"25000",l:"$25,000"},{v:"50000",l:"$50,000"},{v:"100000",l:"$100,000"},{v:"250000",l:"$250,000"}]} style={{padding:"5px 10px",fontSize:12}}/>
+        <div style={{fontSize:10,color:"#64748b",letterSpacing:0.5,fontWeight:600}}>Next tier</div>
       </div>
       <div style={{display:"flex",alignItems:"baseline",gap:10,marginBottom:10,flexWrap:"wrap"}}>
         <div style={{fontSize:26,fontWeight:800,color:reached?"#22c55e":"#818cf8",letterSpacing:-0.5,fontVariantNumeric:"tabular-nums"}}>{fmtPnLUSD(balance)}</div>
@@ -4115,7 +4121,10 @@ function TradesTab(props){
               commitment:state.commitment||null,
               wins:0,losses:0,
               riskMax:parseFloat(settings.riskMax)||0,
-              disciplineScore:null
+              // CHANGED: A logged no-trade day represents a deliberately disciplined choice —
+              // sitting out is the cleanest expression of discipline. Score it 100 so it
+              // counts toward weekly averages, streaks, and the Iron Mind achievement.
+              disciplineScore:100
             };
             try{
               localStorage.setItem(key,JSON.stringify(entry));
@@ -7714,6 +7723,30 @@ function ManageTradeView(props){
 
 function App(props){
   props=props||{};
+  // CHANGED: One-time migration — backfill discipline score on no-trade days that were saved
+  // before the policy change. Walks every journal:* key in localStorage and rewrites entries
+  // where noTradeDay===true && disciplineScore == null to 100. Idempotent and safe to re-run;
+  // a flag (tf-ntday-disc-mig-v1) prevents the scan on subsequent loads.
+  useEffect(function(){
+    try{
+      if(localStorage.getItem("tf-ntday-disc-mig-v1")==="1")return;
+      var toRewrite=[];
+      for(var i=0;i<localStorage.length;i++){
+        var k=localStorage.key(i);
+        if(!k||k.indexOf("journal:")!==0)continue;
+        try{
+          var v=localStorage.getItem(k);if(!v)continue;
+          var e=JSON.parse(v);
+          if(e&&e.noTradeDay===true&&(e.disciplineScore==null||e.disciplineScore===""||isNaN(parseFloat(e.disciplineScore)))){
+            e.disciplineScore=100;toRewrite.push([k,JSON.stringify(e)]);
+          }
+        }catch(_){}
+      }
+      toRewrite.forEach(function(pair){try{localStorage.setItem(pair[0],pair[1]);}catch(_){}});
+      localStorage.setItem("tf-ntday-disc-mig-v1","1");
+      if(toRewrite.length>0&&typeof bumpReloadKey==="function")try{bumpReloadKey();}catch(_){}
+    }catch(e){console.error("No-trade-day discipline backfill failed:",e);}
+  },[]);
   // CHANGED: When the parent (auth/sync wrapper) signals a completed cloud pull via syncTick,
   // refresh data from localStorage WITHOUT remounting — this preserves all in-progress UI state
   // (forms, drafts, editing, scroll position). Without this the app was remounting on every
