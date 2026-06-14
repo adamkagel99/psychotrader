@@ -1104,6 +1104,27 @@ function getWithdrawalAllowance(todayPnL){
 // reaches it, a banner appears on Home. We persist the target and a "dismissed-at-target" marker so
 // the banner doesn't nag once acknowledged (it re-arms if the target changes or allowance dips below).
 function getAllowanceTarget(){try{var v=parseFloat(localStorage.getItem("tf-allowance-target"));return isNaN(v)?0:v;}catch(e){return 0;}}
+// CHANGED: Half-size next-trade guard. After yesterday closed at +3R or higher, suggest sizing
+// down on TODAY's first trade — a single-trade speed bump to interrupt the post-win dopamine
+// loop. Threshold defaults to 3R; reads from settings if user sets one.
+function getHalfSizeRThreshold(){try{var v=parseFloat(localStorage.getItem("tf-halfsize-r-threshold"));return isNaN(v)||v<=0?3:v;}catch(e){return 3;}}
+function getLastDayR(){
+  try{
+    var rows=loadJournalRows().filter(function(r){return (r.trades||[]).length>0;}).sort(function(a,b){return new Date(b.date)-new Date(a.date);});
+    if(rows.length===0)return {date:null,r:0,pnl:0};
+    var s=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}");var risk=parseFloat(s.riskMax)||0;
+    var r=rows[0];var pnl=parseFloat(r.pnl)||0;var rMult=risk>0?(pnl/risk):0;
+    return {date:r.date,r:rMult,pnl:pnl};
+  }catch(e){return {date:null,r:0,pnl:0};}
+}
+function halfSizeNudgeDismissedFor(dateStr){try{return localStorage.getItem("tf-halfsize-dismissed")===dateStr;}catch(e){return false;}}
+function dismissHalfSizeNudge(dateStr){try{localStorage.setItem("tf-halfsize-dismissed",dateStr);}catch(e){}}
+// CHANGED: Profit-taking nudge. After N consecutive green days, suggest taking a withdrawal.
+// Dismissal stores the streak length at the time of dismissal; banner reappears only if the
+// streak grows beyond that, so we don't nag on the same plateau.
+function getStreakNudgeThreshold(){try{var v=parseFloat(localStorage.getItem("tf-streak-nudge-threshold"));return isNaN(v)||v<=0?3:v;}catch(e){return 3;}}
+function streakNudgeDismissedAt(){try{var v=parseInt(localStorage.getItem("tf-streak-nudge-dismissed-at"),10);return isNaN(v)?0:v;}catch(e){return 0;}}
+function dismissStreakNudge(streakLen){try{localStorage.setItem("tf-streak-nudge-dismissed-at",String(streakLen));}catch(e){}}
 function saveAllowanceTarget(v){try{if(v>0)localStorage.setItem("tf-allowance-target",String(v));else localStorage.removeItem("tf-allowance-target");localStorage.removeItem("tf-allowance-notif-dismissed");}catch(e){}}
 function getAllowanceNotifDismissed(){try{return localStorage.getItem("tf-allowance-notif-dismissed")==="1";}catch(e){return false;}}
 function setAllowanceNotifDismissed(v){try{if(v)localStorage.setItem("tf-allowance-notif-dismissed","1");else localStorage.removeItem("tf-allowance-notif-dismissed");}catch(e){}}
@@ -2552,7 +2573,7 @@ function EconomicEvents(props){
           <span style={{fontSize:13,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Economic Events</span>
           <span style={{fontSize:12,color:"#475569"}}>{weekEvents.length}</span>
         </div>
-        <div onClick={function(e){e.stopPropagation();}} style={{display:"flex",alignItems:"center",gap:6,flex:1,justifyContent:"flex-end"}}>
+        <div onClick={function(e){e.stopPropagation();}} style={{display:"flex",alignItems:"center",gap:6,flexShrink:0,justifyContent:"flex-end"}}>
           {currencyList.length>=1&&(
             <div style={{position:"relative"}}>
               <button onClick={function(){setCurrencyOpen(function(o){return !o;});setImpactOpen(false);}} style={{padding:"4px 9px",background:currencyFilter.length>0?"#1e1b4b":"#0a0a0f",border:"1px solid "+(currencyFilter.length>0?"#4338ca":"#334155"),borderRadius:4,color:currencyFilter.length>0?"#a5b4fc":"#94a3b8",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:4,maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
@@ -3384,6 +3405,52 @@ function DashboardTab(props){
       {checklistVisible&&props.state&&props.setState&&(
         <ChecklistPanel state={props.state} setState={props.setState} settings={settings} preCheckComplete={preCheckComplete} checklistVersion={props.checklistVersion} onNavigateToJournal={props.onNavigateToJournal}/>
       )}
+      {/* CHANGED: Half-size next-trade nudge. If yesterday closed at or above the R threshold and
+         we haven't dismissed for today, surface a one-time suggestion to half-size the first
+         trade. Disappears once today has any closed trade (the moment has passed). */}
+      {(function(){
+        var last=getLastDayR();
+        if(!last||!last.date)return null;
+        var t=todayStr();
+        if(last.date===t)return null; // need yesterday, not today
+        var threshold=getHalfSizeRThreshold();
+        if(last.r<threshold)return null;
+        if(halfSizeNudgeDismissedFor(t))return null;
+        var hasTodayClosed=(props.state.trades||[]).some(function(x){return x.status!=="open";});
+        if(hasTodayClosed)return null;
+        return (
+          <div style={{marginBottom:12,padding:"12px 16px",background:"linear-gradient(135deg,#451a03,#78350f)",border:"1px solid #f59e0b",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
+            <div style={{minWidth:0}}>
+              <div style={{fontSize:13,fontWeight:800,color:"#fff",display:"flex",alignItems:"center",gap:7}}>🛑 Yesterday closed +{last.r.toFixed(1)}R — consider half-size on the first trade</div>
+              <div style={{fontSize:11,color:"#fde68a",marginTop:3,lineHeight:1.5}}>One-trade speed bump to interrupt post-win overconfidence. You can ignore this — it's a nudge, not a rule.</div>
+            </div>
+            <button onClick={function(){dismissHalfSizeNudge(t);if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"#0a0a0f44",border:"1px solid #92400e",borderRadius:6,color:"#fde68a",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>Got it</button>
+          </div>
+        );
+      })()}
+      {/* CHANGED: Profit-take nudge after a green streak. Encourages WITHDRAWING (not scaling
+         down) so the trader pays themselves before greed compounds positions. Dismissal stores
+         the streak length at the time so the banner only returns if the streak grows further. */}
+      {(function(){
+        var streak=calculateStreak(true);
+        var threshold=getStreakNudgeThreshold();
+        if(streak<threshold)return null;
+        if(streakNudgeDismissedAt()>=streak)return null;
+        var allowance=getWithdrawalAllowance(totalPnL);
+        var fmt=function(n){return "$"+Math.round(n).toLocaleString();};
+        return (
+          <div style={{marginBottom:12,padding:"12px 16px",background:"linear-gradient(135deg,#064e3b,#065f46)",border:"1px solid #10b981",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
+            <div style={{minWidth:0}}>
+              <div style={{fontSize:13,fontWeight:800,color:"#fff",display:"flex",alignItems:"center",gap:7}}>💰 {streak}-day green streak — pay yourself</div>
+              <div style={{fontSize:11,color:"#a7f3d0",marginTop:3,lineHeight:1.5}}>Lock in some of these gains before greed cranks up size. Suggested withdrawal: {fmt(allowance)}.</div>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0}}>
+              {props.onWithdraw&&allowance>0&&<button onClick={function(){props.onWithdraw(Math.round(allowance));}} style={{padding:"6px 12px",background:"#022c22",border:"1px solid #10b981",borderRadius:6,color:"#a7f3d0",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Withdraw →</button>}
+              <button onClick={function(){dismissStreakNudge(streak);if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"#0a0a0f44",border:"1px solid #065f46",borderRadius:6,color:"#a7f3d0",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Dismiss</button>
+            </div>
+          </div>
+        );
+      })()}
       {/* CHANGED: Allowance-target reached notification. Shows when the user set a target, the live
           allowance has reached it, and it hasn't been dismissed. Dismiss marks it acknowledged. */}
       {(function(){
