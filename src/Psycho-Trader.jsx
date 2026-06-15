@@ -6490,11 +6490,11 @@ function PerformanceTab(props){
                     if(dep>0)return (totalPnl>=0?"+":"")+(totalPnl/dep*100).toFixed(2)+"%";
                   }
                   // CHANGED: For shorter ranges, use the SAME formula as the equity curve:
-                  // cumulative pnl / balance at start of range. The previous "sum of daily %s"
-                  // disagreed with the curve readout because later days had larger denominators.
-                  // Falls back to total-deposits if no start-of-range balance is available.
+                  // cumulative pnl / balance at start of range. getAccountBalanceAtDate already
+                  // returns the balance BEFORE that day's pnl (it sums journal pnl from days
+                  // strictly before), so no further adjustment is needed — match EquityCurve.
                   var startBal=0;
-                  try{if(filtered.length>0){startBal=getAccountBalanceAtDate(filtered[0].date)-((parseFloat(filtered[0].pnl)||0));}}catch(x){}
+                  try{if(filtered.length>0){startBal=getAccountBalanceAtDate(filtered[0].date);}}catch(x){}
                   if(!(startBal>0)){try{(loadTransfers()||[]).forEach(function(tf){var a=parseFloat(tf.amount)||0;if(a>0)startBal+=a;});}catch(x){}}
                   if(startBal>0)return (totalPnl>=0?"+":"")+(totalPnl/startBal*100).toFixed(2)+"%";
                   return "0.00%";
