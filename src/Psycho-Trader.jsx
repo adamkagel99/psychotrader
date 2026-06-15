@@ -6489,7 +6489,15 @@ function PerformanceTab(props){
                     var dep=0;try{(loadTransfers()||[]).forEach(function(tf){var a=parseFloat(tf.amount)||0;if(a>0)dep+=a;});}catch(e){}
                     if(dep>0)return (totalPnl>=0?"+":"")+(totalPnl/dep*100).toFixed(2)+"%";
                   }
-                  var s=0;filtered.forEach(function(r){var sb=0;try{sb=getAccountBalanceAtDate(r.date);}catch(x){}s+=(sb>0?((parseFloat(r.pnl)||0)/sb*100):0);});return (s>=0?"+":"")+s.toFixed(2)+"%";
+                  // CHANGED: For shorter ranges, use the SAME formula as the equity curve:
+                  // cumulative pnl / balance at start of range. The previous "sum of daily %s"
+                  // disagreed with the curve readout because later days had larger denominators.
+                  // Falls back to total-deposits if no start-of-range balance is available.
+                  var startBal=0;
+                  try{if(filtered.length>0){startBal=getAccountBalanceAtDate(filtered[0].date)-((parseFloat(filtered[0].pnl)||0));}}catch(x){}
+                  if(!(startBal>0)){try{(loadTransfers()||[]).forEach(function(tf){var a=parseFloat(tf.amount)||0;if(a>0)startBal+=a;});}catch(x){}}
+                  if(startBal>0)return (totalPnl>=0?"+":"")+(totalPnl/startBal*100).toFixed(2)+"%";
+                  return "0.00%";
                 })():((totalPnl>=0?"+":"-")+"$"+Math.abs(totalPnl).toFixed(2))} color={totalPnl>=0?"#22c55e":"#ef4444"}/>
                 <StatTile label="Trades" active={selectedMetric==="trades"} onClick={function(){setSelectedMetric("trades");}} value={totalTradesCount} sub={tradingDays>0?(Math.ceil(totalTradesCount/tradingDays)+"/day · "+tradingDays+"d"):""}/>
                 <StatTile label="Profit Factor" active={selectedMetric==="profitFactor"} onClick={function(){setSelectedMetric("profitFactor");}} value={pf} color={pfColor}/>
