@@ -1154,6 +1154,13 @@ var ACHIEVEMENTS=[
   {id:"disc90",icon:"🧘",name:"Iron Mind",desc:"90%+ avg discipline (10+ days)",check:function(r){var days=r.filter(function(d){return d.disciplineScore!=null;});if(days.length<10)return false;return days.reduce(function(s,d){return s+(parseFloat(d.disciplineScore)||0);},0)/days.length>=90;}},
   {id:"agrade5",icon:"⭐",name:"A-Game",desc:"5 A-grade trades in one day",check:function(r){return r.some(function(d){return (d.trades||[]).filter(function(t){return t.grade==="A";}).length>=5;});}},
   {id:"noviolations5",icon:"🛡",name:"Clean Hands",desc:"5 consecutive days, zero violations",check:function(r){var sorted=r.slice().sort(function(a,b){return new Date(b.date)-new Date(a.date);});var streak=0;for(var i=0;i<sorted.length;i++){if((sorted[i].trades||[]).some(function(t){return (t.violations||[]).length>0;}))break;streak++;}return streak>=5;}},
+  // CHANGED: No-lock streaks — consecutive trading days where the discipline lock did NOT trigger.
+  // Helper computes the longest current streak (most recent N days, walking back from today). A
+  // no-trade day breaks the streak only if it's wasLocked; otherwise it's neutral and counts as
+  // a non-lock day. Thresholds: 10, 25, 50 — clean round numbers, escalating commitment.
+  {id:"nolock10",icon:"🪨",name:"Steady Hand",desc:"10 trading days, no lock triggers",check:function(r){var tradingDays=r.filter(function(d){return (d.trades||[]).length>0||d.noTradeDay;}).sort(function(a,b){return new Date(b.date)-new Date(a.date);});var streak=0;for(var i=0;i<tradingDays.length;i++){if(tradingDays[i].wasLocked)break;streak++;}return streak>=10;}},
+  {id:"nolock25",icon:"⛰",name:"Bedrock",desc:"25 trading days, no lock triggers",check:function(r){var tradingDays=r.filter(function(d){return (d.trades||[]).length>0||d.noTradeDay;}).sort(function(a,b){return new Date(b.date)-new Date(a.date);});var streak=0;for(var i=0;i<tradingDays.length;i++){if(tradingDays[i].wasLocked)break;streak++;}return streak>=25;}},
+  {id:"nolock50",icon:"🗿",name:"Unshakeable",desc:"50 trading days, no lock triggers",check:function(r){var tradingDays=r.filter(function(d){return (d.trades||[]).length>0||d.noTradeDay;}).sort(function(a,b){return new Date(b.date)-new Date(a.date);});var streak=0;for(var i=0;i<tradingDays.length;i++){if(tradingDays[i].wasLocked)break;streak++;}return streak>=50;}},
   {id:"trades50",icon:"📈",name:"Volume Trader",desc:"50 total trades logged",check:function(r){return r.reduce(function(s,d){return s+(d.wins||0)+(d.losses||0);},0)>=50;}},
   {id:"trades200",icon:"📊",name:"Market Veteran",desc:"200 total trades logged",check:function(r){return r.reduce(function(s,d){return s+(d.wins||0)+(d.losses||0);},0)>=200;}},
   {id:"balance5k",icon:"🪙",name:"Five Grand",desc:"Account balance reaches $5,000",check:function(){return getAccountBalance()>=5000;}},
@@ -2940,13 +2947,17 @@ function ScalingTargetCard(props){
   milestones.push(15000);milestones.push(20000);
   for(var m10=30000;m10<=100000;m10+=10000)milestones.push(m10);
   var targetVal=milestones.find(function(m){return m>balance;})||milestones[milestones.length-1];
+  // CHANGED: Position Now sizes use the CURRENT TIER (largest milestone ≤ balance), not the raw
+  // balance — the live trade-sizing logic bands to the current tier so values stay stable across
+  // each band. Without this, the card disagrees with the Settings preview which IS banded.
+  var currentTier=(function(){var t=milestones[0];for(var i=0;i<milestones.length;i++){if(milestones[i]<=balance)t=milestones[i];else break;}return t;})();
   var pctToTarget=targetVal>0?Math.min(100,Math.max(0,(balance/targetVal)*100)):0;
   var reached=targetVal>0&&balance>=targetVal;
   var slip=settings.slippagePct!=null?settings.slippagePct:20;
   var posMaxPct=settings.positionMaxPct!=null?settings.positionMaxPct:7.5;
   var riskMaxPct=settings.riskMaxPct!=null?settings.riskMaxPct:33;
   var sizesAtTarget=calcPosSizes(targetVal,{sizingMode:settings.sizingMode,slippagePct:slip,positionMaxPct:posMaxPct,riskMaxPct:riskMaxPct,positionMaxDollar:settings.positionMaxDollar,riskMaxDollar:settings.riskMaxDollar});
-  var sizesNow=calcPosSizes(balance,{sizingMode:settings.sizingMode,slippagePct:slip,positionMaxPct:posMaxPct,riskMaxPct:riskMaxPct,positionMaxDollar:settings.positionMaxDollar,riskMaxDollar:settings.riskMaxDollar});
+  var sizesNow=calcPosSizes(currentTier,{sizingMode:settings.sizingMode,slippagePct:slip,positionMaxPct:posMaxPct,riskMaxPct:riskMaxPct,positionMaxDollar:settings.positionMaxDollar,riskMaxDollar:settings.riskMaxDollar});
   function fmtUSD(v){return "$"+v.toLocaleString("en-US",{maximumFractionDigits:0});}
   function fmtPnLUSD(v){if(HIDE_DOLLAR_PNL)return "$•••";return "$"+v.toLocaleString("en-US",{maximumFractionDigits:0});}
   return (
@@ -3346,12 +3357,21 @@ function PerfProgressCard(props){
   var expPctVal=expPctArr.length?expPctArr.reduce(function(s,v){return s+v;},0)/expPctArr.length:null;
   var streak=calculateStreak(true);
   var aGrade=calculateAGradeStreak(true);
+  // CHANGED: Days-since-discipline-lock — walks trading days (those with closed trades OR
+  // explicit no-trade entries) in reverse chrono and counts until the first wasLocked day.
+  // Mirrors the no-lock-streak achievement helper; replaces the A-Grade Streak tile on Home.
+  var daysSinceLock=(function(){
+    try{
+      var tradingDays=loadJournalRows().filter(function(d){return (d.trades||[]).length>0||d.noTradeDay;}).sort(function(a,b){return new Date(b.date)-new Date(a.date);});
+      var n=0;for(var i=0;i<tradingDays.length;i++){if(tradingDays[i].wasLocked)break;n++;}return n;
+    }catch(e){return 0;}
+  })();
   var kpis=[
     {label:"Win Rate",icon:"🎯",value:hasData?winRate+"%":"—",color:hasData?wrColor(winRate):"#64748b"},
     {label:"Profit Factor",icon:"⚖️",value:hasData?pf:"—",color:hasData?(pfNum>1?"#22c55e":pfNum<1?"#ef4444":"#94a3b8"):"#64748b"},
     {label:"Expectancy",icon:"📈",value:expPctVal!=null?((expPctVal>=0?"+":"")+expPctVal.toFixed(2)+"%"):"—",color:expPctVal!=null?(expPctVal>=0?"#22c55e":"#ef4444"):"#64748b"},
     {label:"Green Streak",icon:"🌱",value:streak,suffix:streak===1?" day":" days",color:streak>0?"#22c55e":"#64748b"},
-    {label:"A-Grade Streak",icon:"⭐",value:aGrade,suffix:aGrade===1?" day":" days",color:aGrade>0?"#a5b4fc":"#64748b"}
+    {label:"Days Since Lock",icon:"🛡",value:daysSinceLock,suffix:daysSinceLock===1?" day":" days",color:daysSinceLock>=10?"#22c55e":daysSinceLock>0?"#a5b4fc":"#64748b"}
   ];
   // CHANGED: compact summary shown in the collapsed header.
   var [open,setOpen]=useState(false);
@@ -4040,17 +4060,48 @@ function TradesTab(props){
       {/* CHANGED: Notebook — collates all trade notes + end-of-day notes across the journal. */}
       <NotebookPanel todayState={props.state}/>
       {galleryScope==="all"?(function(){
-        // CHANGED: "All trades" — list every saved trade across the whole journal (filtered + sorted).
-        // Rendered read-only (edit/delete are date-scoped), with a date label per trade.
-        if(allGalleryTrades.length===0)return <div style={{textAlign:"center",padding:"40px 20px",borderTop:"1px dashed #1e293b",marginTop:8}}><div style={{fontSize:14,color:"#475569"}}>{activeFilterCount>0?"No trades match your filters":"No trades saved yet"}</div></div>;
+        // CHANGED: "All trades" — list every saved trade across the whole journal (filtered + sorted),
+        // PLUS no-trade days as marker tiles. Grouped by date with ONE date header per group, then
+        // a 3-column grid of compact trade cards (or a single no-trade marker for sit-out days).
+        // Mobile collapses to single column via responsive grid below.
+        // Build grouped structure: each group is {date, isNoTradeDay, reasons?, trades:[]}.
+        var byDate={};var ord=[];
+        allGalleryTrades.forEach(function(t){if(!byDate[t.date]){byDate[t.date]={date:t.date,isNoTradeDay:false,trades:[]};ord.push(t.date);}byDate[t.date].trades.push(t);});
+        // Merge no-trade days from journal rows (only when no other filters are active — filters scope
+        // to trade fields and a no-trade day has no trade to match against).
+        if(activeFilterCount===0){
+          try{
+            loadJournalRows().forEach(function(r){
+              if(r&&r.noTradeDay&&!byDate[r.date]){byDate[r.date]={date:r.date,isNoTradeDay:true,reasons:r.noTradeReasons||[],note:r.note||"",trades:[]};ord.push(r.date);}
+            });
+          }catch(e){}
+        }
+        // Sort groups by date descending (most recent first).
+        ord.sort(function(a,b){return new Date(b)-new Date(a);});
+        if(ord.length===0)return <div style={{textAlign:"center",padding:"40px 20px",borderTop:"1px dashed #1e293b",marginTop:8}}><div style={{fontSize:14,color:"#475569"}}>{activeFilterCount>0?"No trades match your filters":"No trades saved yet"}</div></div>;
+        var totalTrades=allGalleryTrades.length;
         return (
           <div>
-            <div style={{fontSize:12,color:"#64748b",marginBottom:10}}>{allGalleryTrades.length} {allGalleryTrades.length===1?"trade":"trades"} across all sessions{activeFilterCount>0?" (filtered)":""}</div>
-            {allGalleryTrades.map(function(t,i){
+            <div style={{fontSize:12,color:"#64748b",marginBottom:10}}>{totalTrades} {totalTrades===1?"trade":"trades"} across all sessions{activeFilterCount>0?" (filtered)":""}</div>
+            {ord.map(function(d){
+              var g=byDate[d];
+              var label=d===todayStr()?"Today":d;
               return (
-                <div key={(t.id||"")+"_"+i} style={{position:"relative"}}>
-                  <div style={{fontSize:11,color:"#475569",fontWeight:600,margin:"4px 2px 2px"}}>{t.date===todayStr()?"Today":t.date}</div>
-                  <TradeTile t={t} i={i} posMax={settings.positionMax} hideControls={true}/>
+                <div key={d} style={{marginBottom:14}}>
+                  <div style={{fontSize:11,color:"#64748b",fontWeight:700,letterSpacing:0.5,margin:"4px 2px 6px",textTransform:"uppercase"}}>{label}{g.isNoTradeDay?" · No-Trade Day":""}</div>
+                  {g.isNoTradeDay?(
+                    <div style={{padding:"10px 12px",background:"#0a0a0f",border:"1px dashed #4338ca44",borderRadius:8}}>
+                      <div style={{fontSize:12,color:"#a5b4fc",fontWeight:700,marginBottom:4}}>⊘ Sat out</div>
+                      {g.reasons&&g.reasons.length>0&&<div style={{fontSize:11,color:"#94a3b8"}}>{g.reasons.join(" · ")}</div>}
+                      {g.note&&<div style={{fontSize:11,color:"#64748b",marginTop:4,fontStyle:"italic",lineHeight:1.4}}>{g.note}</div>}
+                    </div>
+                  ):(
+                    <div style={{display:"grid",gridTemplateColumns:props.mobile?"1fr":"repeat(3, minmax(0,1fr))",gap:8}}>
+                      {g.trades.map(function(t,i){return (
+                        <TradeTile key={(t.id||"")+"_"+i} t={t} i={i} posMax={settings.positionMax} hideControls={true}/>
+                      );})}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -6667,7 +6718,9 @@ function PerformanceTab(props){
               </StatSec>
             );
           })()}
-          <div style={{breakInside:"avoid",WebkitColumnBreakInside:"avoid",marginBottom:16}}><WhatsWorkingPanel trades={allTrades}/></div>
+          {/* CHANGED: "What's Working / What's Hurting" panel removed — the Best/Worst section
+             above shows the same setup/pattern/indicator-level read with WR + count + return,
+             so the duplicate panel just took space without adding info. */}
           {(function(){
             function summarize(filterFn){
               var n=0,w=0,l=0,pnl=0,pcts=[];
@@ -7180,7 +7233,11 @@ function SettingsTab(props){
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8,marginBottom:8}}>
             <div><label style={lbl}>Slippage %</label><input type="number" step="0.1" value={settings.slippagePct!=null?settings.slippagePct:20} onChange={function(e){setSettings(function(s){return Object.assign({},s,{slippagePct:parseFloat(e.target.value)||0});});}} style={fld}/></div>
             <div><label style={lbl}>Position Max %</label><input type="number" step="0.1" value={settings.positionMaxPct!=null?settings.positionMaxPct:7.5} onChange={function(e){setSettings(function(s){return Object.assign({},s,{positionMaxPct:parseFloat(e.target.value)||0});});}} style={fld}/></div>
-            <div><label style={lbl}>Risk Max % of Pos</label><input type="number" step="0.1" value={settings.riskMaxPct!=null?settings.riskMaxPct:33} onChange={function(e){setSettings(function(s){return Object.assign({},s,{riskMaxPct:parseFloat(e.target.value)||0});});}} style={fld}/></div>
+            <div><label style={lbl}>Risk Max % of Pos</label><input type="number" step="0.1" value={settings.riskMaxPct!=null?settings.riskMaxPct:33} onChange={function(e){setSettings(function(s){return Object.assign({},s,{riskMaxPct:parseFloat(e.target.value)||0});});}} style={fld}/>
+              {/* CHANGED: Dimmed helper — shows what Risk Max % resolves to as a % of total
+                 account (positionMaxPct × riskMaxPct / 100). E.g. 7% pos × 30% risk = 2.1% account. */}
+              <div style={{fontSize:10,color:"#475569",marginTop:4,fontWeight:500,letterSpacing:0.3}}>= {((parseFloat(settings.positionMaxPct)||0)*(parseFloat(settings.riskMaxPct)||0)/100).toFixed(2)}% of account</div>
+            </div>
           </div>
         ):(
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8,marginBottom:8}}>
