@@ -7233,10 +7233,13 @@ function SettingsTab(props){
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8,marginBottom:8}}>
             <div><label style={lbl}>Slippage %</label><input type="number" step="0.1" value={settings.slippagePct!=null?settings.slippagePct:20} onChange={function(e){setSettings(function(s){return Object.assign({},s,{slippagePct:parseFloat(e.target.value)||0});});}} style={fld}/></div>
             <div><label style={lbl}>Position Max %</label><input type="number" step="0.1" value={settings.positionMaxPct!=null?settings.positionMaxPct:7.5} onChange={function(e){setSettings(function(s){return Object.assign({},s,{positionMaxPct:parseFloat(e.target.value)||0});});}} style={fld}/></div>
-            <div><label style={lbl}>Risk Max % of Pos</label><input type="number" step="0.1" value={settings.riskMaxPct!=null?settings.riskMaxPct:33} onChange={function(e){setSettings(function(s){return Object.assign({},s,{riskMaxPct:parseFloat(e.target.value)||0});});}} style={fld}/>
-              {/* CHANGED: Dimmed helper — shows what Risk Max % resolves to as a % of total
-                 account (positionMaxPct × riskMaxPct / 100). E.g. 7% pos × 30% risk = 2.1% account. */}
-              <div style={{fontSize:10,color:"#475569",marginTop:4,fontWeight:500,letterSpacing:0.3}}>= {((parseFloat(settings.positionMaxPct)||0)*(parseFloat(settings.riskMaxPct)||0)/100).toFixed(2)}% of account</div>
+            <div><label style={lbl}>Risk Max % of Pos</label>
+              {/* CHANGED: Helper readout now sits INSIDE the textbox, right-aligned and matched
+                 to the input's 15px size — reads like an inline unit/suffix instead of a separate row. */}
+              <div style={{position:"relative"}}>
+                <input type="number" step="0.1" value={settings.riskMaxPct!=null?settings.riskMaxPct:33} onChange={function(e){setSettings(function(s){return Object.assign({},s,{riskMaxPct:parseFloat(e.target.value)||0});});}} style={Object.assign({},fld,{paddingRight:170})}/>
+                <div style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",fontSize:15,color:"#475569",fontWeight:500,pointerEvents:"none",fontFamily:"inherit"}}>= {((parseFloat(settings.positionMaxPct)||0)*(parseFloat(settings.riskMaxPct)||0)/100).toFixed(2)}% of account</div>
+              </div>
             </div>
           </div>
         ):(
