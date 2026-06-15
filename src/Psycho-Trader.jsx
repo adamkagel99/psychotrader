@@ -3922,17 +3922,7 @@ function TradesTab(props){
         }
         return null;
       })()}
-      {/* CHANGED: Conditions banner — collapsed to a single-line chip when all clear; full panel only on warnings. */}
-      {phase!=="closed"&&(function(){
-        var condItems=loadConditionsItems();
-        if(condItems.length===0)return null;
-        var conditionsChecked=props.state.conditionsChecked||{};
-        var warnings=condItems.filter(function(it){return !!conditionsChecked[it.key];});
-        var allGood=warnings.length===0;
-        return (
-          <CompactConditions allGood={allGood} condItems={condItems} warnings={warnings} conditionsChecked={conditionsChecked} setState={props.setState}/>
-        );
-      })()}
+      {/* CHANGED: Conditions banner removed entirely (feature deprecated). */}
       {/* CHANGED: Position/Risk strip removed from journal — shown in the New Trade form instead. */}
       {phase!=="closed"&&<SessionStrategy phase={phase} preCheckComplete={preCheckComplete} settings={settings}/>}
       {phase!=="closed"&&isToday&&props.liveTrades&&props.liveTrades.length>0&&(
@@ -7480,36 +7470,9 @@ function SettingsTab(props){
         )}
       </SettingsSection>
 
-      <SettingsSection title="Conditions Checklist">
-        <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>These items appear as a banner above the trade log during active sessions. Checked = choppy (warning); unchecked = clear. If any item is checked, the trade button is blocked ("Conditions Choppy").</div>
-        {conditionsItems.length>0&&(
-          <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:6,marginBottom:6,alignItems:"center",paddingBottom:6,borderBottom:"1px solid #1e293b"}}>
-            <span style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Item</span>
-            <span/>
-          </div>
-        )}
-        {conditionsItems.map(function(item){
-          return (
-            <div key={item.key} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:6,marginBottom:6,alignItems:"center"}}>
-              <input value={item.label} onChange={function(e){var v=e.target.value;var ns=conditionsItems.map(function(x){return x.key===item.key?Object.assign({},x,{label:v}):x;});setConditionsItems(ns);saveConditionsItems(ns);if(props.onChecklistChange)props.onChecklistChange();}} style={Object.assign({},fld,{padding:"6px 9px",fontSize:13})}/>
-              <button onClick={function(){setConditionsItems(function(prev){var arr=prev.filter(function(x){return x.key!==item.key;});saveConditionsItems(arr);if(props.onChecklistChange)props.onChecklistChange();return arr;});}} style={{padding:"5px 9px",background:"#7f1d1d33",border:"1px solid #7f1d1d",borderRadius:4,color:"#fca5a5",fontSize:13,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>
-            </div>
-          );
-        })}
-        {conditionsItems.length===0&&<div style={{fontSize:12,color:"#64748b",fontStyle:"italic",padding:"6px 0"}}>No conditions items.</div>}
-        <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:6,marginTop:10,paddingTop:10,borderTop:"1px solid #1e293b",alignItems:"center"}}>
-          <input value={newConditionsItem.label} onChange={function(e){setNewConditionsItem(function(d){return Object.assign({},d,{label:e.target.value});});}} placeholder="New conditions item..." style={Object.assign({},fld,{padding:"6px 9px",fontSize:13})}/>
-          <button onClick={function(){
-            var label=(newConditionsItem.label||"").trim();
-            if(!label)return;
-            var newItem={key:"cond_"+Date.now()+"_"+Math.random().toString(36).slice(2,6),label:label};
-            var ns=conditionsItems.concat([newItem]);
-            setConditionsItems(ns);saveConditionsItems(ns);
-            if(props.onChecklistChange)props.onChecklistChange();
-            setNewConditionsItem({label:""});
-          }} style={{padding:"5px 9px",background:"#4f46e5",border:"none",borderRadius:4,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ Add</button>
-        </div>
-      </SettingsSection>
+      {/* CHANGED: Conditions Checklist removed — the feature blocked the trade button without
+         enough utility to justify the extra cognitive load. State and storage left in place
+         so legacy entries with conditionsChecked keys don't crash; new entries simply ignore it. */}
 
       <SettingsSection title="Session Strategy">
         {(function(){
@@ -8221,13 +8184,7 @@ function App(props){
     // or trades placed elsewhere right after the bell. All other gates (pre-market checklist,
     // conditions, session disabled, day-of-week, max trades, daily R stops) still apply.
     if(!preCheckComplete)return {ok:false,reason:"Complete pre-market checklist first"};
-    // CHANGED: Block new trades when Conditions has unresolved warnings (uses separate conditionsChecked state).
-    var condItems=loadConditionsItems();
-    if(condItems.length>0){
-      var conditionsChecked=state.conditionsChecked||{};
-      var condWarnings=condItems.filter(function(it){return !!conditionsChecked[it.key];});
-      if(condWarnings.length>0)return {ok:false,reason:"Conditions Choppy"};
-    }
+    // CHANGED: Conditions check removed — feature deprecated.
     var rule=getSessions(settings).find(function(s){return s.id===phase;});
     if(rule&&rule.enabled===false)return {ok:false,reason:"Session disabled"};
     var dayOfWeek=getNow().getDay();
