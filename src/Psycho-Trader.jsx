@@ -6121,7 +6121,14 @@ function SessionDayHeatmap(props){
   var dayLabels=["Mon","Tue","Wed","Thu","Fri"];
   var dayNums=[1,2,3,4,5];
   // grid[sessionIdx][dayIdx] = {pnl,n,wins,rSum}
-  var grid=sessions.map(function(){return dayLabels.map(function(){return {pnl:0,n:0,wins:0,rSum:0};});});
+  // CHANGED: Out-of-session bucket — trades whose sessionId doesn't match any configured session
+  // (e.g. entered outside any active session window, or a session that's since been deleted) go
+  // into a synthetic last row. Row only renders if it has data, so it stays out of the way for
+  // users who only trade inside their sessions.
+  var rowSessions=sessions.slice();
+  var OUT_IDX=rowSessions.length;
+  rowSessions.push({id:"__out",name:"Out of session"});
+  var grid=rowSessions.map(function(){return dayLabels.map(function(){return {pnl:0,n:0,wins:0,rSum:0};});});
   var fallbackRisk=parseFloat(settings.riskMax)||0;
   var totalTrades=0;
   rows.forEach(function(r){
@@ -6131,7 +6138,7 @@ function SessionDayHeatmap(props){
     (r.trades||[]).forEach(function(t){
       if(!t||t.status==="open")return;
       var sidx=sessions.findIndex(function(s){return s.id===t.sessionId;});
-      if(sidx<0)return;
+      if(sidx<0)sidx=OUT_IDX; // CHANGED: route to "Out of session" instead of skipping.
       var pnl=parseFloat(t.pnl)||0;
       grid[sidx][di].pnl+=pnl;
       grid[sidx][di].n++;
@@ -6140,6 +6147,10 @@ function SessionDayHeatmap(props){
       totalTrades++;
     });
   });
+  // CHANGED: Strip the Out-of-session row if it has no data — keeps the heatmap clean for users
+  // whose trades are all properly inside session windows.
+  var outHasData=grid[OUT_IDX].some(function(c){return c.n>0;});
+  if(!outHasData){rowSessions.pop();grid.pop();}
   if(totalTrades<3)return null;
   // Find max absolute pnl for color intensity.
   var maxAbs=0;
@@ -6147,7 +6158,7 @@ function SessionDayHeatmap(props){
   if(maxAbs===0)maxAbs=1;
   var [hover,setHover]=useState(null);
   var fmt=function(n){if(HIDE_DOLLAR_PNL)return (n>=0?"+":"-")+"$•••";return (n>=0?"+":"-")+"$"+Math.abs(n).toFixed(0);};
-  var hp=hover?{s:sessions[hover.s],d:dayLabels[hover.d],c:grid[hover.s][hover.d]}:null;
+  var hp=hover?{s:rowSessions[hover.s],d:dayLabels[hover.d],c:grid[hover.s][hover.d]}:null;
   return (
     <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid #1e293b",borderRadius:10,display:"flex",flexDirection:"column",height:"100%",boxSizing:"border-box"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10,gap:8}}>
@@ -6163,7 +6174,7 @@ function SessionDayHeatmap(props){
       <div style={{display:"grid",gridTemplateColumns:"minmax(0,84px) repeat(5,minmax(0,1fr))",gap:4,flex:1,alignContent:"center"}}>
         <div/>
         {dayLabels.map(function(d,i){return <div key={i} style={{fontSize:9,color:"#64748b",fontWeight:700,textAlign:"center",letterSpacing:0.5,textTransform:"uppercase"}}>{d}</div>;})}
-        {sessions.map(function(s,si){
+        {rowSessions.map(function(s,si){
           var children=[<div key={"l"+si} style={{fontSize:10,color:"#cbd5e1",fontWeight:600,display:"flex",alignItems:"center",paddingRight:4,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={s.name}>{s.name}</div>];
           dayLabels.forEach(function(d,di){
             var c=grid[si][di];
