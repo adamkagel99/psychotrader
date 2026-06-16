@@ -137,8 +137,14 @@ export async function pullFromCloud(userId) {
     .from("user_kv")
     .select("key,value")
     .eq("user_id", userId);
+  // CHANGED: Respect SKIP_KEYS during pull. Without this, any value that was synced to the
+  // cloud BEFORE a key was added to SKIP_KEYS would keep getting restored on every pull,
+  // overwriting the local-only toggle the user just set. Skipping here makes the local
+  // value authoritative for UI-state keys.
   (kv || []).forEach((row) => {
-    if (row.value != null) rawSetItem(row.key, JSON.stringify(row.value));
+    if (row.value == null) return;
+    if (typeof row.key === "string" && SKIP_KEYS.has(row.key)) return;
+    rawSetItem(row.key, JSON.stringify(row.value));
   });
 
   // 2. Transfers
