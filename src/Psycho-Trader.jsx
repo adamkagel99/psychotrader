@@ -1157,7 +1157,7 @@ function MonthlyTargetBanner(props){
   var allowance=getWithdrawalAllowance(totalPnL);
   var fmt=function(n){return "$"+Math.round(n).toLocaleString();};
   return (
-    <div style={{marginBottom:12,padding:"12px 16px",background:"linear-gradient(135deg,#422006,#713f12)",border:"1px solid #facc15",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+    <div style={{marginBottom:props.compact?0:12,padding:props.compact?"8px 12px":"12px 16px",background:"linear-gradient(135deg,#422006,#713f12)",border:"1px solid #facc15",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
       <div style={{minWidth:0}}>
         <div style={{fontSize:13,fontWeight:800,color:"#fff",display:"flex",alignItems:"center",gap:7}}>🏁 Monthly target hit — {fmt(monthPnLLive)} of {fmt(monthlyTarget)}</div>
       </div>
@@ -8384,7 +8384,7 @@ function App(props){
       <div style={{maxWidth:mobile?560:"min(1800px, 96vw)",margin:"0 auto",padding:mobile?"0 12px 84px":"0 28px 60px"}}>
         <div style={{padding:"16px 0 12px",position:"sticky",top:0,background:"#0a0a0f",zIndex:50,borderBottom:"1px solid #1e293b"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,gap:12}}>
-            <div style={{flex:1,minWidth:0}}>
+            <div style={{flex:"0 1 auto",minWidth:0}}>
               {/* CHANGED: brand only shows in mobile (no sidebar there); laptop shows date/session prominently. */}
               {mobile&&(
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
@@ -8397,6 +8397,15 @@ function App(props){
               <div style={{fontSize:18,fontWeight:700,color:"#e2e8f0",letterSpacing:-0.3}}>{todayDisplay()}</div>
               <div style={{fontSize:18,fontWeight:700,color:"#e2e8f0",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{fmtClock(headerNow)}</div>
             </div>
+            {/* CHANGED: Monthly target banner lives in the header's center column on laptop —
+               always visible across tabs, sized to fill the space between date and session. On
+               mobile the header is too narrow for the banner's buttons; falls back to the global
+               render below. */}
+            {!mobile&&<div style={{flex:"1 1 auto",minWidth:0,display:"flex",justifyContent:"center"}}>
+              <div style={{width:"100%",maxWidth:680}}>
+                <MonthlyTargetBanner totalPnL={totalPnL} bumpReloadKey={bumpReloadKey} onWithdraw={function(amt){setPendingWithdrawAmount(amt);setTab("settings");}} compact={true}/>
+              </div>
+            </div>}
             <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
               <div style={{textAlign:"right"}}>
                 <div style={{fontSize:11,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>{(TIMEZONES.find(function(z){return z.value===(settings.timezone||USER_TIMEZONE);})||{label:""}).label.replace(/.*\((.+)\).*/,"$1")||""}</div>
@@ -8413,10 +8422,11 @@ function App(props){
           var dRiskMin=Math.round((settings.riskMin||0)*sf);
           var dRiskMax=Math.round((settings.riskMax||0)*sf);
           return (<>
-            {/* CHANGED: Monthly target banner moved above all tab content so it surfaces on every
-               tab. Same wiring as before — Withdraw routes through the existing pendingWithdraw
-               flow into Settings; bumpReloadKey makes the banner's own state changes re-render. */}
-            <MonthlyTargetBanner totalPnL={totalPnL} bumpReloadKey={bumpReloadKey} onWithdraw={function(amt){setPendingWithdrawAmount(amt);setTab("settings");}}/>
+            {/* CHANGED: On laptop the monthly target banner lives in the sticky header (between
+               the date and the session readout) so it persists across tabs without taking
+               another row. On mobile the header is too narrow — fall back to rendering above
+               the tab content. */}
+            {mobile&&<MonthlyTargetBanner totalPnL={totalPnL} bumpReloadKey={bumpReloadKey} onWithdraw={function(amt){setPendingWithdrawAmount(amt);setTab("settings");}}/>}
             {tab==="dashboard"&&<DashboardTab key={reloadKey} mobile={mobile} settings={settings} phase={phase} state={state} setState={setState} checklistVersion={checklistVersion} onNavigateToJournal={function(){setTab("trades");}} onStartTrade={function(){var t=mkTrade();t.sessionId=phase!=="closed"?phase:null;setTrade(t);setShowForm(true);setTab("trades");}} preCheckComplete={preCheckComplete} currentAccount={computeAccountBalance(totalPnL)} displayPosMin={dPosMin} displayPosMax={dPosMax} displayRiskMin={dRiskMin} displayRiskMax={dRiskMax} totalPnL={totalPnL} todayTrades={state.trades} prevPnL={prevPnL} prevDate={prevDate} prevRiskMax={prevRiskMax} onNavigateToTrade={navigateToTrade} eventsReloadKey={eventsReloadKey} eventCurrencyFilter={eventCurrencyFilter} setEventCurrencyFilter={setEventCurrencyFilter} eventImpactFilter={eventImpactFilter} setEventImpactFilter={setEventImpactFilter} onNavigateToSettings={function(){setSettingsFocus("economicEvents");setTab("settings");}} onNavigateToPerformance={function(){setTab("performance");}} onNavigateToGoals={function(){setTab("goals");}} onWithdraw={function(amt){setPendingWithdrawAmount(amt);setTab("settings");}} bumpReloadKey={bumpReloadKey} tradeStatus={tradeStatus}/>}
             {tab==="trades"&&<TradesTab mobile={mobile} state={state} setState={setState} showForm={showForm} setShowForm={setShowForm} trade={trade} setTrade={setTrade} saveTrade={saveTrade} deleteTrade={deleteTrade} tradeStatus={tradeStatus} phase={phase} settings={settings} preCheckComplete={preCheckComplete} totalPnL={totalPnL} initialDate={tradesInitialDate} reloadKey={reloadKey} bumpReloadKey={bumpReloadKey} timezone={settings.timezone} liveTrades={liveTrades} openLiveTrade={function(lt){setLiveTradeManaging(lt);}} displayPosMin={dPosMin} displayPosMax={dPosMax} displayRiskMin={dRiskMin} displayRiskMax={dRiskMax} tradeOptions={tradeOptions} autoAddViolations={autoAddViolations} refreshHistory={bumpReloadKey} checklistVersion={checklistVersion}/>}
           </>);
