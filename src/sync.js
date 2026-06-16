@@ -87,6 +87,18 @@ const SKIP_KEYS = new Set([
   "tf-aicoach-question",
   "tf-progress-collapsed",
   "tf-stats-range",
+  // CHANGED: Behavioral-nudge UI state — per-device session flags, not cross-device data.
+  // Syncing them creates race conditions where a cloud reconcile wipes the local toggle before
+  // the push lands. Keeping them local also matches their semantic intent (these are about
+  // "where am I right now on this device").
+  "tf-month-halfsize-active",
+  "tf-month-goal-banner-dismissed",
+  "tf-halfsize-dismissed",
+  "tf-streak-nudge-dismissed-at",
+  "tf-allowance-target-dismissed",
+  "tf-dash-cal-open",
+  "tf-notebook-open",
+  "tf-events-expanded",
 ]);
 
 function isJournalKey(k) {

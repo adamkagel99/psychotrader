@@ -3537,10 +3537,13 @@ function DashboardTab(props){
         var todayInJournal=monthRows.some(function(e){return e.date===todayKeyLocal;});
         var monthPnLLive=monthRows.reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0)+(todayInJournal?0:totalPnL);
         if(monthPnLLive<monthlyTarget)return null;
-        if(isMonthGoalBannerDismissed())return null;
+        // CHANGED: If half-size is on, the banner always shows (so the user can manage that state)
+        // even if they previously dismissed. Dismissal only suppresses the "you hit your target"
+        // pure-info state, never the active half-size commitment indicator.
+        var halfOn=isMonthHalfsizeActive();
+        if(!halfOn&&isMonthGoalBannerDismissed())return null;
         var allowance=getWithdrawalAllowance(totalPnL);
         var fmt=function(n){return "$"+Math.round(n).toLocaleString();};
-        var halfOn=isMonthHalfsizeActive();
         return (
           <div style={{marginBottom:12,padding:"12px 16px",background:"linear-gradient(135deg,#422006,#713f12)",border:"1px solid #facc15",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
             <div style={{minWidth:0}}>
@@ -3550,9 +3553,11 @@ function DashboardTab(props){
             <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap"}}>
               {/* CHANGED: "Half-size remaining" was ambiguous (could read as halving the remaining
                  dollar amount). Renamed to "Half-size rest of month" — names the duration explicitly. */}
-              <button onClick={function(){setMonthHalfsizeActive(!halfOn);if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:halfOn?"#facc15":"#0a0a0f44",border:"1px solid #facc15",borderRadius:6,color:halfOn?"#422006":"#fde68a",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>{halfOn?"✓ Half-size on":"Half-size rest of month"}</button>
+              <button onClick={function(){setMonthHalfsizeActive(!halfOn);if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:halfOn?"#facc15":"#0a0a0f44",border:"1px solid #facc15",borderRadius:6,color:halfOn?"#422006":"#fde68a",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>{halfOn?"✓ Half-size on — tap to turn off":"Half-size rest of month"}</button>
               {props.onWithdraw&&allowance>0&&<button onClick={function(){props.onWithdraw(Math.round(allowance));dismissMonthGoalBanner();if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"#0a0a0f44",border:"1px solid #facc15",borderRadius:6,color:"#fde68a",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Withdraw {fmt(allowance)} →</button>}
-              <button onClick={function(){dismissMonthGoalBanner();if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"transparent",border:"1px solid #78350f",borderRadius:6,color:"#fde68a",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Dismiss</button>
+              {/* CHANGED: Dismiss is hidden while half-size is on — the banner is the user's only
+                 surface to manage that state, so we keep it visible until they turn it off. */}
+              {!halfOn&&<button onClick={function(){dismissMonthGoalBanner();if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"transparent",border:"1px solid #78350f",borderRadius:6,color:"#fde68a",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Dismiss</button>}
             </div>
           </div>
         );
