@@ -1137,6 +1137,38 @@ function isMonthHalfsizeActive(){try{return localStorage.getItem("tf-month-halfs
 function setMonthHalfsizeActive(on){try{if(on)localStorage.setItem("tf-month-halfsize-active",getCurrentMonthKey());else localStorage.removeItem("tf-month-halfsize-active");}catch(e){}}
 function isMonthGoalBannerDismissed(){try{return localStorage.getItem("tf-month-goal-banner-dismissed")===getCurrentMonthKey();}catch(e){return false;}}
 function dismissMonthGoalBanner(){try{localStorage.setItem("tf-month-goal-banner-dismissed",getCurrentMonthKey());}catch(e){}}
+// CHANGED: Monthly target banner extracted as a component so it can render globally (above the
+// tab content in App), not only inside the Dashboard. Same logic as before — surfaces when
+// month P&L >= monthly target; sticky while half-size mode is on so the user always has one
+// place to toggle it back off.
+function MonthlyTargetBanner(props){
+  var goalsLocal=(function(){try{return JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};}catch(e){return {};}})();
+  var monthlyTarget=parseFloat(goalsLocal.monthlyPnL)||0;
+  if(monthlyTarget<=0)return null;
+  var moStart=(function(){var d=new Date();return new Date(d.getFullYear(),d.getMonth(),1);})();
+  var todayKeyLocal=todayStr();
+  var monthRows=loadJournalRows().filter(function(e){return new Date(e.date)>=moStart;});
+  var todayInJournal=monthRows.some(function(e){return e.date===todayKeyLocal;});
+  var totalPnL=parseFloat(props.totalPnL)||0;
+  var monthPnLLive=monthRows.reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0)+(todayInJournal?0:totalPnL);
+  if(monthPnLLive<monthlyTarget)return null;
+  var halfOn=isMonthHalfsizeActive();
+  if(!halfOn&&isMonthGoalBannerDismissed())return null;
+  var allowance=getWithdrawalAllowance(totalPnL);
+  var fmt=function(n){return "$"+Math.round(n).toLocaleString();};
+  return (
+    <div style={{marginBottom:12,padding:"12px 16px",background:"linear-gradient(135deg,#422006,#713f12)",border:"1px solid #facc15",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+      <div style={{minWidth:0}}>
+        <div style={{fontSize:13,fontWeight:800,color:"#fff",display:"flex",alignItems:"center",gap:7}}>🏁 Monthly target hit — {fmt(monthPnLLive)} of {fmt(monthlyTarget)}</div>
+      </div>
+      <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap"}}>
+        <button onClick={function(){setMonthHalfsizeActive(!halfOn);if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:halfOn?"#facc15":"#0a0a0f44",border:"1px solid #facc15",borderRadius:6,color:halfOn?"#422006":"#fde68a",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>{halfOn?"✓ Half-size on — tap to turn off":"Half-size rest of month"}</button>
+        {props.onWithdraw&&allowance>0&&<button onClick={function(){props.onWithdraw(Math.round(allowance));dismissMonthGoalBanner();if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"#0a0a0f44",border:"1px solid #facc15",borderRadius:6,color:"#fde68a",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Withdraw {fmt(allowance)} →</button>}
+        {!halfOn&&<button onClick={function(){dismissMonthGoalBanner();if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"transparent",border:"1px solid #78350f",borderRadius:6,color:"#fde68a",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Dismiss</button>}
+      </div>
+    </div>
+  );
+}
 function streakNudgeDismissedAt(){try{var v=parseInt(localStorage.getItem("tf-streak-nudge-dismissed-at"),10);return isNaN(v)?0:v;}catch(e){return 0;}}
 function dismissStreakNudge(streakLen){try{localStorage.setItem("tf-streak-nudge-dismissed-at",String(streakLen));}catch(e){}}
 function saveAllowanceTarget(v){try{if(v>0)localStorage.setItem("tf-allowance-target",String(v));else localStorage.removeItem("tf-allowance-target");localStorage.removeItem("tf-allowance-notif-dismissed");}catch(e){}}
@@ -3518,50 +3550,7 @@ function DashboardTab(props){
           </div>
         );
       })()}
-      {/* CHANGED: Monthly P&L target hit — two-option banner protecting the gain. Half-size every
-         remaining trade this month, or take a withdrawal now. Dismissal is per-month so it stops
-         pinging once the user acts. Banner hides once user dismisses, takes either action, or
-         the month rolls. */}
-      {(function(){
-        // CHANGED: Load goals inline — this banner's parent JSX scope doesn't have `goals` in
-        // closure (it was relying on a variable defined in a different function).
-        var goalsLocal=(function(){try{return JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};}catch(e){return {};}})();
-        var monthlyTarget=parseFloat(goalsLocal.monthlyPnL)||0;
-        if(monthlyTarget<=0)return null;
-        // CHANGED: Match the monthly P&L formula used elsewhere on the Dashboard — only add the
-        // live (unsaved) total if today's row isn't already in the journal, otherwise the saved
-        // pnl gets double-counted with today's running P&L.
-        var moStart=(function(){var d=new Date();return new Date(d.getFullYear(),d.getMonth(),1);})();
-        var todayKeyLocal=todayStr();
-        var monthRows=loadJournalRows().filter(function(e){return new Date(e.date)>=moStart;});
-        var todayInJournal=monthRows.some(function(e){return e.date===todayKeyLocal;});
-        var monthPnLLive=monthRows.reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0)+(todayInJournal?0:totalPnL);
-        if(monthPnLLive<monthlyTarget)return null;
-        // CHANGED: If half-size is on, the banner always shows (so the user can manage that state)
-        // even if they previously dismissed. Dismissal only suppresses the "you hit your target"
-        // pure-info state, never the active half-size commitment indicator.
-        var halfOn=isMonthHalfsizeActive();
-        if(!halfOn&&isMonthGoalBannerDismissed())return null;
-        var allowance=getWithdrawalAllowance(totalPnL);
-        var fmt=function(n){return "$"+Math.round(n).toLocaleString();};
-        return (
-          <div style={{marginBottom:12,padding:"12px 16px",background:"linear-gradient(135deg,#422006,#713f12)",border:"1px solid #facc15",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
-            <div style={{minWidth:0}}>
-              {/* CHANGED: Subtitle removed per user — header alone is enough. */}
-              <div style={{fontSize:13,fontWeight:800,color:"#fff",display:"flex",alignItems:"center",gap:7}}>🏁 Monthly target hit — {fmt(monthPnLLive)} of {fmt(monthlyTarget)}</div>
-            </div>
-            <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap"}}>
-              {/* CHANGED: "Half-size remaining" was ambiguous (could read as halving the remaining
-                 dollar amount). Renamed to "Half-size rest of month" — names the duration explicitly. */}
-              <button onClick={function(){setMonthHalfsizeActive(!halfOn);if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:halfOn?"#facc15":"#0a0a0f44",border:"1px solid #facc15",borderRadius:6,color:halfOn?"#422006":"#fde68a",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>{halfOn?"✓ Half-size on — tap to turn off":"Half-size rest of month"}</button>
-              {props.onWithdraw&&allowance>0&&<button onClick={function(){props.onWithdraw(Math.round(allowance));dismissMonthGoalBanner();if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"#0a0a0f44",border:"1px solid #facc15",borderRadius:6,color:"#fde68a",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Withdraw {fmt(allowance)} →</button>}
-              {/* CHANGED: Dismiss is hidden while half-size is on — the banner is the user's only
-                 surface to manage that state, so we keep it visible until they turn it off. */}
-              {!halfOn&&<button onClick={function(){dismissMonthGoalBanner();if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"transparent",border:"1px solid #78350f",borderRadius:6,color:"#fde68a",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Dismiss</button>}
-            </div>
-          </div>
-        );
-      })()}
+      {/* CHANGED: Monthly P&L target banner moved to App scope so it shows on every tab. */}
       {/* CHANGED: Allowance-target reached notification. Shows when the user set a target, the live
           allowance has reached it, and it hasn't been dismissed. Dismiss marks it acknowledged. */}
       {(function(){
@@ -8424,6 +8413,10 @@ function App(props){
           var dRiskMin=Math.round((settings.riskMin||0)*sf);
           var dRiskMax=Math.round((settings.riskMax||0)*sf);
           return (<>
+            {/* CHANGED: Monthly target banner moved above all tab content so it surfaces on every
+               tab. Same wiring as before — Withdraw routes through the existing pendingWithdraw
+               flow into Settings; bumpReloadKey makes the banner's own state changes re-render. */}
+            <MonthlyTargetBanner totalPnL={totalPnL} bumpReloadKey={bumpReloadKey} onWithdraw={function(amt){setPendingWithdrawAmount(amt);setTab("settings");}}/>
             {tab==="dashboard"&&<DashboardTab key={reloadKey} mobile={mobile} settings={settings} phase={phase} state={state} setState={setState} checklistVersion={checklistVersion} onNavigateToJournal={function(){setTab("trades");}} onStartTrade={function(){var t=mkTrade();t.sessionId=phase!=="closed"?phase:null;setTrade(t);setShowForm(true);setTab("trades");}} preCheckComplete={preCheckComplete} currentAccount={computeAccountBalance(totalPnL)} displayPosMin={dPosMin} displayPosMax={dPosMax} displayRiskMin={dRiskMin} displayRiskMax={dRiskMax} totalPnL={totalPnL} todayTrades={state.trades} prevPnL={prevPnL} prevDate={prevDate} prevRiskMax={prevRiskMax} onNavigateToTrade={navigateToTrade} eventsReloadKey={eventsReloadKey} eventCurrencyFilter={eventCurrencyFilter} setEventCurrencyFilter={setEventCurrencyFilter} eventImpactFilter={eventImpactFilter} setEventImpactFilter={setEventImpactFilter} onNavigateToSettings={function(){setSettingsFocus("economicEvents");setTab("settings");}} onNavigateToPerformance={function(){setTab("performance");}} onNavigateToGoals={function(){setTab("goals");}} onWithdraw={function(amt){setPendingWithdrawAmount(amt);setTab("settings");}} bumpReloadKey={bumpReloadKey} tradeStatus={tradeStatus}/>}
             {tab==="trades"&&<TradesTab mobile={mobile} state={state} setState={setState} showForm={showForm} setShowForm={setShowForm} trade={trade} setTrade={setTrade} saveTrade={saveTrade} deleteTrade={deleteTrade} tradeStatus={tradeStatus} phase={phase} settings={settings} preCheckComplete={preCheckComplete} totalPnL={totalPnL} initialDate={tradesInitialDate} reloadKey={reloadKey} bumpReloadKey={bumpReloadKey} timezone={settings.timezone} liveTrades={liveTrades} openLiveTrade={function(lt){setLiveTradeManaging(lt);}} displayPosMin={dPosMin} displayPosMax={dPosMax} displayRiskMin={dRiskMin} displayRiskMax={dRiskMax} tradeOptions={tradeOptions} autoAddViolations={autoAddViolations} refreshHistory={bumpReloadKey} checklistVersion={checklistVersion}/>}
           </>);
