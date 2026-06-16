@@ -7248,7 +7248,9 @@ function SettingsTab(props){
           var allowance=getWithdrawalAllowance(props.liveTotalPnL);
           var lastDate=getLastWithdrawalDate();
           var entered=Math.abs(parseFloat(transferDraft.amount)||0);
-          var overAllowance=allowance>0&&entered>allowance;
+          // CHANGED: Require the difference to be at least 1¢ — float precision was making
+          // exact-equal withdrawals trigger "Over allowance by $0" warnings.
+          var overAllowance=allowance>0&&(entered-allowance)>=0.01;
           var unlocked=allowance>0;
           var fmt=function(n){return "$"+Math.round(n).toLocaleString();};
           return (
