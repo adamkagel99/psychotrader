@@ -1128,6 +1128,15 @@ function dismissHalfSizeNudge(dateStr){try{localStorage.setItem("tf-halfsize-dis
 // Dismissal stores the streak length at the time of dismissal; banner reappears only if the
 // streak grows beyond that, so we don't nag on the same plateau.
 function getStreakNudgeThreshold(){try{var v=parseFloat(localStorage.getItem("tf-streak-nudge-threshold"));return isNaN(v)||v<=0?3:v;}catch(e){return 3;}}
+// CHANGED: Month-halfsize-remaining mode. When the user hits their monthly P&L goal, they can opt
+// to half-size every trade for the rest of the month to protect the gain. State is per-month
+// (key: YYYY-MM) so it auto-clears at month rollover. Banner dismissal stored separately so the
+// banner can stop nagging once the user takes any action (or explicitly dismisses for the month).
+function getCurrentMonthKey(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");}
+function isMonthHalfsizeActive(){try{return localStorage.getItem("tf-month-halfsize-active")===getCurrentMonthKey();}catch(e){return false;}}
+function setMonthHalfsizeActive(on){try{if(on)localStorage.setItem("tf-month-halfsize-active",getCurrentMonthKey());else localStorage.removeItem("tf-month-halfsize-active");}catch(e){}}
+function isMonthGoalBannerDismissed(){try{return localStorage.getItem("tf-month-goal-banner-dismissed")===getCurrentMonthKey();}catch(e){return false;}}
+function dismissMonthGoalBanner(){try{localStorage.setItem("tf-month-goal-banner-dismissed",getCurrentMonthKey());}catch(e){}}
 function streakNudgeDismissedAt(){try{var v=parseInt(localStorage.getItem("tf-streak-nudge-dismissed-at"),10);return isNaN(v)?0:v;}catch(e){return 0;}}
 function dismissStreakNudge(streakLen){try{localStorage.setItem("tf-streak-nudge-dismissed-at",String(streakLen));}catch(e){}}
 function saveAllowanceTarget(v){try{if(v>0)localStorage.setItem("tf-allowance-target",String(v));else localStorage.removeItem("tf-allowance-target");localStorage.removeItem("tf-allowance-notif-dismissed");}catch(e){}}
@@ -1585,6 +1594,13 @@ function CalendarLegend(){
 
 function CalendarGrid(props){
   var sessionMap=props.sessionMap,todayDateStr=props.todayDateStr,selectedDate=props.selectedDate,onSelect=props.onSelect;
+  // CHANGED: Load goal targets here so the grid can highlight goal-met days/weeks/months.
+  var goals=(function(){try{return JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};}catch(e){return {};}})();
+  var settingsForTarget=(function(){try{return JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};}catch(e){return {};}})();
+  var dailyTarget=parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(computeDailyTarget(settingsForTarget)||0);
+  var weeklyMultiplier=parseFloat(goals.weeklyMultiplier)||4;
+  var weeklyTarget=parseFloat(goals.weeklyPnL)>0?parseFloat(goals.weeklyPnL):(dailyTarget*weeklyMultiplier);
+  var monthlyTarget=parseFloat(goals.monthlyPnL)||0;
   var now=getPT();
   var [calYear,setCalYear]=useState(now.getFullYear());
   var [calMonth,setCalMonth]=useState(now.getMonth());
@@ -1602,11 +1618,16 @@ function CalendarGrid(props){
   for(var i=0;i<firstDay;i++)cur.push(null);
   for(var d=1;d<=daysInMonth;d++){cur.push(d);if(cur.length===7){weeks.push(cur);cur=[];}}
   if(cur.length>0){while(cur.length<7)cur.push(null);weeks.push(cur);}
+  // CHANGED: Pre-compute per-week and full-month PnL totals from sessionMap so we can mark
+  // goal-hit weeks (gold ring on each day-cell) and the goal-hit month (🏁 in the header).
+  var weekPnLs=weeks.map(function(wk){return wk.reduce(function(s,day){if(!day)return s;var ds2=(calMonth+1)+"/"+day+"/"+calYear;var dd=sessionMap[ds2];return s+(dd?(parseFloat(dd.pnl)||0):0);},0);});
+  var monthPnLTotal=weekPnLs.reduce(function(s,w){return s+w;},0);
+  var monthGoalHit=monthlyTarget>0&&monthPnLTotal>=monthlyTarget;
   return (
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
         <button onClick={function(){moveMonth(-1);}} style={{background:"none",border:"1px solid #334155",borderRadius:5,color:"#94a3b8",fontSize:13,cursor:"pointer",fontFamily:"inherit",padding:"4px 10px"}}>‹</button>
-        <button onClick={function(){setShowPicker(function(o){return !o;});}} style={{background:"none",border:"none",fontSize:15,fontWeight:700,color:"#e2e8f0",cursor:"pointer",fontFamily:"inherit"}}>{MONTH_NAMES[calMonth]} {calYear}</button>
+        <button onClick={function(){setShowPicker(function(o){return !o;});}} style={{background:"none",border:"none",fontSize:15,fontWeight:700,color:"#e2e8f0",cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:6}}>{MONTH_NAMES[calMonth]} {calYear}{monthGoalHit&&<span style={{fontSize:12,color:"#fbbf24",fontWeight:800}} title={"Monthly P&L goal met ($"+monthPnLTotal.toFixed(0)+" / $"+monthlyTarget.toFixed(0)+")"}>🏁</span>}</button>
         <button onClick={function(){moveMonth(1);}} style={{background:"none",border:"1px solid #334155",borderRadius:5,color:"#94a3b8",fontSize:13,cursor:"pointer",fontFamily:"inherit",padding:"4px 10px"}}>›</button>
       </div>
       {showPicker&&<MonthYearPicker year={calYear} month={calMonth} onChange={function(y,m){setCalYear(y);setCalMonth(m);setShowPicker(false);}}/>}
@@ -1634,12 +1655,22 @@ function CalendarGrid(props){
           if(isNoTrade){bg="#1c1408";bd="#a16207";col="#fcd34d";noTradeBorderStyle="dashed";}
           if(isToday){bg="#1e1b4b";bd="#4338ca";col="#a5b4fc";noTradeBorderStyle="solid";}
           if(isSelected){bd="#818cf8";}
+          // CHANGED: Goal-hit markers. Weekly: every cell in a week whose cumulative pnl met the
+          // weekly target gets a gold border override (skipped if cell is today/selected so those
+          // markers still read). Daily: a small gold dot in the bottom-right when pnl ≥ dailyTarget.
+          var weekIdx=Math.floor(i/7);
+          var weekGoalHit=weeklyTarget>0&&(weekPnLs[weekIdx]||0)>=weeklyTarget;
+          var dayGoalHit=dailyTarget>0&&pnl!=null&&pnl>=dailyTarget;
+          if(weekGoalHit&&!isToday&&!isSelected){bd="#facc15";}
           return (
             <button key={i} onClick={function(){onSelect(ds);}} style={{height:46,background:bg,border:(isNoTrade?"1.5px ":"1px ")+noTradeBorderStyle+" "+bd,borderRadius:5,color:col,fontSize:13,fontWeight:isToday||isSelected||isNoTrade?700:500,cursor:"pointer",fontFamily:"inherit",position:"relative",padding:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2}} title={holiday||(isNoTrade?"No-trade day (deliberately sat out)":(pnl!=null?(pnl>=0?"+":"")+"$"+pnl.toFixed(0):""))}>
               <span style={{lineHeight:1}}>{d}</span>
               {pnl!=null&&dayData&&dayData.tradeCount>0&&(HIDE_DOLLAR_PNL?(dayRiskMax>0&&<span style={{fontSize:9,color:col,fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1}}>{(pnl/dayRiskMax>=0?"+":"")+(pnl/dayRiskMax).toFixed(1)}R</span>):<span style={{fontSize:9,color:col,fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1}}>{(pnl>=0?"+$":"-$")+Math.abs(pnl).toFixed(0)}</span>)}
               {isNoTrade&&!isToday&&<span style={{fontSize:9,color:"#fbbf24",fontWeight:800,letterSpacing:0.3,lineHeight:1}}>⊘ NT</span>}
               {earlyClose&&<div style={{position:"absolute",top:1,right:2,width:4,height:4,borderRadius:"50%",background:"#f59e0b"}}/>}
+              {/* CHANGED: Daily goal-hit gold dot in the bottom-right corner. Won't conflict with
+                 the early-close dot (top-right) or the discipline-lock D (top-left). */}
+              {dayGoalHit&&<div style={{position:"absolute",bottom:2,right:2,width:5,height:5,borderRadius:"50%",background:"#facc15",boxShadow:"0 0 4px #facc15"}} title={"Daily goal hit (+$"+pnl.toFixed(0)+" / $"+dailyTarget.toFixed(0)+")"}/>}
               {/* CHANGED: Discipline-lock marker — small "D" badge in top-left corner when day's discipline score fell below threshold. */}
               {dayData&&dayData.wasLocked&&<div style={{position:"absolute",top:1,left:2,fontSize:8,fontWeight:800,color:"#fff",background:"#ef4444",borderRadius:3,padding:"0 3px",lineHeight:"11px",letterSpacing:0.3}} title="Discipline lock triggered">D</div>}
             </button>
@@ -3478,6 +3509,38 @@ function DashboardTab(props){
             <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0}}>
               {props.onWithdraw&&allowance>0&&<button onClick={function(){props.onWithdraw(Math.round(allowance));}} style={{padding:"6px 12px",background:"#022c22",border:"1px solid #10b981",borderRadius:6,color:"#a7f3d0",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Withdraw →</button>}
               <button onClick={function(){dismissStreakNudge(streak);if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"#0a0a0f44",border:"1px solid #065f46",borderRadius:6,color:"#a7f3d0",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Dismiss</button>
+            </div>
+          </div>
+        );
+      })()}
+      {/* CHANGED: Monthly P&L target hit — two-option banner protecting the gain. Half-size every
+         remaining trade this month, or take a withdrawal now. Dismissal is per-month so it stops
+         pinging once the user acts. Banner hides once user dismisses, takes either action, or
+         the month rolls. */}
+      {(function(){
+        // CHANGED: Load goals inline — this banner's parent JSX scope doesn't have `goals` in
+        // closure (it was relying on a variable defined in a different function).
+        var goalsLocal=(function(){try{return JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};}catch(e){return {};}})();
+        var monthlyTarget=parseFloat(goalsLocal.monthlyPnL)||0;
+        if(monthlyTarget<=0)return null;
+        // monthPnL is computed up in this function's earlier scope; recompute here defensively.
+        var moStart=(function(){var d=new Date();return new Date(d.getFullYear(),d.getMonth(),1);})();
+        var monthPnLLive=loadJournalRows().filter(function(e){return new Date(e.date)>=moStart;}).reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0)+totalPnL;
+        if(monthPnLLive<monthlyTarget)return null;
+        if(isMonthGoalBannerDismissed())return null;
+        var allowance=getWithdrawalAllowance(totalPnL);
+        var fmt=function(n){return "$"+Math.round(n).toLocaleString();};
+        var halfOn=isMonthHalfsizeActive();
+        return (
+          <div style={{marginBottom:12,padding:"12px 16px",background:"linear-gradient(135deg,#422006,#713f12)",border:"1px solid #facc15",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+            <div style={{minWidth:0}}>
+              <div style={{fontSize:13,fontWeight:800,color:"#fff",display:"flex",alignItems:"center",gap:7}}>🏁 Monthly target hit — {fmt(monthPnLLive)} of {fmt(monthlyTarget)}</div>
+              <div style={{fontSize:11,color:"#fde68a",marginTop:3,lineHeight:1.5}}>The last week of a strong month is where people give it back. Protect the gain.</div>
+            </div>
+            <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap"}}>
+              <button onClick={function(){setMonthHalfsizeActive(!halfOn);if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:halfOn?"#facc15":"#0a0a0f44",border:"1px solid #facc15",borderRadius:6,color:halfOn?"#422006":"#fde68a",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>{halfOn?"✓ Half-size on":"Half-size remaining"}</button>
+              {props.onWithdraw&&allowance>0&&<button onClick={function(){props.onWithdraw(Math.round(allowance));dismissMonthGoalBanner();if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"#0a0a0f44",border:"1px solid #facc15",borderRadius:6,color:"#fde68a",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Withdraw {fmt(allowance)} →</button>}
+              <button onClick={function(){dismissMonthGoalBanner();if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"transparent",border:"1px solid #78350f",borderRadius:6,color:"#fde68a",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Dismiss</button>
             </div>
           </div>
         );
@@ -8074,6 +8137,9 @@ function App(props){
     // session already shrank you to". Without this floor, a session with sf=0.5 combined with the
     // lock's ×0.5 produced 0.25 — way more restrictive than the user expects from "half-size".
     try{var lk=checkDisciplineLock(state.trades,state.commitment);if(lk&&lk.locked)sf=Math.min(sf,0.5);}catch(e){}
+    // CHANGED: Month-halfsize mode caps SF at 0.5 too (same floor as the lock), so the trade is
+    // measured against the half-size threshold and oversized-entry flags fire correctly.
+    if(isMonthHalfsizeActive())sf=Math.min(sf,0.5);
     var effPosMax=posMax>0?posMax*sf:0;
     // CHANGED: Auto-violations must be REMOVABLE — if a re-save brings the trade within the cap,
     // the previous "Oversized entry" flag should clear. Same for "Max risk exceeded".
@@ -8207,6 +8273,9 @@ function App(props){
   var effSF=sessForSf&&sessForSf.sizeFraction!=null?parseFloat(sessForSf.sizeFraction)||1:1;
   var liveLockForSF=checkDisciplineLock(state.trades,state.commitment);
   if(liveLockForSF.locked)effSF=Math.min(effSF,0.5);
+  // CHANGED: When the month-halfsize-remaining mode is on (set after monthly P&L goal hit),
+  // cap effective size fraction at 0.5 for live trade computations too.
+  if(isMonthHalfsizeActive())effSF=Math.min(effSF,0.5);
   var tradeStatus=(function(){
     // CHANGED: Market-closed no longer blocks new trades — users may log fills from extended hours
     // or trades placed elsewhere right after the bell. All other gates (pre-market checklist,
