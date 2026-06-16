@@ -5939,10 +5939,13 @@ function RMultipleHistogram(props){
 // P&L in the readout.
 function DisciplineScatter(props){
   var rows=props.rows||[],settings=props.settings||{};
-  // CHANGED: When viewing this-week / last-week, plot one point per closed trade so individual
-  // trades can be inspected. Score for a trade is the day's process score taken AT that trade
-  // (cumulative through that trade in chronological order). P&L is the trade's own P&L.
-  var granular=props.range==="thisweek"||props.range==="week";
+  // CHANGED: Per-trade granularity activates whenever the filtered range covers fewer than 30
+  // trading days. Previously only this-week/last-week triggered it. The day-count check works
+  // across every named range (mtd, custom, etc.) without needing to know the range's duration —
+  // if there isn't enough data to be statistically meaningful as daily-aggregated points, we
+  // surface each trade so the user can inspect individual decisions instead.
+  var tradingDays=rows.filter(function(r){return (r.trades||[]).some(function(t){return t&&t.status!=="open";});}).length;
+  var granular=props.range==="thisweek"||props.range==="week"||tradingDays<30;
   var pts=[];
   if(granular){
     rows.forEach(function(r){
