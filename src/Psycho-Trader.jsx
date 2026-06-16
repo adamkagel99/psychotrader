@@ -5068,7 +5068,7 @@ function GoalsTab(props){
               {(goals.custom||[]).map(function(cg){
                 if(editingCustomId===cg.id)return renderCustomGoal(cg);
                 return (
-                  <button key={cg.id} onClick={function(){setEditingCustomId(cg.id);setCustomDraft({title:cg.title||"",target:cg.target||"",metric:cg.metric||"pnl",period:cg.period||"daily",prefix:cg.prefix||"",suffix:cg.suffix||"",customName:cg.customName||"",deadline:cg.deadline||"",filterField:cg.filterField||"",filterValue:cg.filterValue||""});}} style={{textAlign:"left",padding:"10px 12px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8,cursor:"pointer",fontFamily:"inherit",display:"flex",flexDirection:"column",gap:3}}>
+                  <button key={cg.id} onClick={function(){setEditingCustomId(cg.id);setCustomDraft({title:cg.title||"",target:cg.target||"",metric:cg.metric||"pnl",period:cg.period||"daily",prefix:cg.prefix||"",suffix:cg.suffix||"",customName:cg.customName||"",deadline:cg.deadline||"",filterField:cg.filterField||"",filterValue:cg.filterValue||"",section:cg.section||"custom",sectionName:cg.sectionName||null});}} style={{textAlign:"left",padding:"10px 12px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8,cursor:"pointer",fontFamily:"inherit",display:"flex",flexDirection:"column",gap:3}}>
                     <div style={{fontSize:12,color:"#e2e8f0",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cg.title}</div>
                     <div style={{fontSize:10,color:"#64748b"}}>{cg.metric}{cg.period?" · "+cg.period:""} · target {cg.prefix||""}{cg.target}{cg.suffix||""}</div>
                   </button>
