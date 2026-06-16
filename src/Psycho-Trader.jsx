@@ -7219,7 +7219,7 @@ function SettingsTab(props){
       </SettingsSection>
 
       <SettingsSection title="Auto-Sizing Parameters">
-        <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Position Max % is the cap on a single trade as a % of your account tier. Risk Max % is the most you'll lose on that trade as a % of its position size. Slippage % defines a minimum (lower bound) for both.</div>
+        <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Risk Max % of Balance is the most you'll lose on a single trade as a % of your account. Stop Loss Max % is the largest stop distance from entry as a % of position size. Together they determine your position size: Position Size % = Risk / Stop × 100. Slippage % sets a minimum lower bound.</div>
         {/* CHANGED: $ / % mode toggle. */}
         <div style={{display:"flex",gap:6,marginBottom:12}}>
           {[{id:"pct",label:"% of Balance"},{id:"dollar",label:"Fixed $"}].map(function(o){
@@ -7229,16 +7229,36 @@ function SettingsTab(props){
         </div>
         {(settings.sizingMode||"pct")==="pct"?(
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8,marginBottom:8}}>
-            <div><label style={lbl}>Slippage %</label><input type="number" step="0.1" value={settings.slippagePct!=null?settings.slippagePct:20} onChange={function(e){setSettings(function(s){return Object.assign({},s,{slippagePct:parseFloat(e.target.value)||0});});}} style={fld}/></div>
-            <div><label style={lbl}>Position Max %</label><input type="number" step="0.1" value={settings.positionMaxPct!=null?settings.positionMaxPct:7.5} onChange={function(e){setSettings(function(s){return Object.assign({},s,{positionMaxPct:parseFloat(e.target.value)||0});});}} style={fld}/></div>
-            <div><label style={lbl}>Risk Max % of Pos</label>
-              {/* CHANGED: Helper readout now sits INSIDE the textbox, right-aligned and matched
-                 to the input's 15px size — reads like an inline unit/suffix instead of a separate row. */}
-              <div style={{position:"relative"}}>
-                <input type="number" step="0.1" value={settings.riskMaxPct!=null?settings.riskMaxPct:33} onChange={function(e){setSettings(function(s){return Object.assign({},s,{riskMaxPct:parseFloat(e.target.value)||0});});}} style={Object.assign({},fld,{paddingRight:170})}/>
-                <div style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",fontSize:15,color:"#475569",fontWeight:500,pointerEvents:"none",fontFamily:"inherit"}}>= {((parseFloat(settings.positionMaxPct)||0)*(parseFloat(settings.riskMaxPct)||0)/100).toFixed(2)}% of account</div>
-              </div>
+            {/* CHANGED: Inputs restructured to match how traders actually think:
+                  1) Risk Max % of Balance (left) — the headline number: "I'll risk X% per trade"
+                  2) Stop Loss Max % (middle) — the price stop distance as % of position
+                  3) Slippage % (right) — lower bound floor
+                positionMaxPct is now a DERIVED value (= risk/stop × 100), persisted to settings so
+                all downstream sizing logic continues to work unchanged. */}
+            <div><label style={lbl}>Risk Max % of Balance</label>
+              <input type="number" step="0.01" min="0" value={(function(){var pm=parseFloat(settings.positionMaxPct)||0;var rm=parseFloat(settings.riskMaxPct)||0;return (pm*rm/100).toFixed(2);})()} onChange={function(e){
+                var b=parseFloat(e.target.value)||0;
+                setSettings(function(s){
+                  var stop=parseFloat(s.riskMaxPct)||33;
+                  var pos=stop>0?(b/stop*100):0;
+                  return Object.assign({},s,{positionMaxPct:Math.round(pos*1000)/1000});
+                });
+              }} style={fld}/>
             </div>
+            <div><label style={lbl}>Stop Loss Max %</label>
+              <input type="number" step="0.1" value={settings.riskMaxPct!=null?settings.riskMaxPct:33} onChange={function(e){
+                var newStop=parseFloat(e.target.value)||0;
+                setSettings(function(s){
+                  // Keep "Risk % of Balance" constant when stop loss is edited — recompute positionMaxPct.
+                  var oldPos=parseFloat(s.positionMaxPct)||0;
+                  var oldStop=parseFloat(s.riskMaxPct)||0;
+                  var balance=oldPos*oldStop/100;
+                  var pos=newStop>0?(balance/newStop*100):0;
+                  return Object.assign({},s,{riskMaxPct:newStop,positionMaxPct:Math.round(pos*1000)/1000});
+                });
+              }} style={fld}/>
+            </div>
+            <div><label style={lbl}>Slippage %</label><input type="number" step="0.1" value={settings.slippagePct!=null?settings.slippagePct:20} onChange={function(e){setSettings(function(s){return Object.assign({},s,{slippagePct:parseFloat(e.target.value)||0});});}} style={fld}/></div>
           </div>
         ):(
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8,marginBottom:8}}>
