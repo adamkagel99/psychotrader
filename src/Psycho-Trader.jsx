@@ -3528,9 +3528,14 @@ function DashboardTab(props){
         var goalsLocal=(function(){try{return JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};}catch(e){return {};}})();
         var monthlyTarget=parseFloat(goalsLocal.monthlyPnL)||0;
         if(monthlyTarget<=0)return null;
-        // monthPnL is computed up in this function's earlier scope; recompute here defensively.
+        // CHANGED: Match the monthly P&L formula used elsewhere on the Dashboard — only add the
+        // live (unsaved) total if today's row isn't already in the journal, otherwise the saved
+        // pnl gets double-counted with today's running P&L.
         var moStart=(function(){var d=new Date();return new Date(d.getFullYear(),d.getMonth(),1);})();
-        var monthPnLLive=loadJournalRows().filter(function(e){return new Date(e.date)>=moStart;}).reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0)+totalPnL;
+        var todayKeyLocal=todayStr();
+        var monthRows=loadJournalRows().filter(function(e){return new Date(e.date)>=moStart;});
+        var todayInJournal=monthRows.some(function(e){return e.date===todayKeyLocal;});
+        var monthPnLLive=monthRows.reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0)+(todayInJournal?0:totalPnL);
         if(monthPnLLive<monthlyTarget)return null;
         if(isMonthGoalBannerDismissed())return null;
         var allowance=getWithdrawalAllowance(totalPnL);
@@ -3539,11 +3544,13 @@ function DashboardTab(props){
         return (
           <div style={{marginBottom:12,padding:"12px 16px",background:"linear-gradient(135deg,#422006,#713f12)",border:"1px solid #facc15",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
             <div style={{minWidth:0}}>
+              {/* CHANGED: Subtitle removed per user — header alone is enough. */}
               <div style={{fontSize:13,fontWeight:800,color:"#fff",display:"flex",alignItems:"center",gap:7}}>🏁 Monthly target hit — {fmt(monthPnLLive)} of {fmt(monthlyTarget)}</div>
-              <div style={{fontSize:11,color:"#fde68a",marginTop:3,lineHeight:1.5}}>The last week of a strong month is where people give it back. Protect the gain.</div>
             </div>
             <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap"}}>
-              <button onClick={function(){setMonthHalfsizeActive(!halfOn);if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:halfOn?"#facc15":"#0a0a0f44",border:"1px solid #facc15",borderRadius:6,color:halfOn?"#422006":"#fde68a",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>{halfOn?"✓ Half-size on":"Half-size remaining"}</button>
+              {/* CHANGED: "Half-size remaining" was ambiguous (could read as halving the remaining
+                 dollar amount). Renamed to "Half-size rest of month" — names the duration explicitly. */}
+              <button onClick={function(){setMonthHalfsizeActive(!halfOn);if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:halfOn?"#facc15":"#0a0a0f44",border:"1px solid #facc15",borderRadius:6,color:halfOn?"#422006":"#fde68a",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>{halfOn?"✓ Half-size on":"Half-size rest of month"}</button>
               {props.onWithdraw&&allowance>0&&<button onClick={function(){props.onWithdraw(Math.round(allowance));dismissMonthGoalBanner();if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"#0a0a0f44",border:"1px solid #facc15",borderRadius:6,color:"#fde68a",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Withdraw {fmt(allowance)} →</button>}
               <button onClick={function(){dismissMonthGoalBanner();if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"transparent",border:"1px solid #78350f",borderRadius:6,color:"#fde68a",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Dismiss</button>
             </div>
