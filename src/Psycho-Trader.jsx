@@ -1571,14 +1571,22 @@ function MonthYearPicker(props){
 // CHANGED: Unified calendar legend — 2-column grid for consistent alignment, includes
 // "Discipline broken" entry with the D badge marker used on cells.
 function CalendarLegend(){
+  // CHANGED: Reordered for the user's preferred reading flow + dropped Early close (it's noisy
+  // and the holiday cell already encodes adjacent context). Two columns, row-major layout —
+  // items array is interleaved so left/right columns read as requested top-to-bottom.
   var items=[
-    {sw:<div style={{width:10,height:10,borderRadius:2,background:"#14532d",border:"1px solid #166534"}}/>,label:"Green day"},
-    {sw:<div style={{width:10,height:10,borderRadius:2,background:"#7f1d1d",border:"1px solid #991b1b"}}/>,label:"Red day"},
+    // Row 1
     {sw:<div style={{width:10,height:10,borderRadius:2,background:"#1e1b4b",border:"1px solid #4338ca"}}/>,label:"Today"},
-    {sw:<div style={{width:10,height:10,borderRadius:2,background:"#1c1408",border:"1.5px dashed #a16207"}}/>,label:"No-trade"},
     {sw:<div style={{width:10,height:10,borderRadius:2,background:"#2a1d0a",border:"1px solid #713f12"}}/>,label:"Holiday"},
-    {sw:<div style={{width:8,height:8,borderRadius:"50%",background:"#f59e0b"}}/>,label:"Early close"},
-    {sw:<div style={{fontSize:8,fontWeight:800,color:"#fff",background:"#ef4444",borderRadius:3,padding:"0 3px",lineHeight:"11px",letterSpacing:0.3}}>D</div>,label:"Discipline broken"}
+    // Row 2
+    {sw:<div style={{width:10,height:10,borderRadius:2,background:"#14532d",border:"1px solid #166534"}}/>,label:"Green day"},
+    {sw:<div style={{fontSize:8,fontWeight:800,color:"#fff",background:"#ef4444",borderRadius:3,padding:"0 3px",lineHeight:"11px",letterSpacing:0.3}}>D</div>,label:"Discipline broken"},
+    // Row 3
+    {sw:<div style={{width:10,height:10,borderRadius:2,background:"#7f1d1d",border:"1px solid #991b1b"}}/>,label:"Red day"},
+    {sw:<div style={{fontSize:11,color:"#facc15",fontWeight:900,lineHeight:1,textShadow:"0 0 3px rgba(250,204,21,0.6)"}}>✓</div>,label:"Daily target met"},
+    // Row 4
+    {sw:<div style={{width:10,height:10,borderRadius:2,background:"#1c1408",border:"1.5px dashed #a16207"}}/>,label:"No-trade day"},
+    {sw:<div style={{fontSize:11,lineHeight:1}}>🏁</div>,label:"Monthly target met"}
   ];
   return (
     <div style={{marginTop:12,paddingTop:10,borderTop:"1px solid #1e293b",display:"grid",gridTemplateColumns:"1fr 1fr",rowGap:6,columnGap:14}}>
