@@ -1655,22 +1655,19 @@ function CalendarGrid(props){
           if(isNoTrade){bg="#1c1408";bd="#a16207";col="#fcd34d";noTradeBorderStyle="dashed";}
           if(isToday){bg="#1e1b4b";bd="#4338ca";col="#a5b4fc";noTradeBorderStyle="solid";}
           if(isSelected){bd="#818cf8";}
-          // CHANGED: Goal-hit markers. Weekly: every cell in a week whose cumulative pnl met the
-          // weekly target gets a gold border override (skipped if cell is today/selected so those
-          // markers still read). Daily: a small gold dot in the bottom-right when pnl ≥ dailyTarget.
-          var weekIdx=Math.floor(i/7);
-          var weekGoalHit=weeklyTarget>0&&(weekPnLs[weekIdx]||0)>=weeklyTarget;
+          // CHANGED: Daily goal-hit marker. Distinguished from the early-close orange dot by
+          // using a checkmark glyph instead of a dot. Weekly border override removed — users
+          // found it looked too similar to other states and added little signal.
           var dayGoalHit=dailyTarget>0&&pnl!=null&&pnl>=dailyTarget;
-          if(weekGoalHit&&!isToday&&!isSelected){bd="#facc15";}
           return (
             <button key={i} onClick={function(){onSelect(ds);}} style={{height:46,background:bg,border:(isNoTrade?"1.5px ":"1px ")+noTradeBorderStyle+" "+bd,borderRadius:5,color:col,fontSize:13,fontWeight:isToday||isSelected||isNoTrade?700:500,cursor:"pointer",fontFamily:"inherit",position:"relative",padding:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2}} title={holiday||(isNoTrade?"No-trade day (deliberately sat out)":(pnl!=null?(pnl>=0?"+":"")+"$"+pnl.toFixed(0):""))}>
               <span style={{lineHeight:1}}>{d}</span>
               {pnl!=null&&dayData&&dayData.tradeCount>0&&(HIDE_DOLLAR_PNL?(dayRiskMax>0&&<span style={{fontSize:9,color:col,fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1}}>{(pnl/dayRiskMax>=0?"+":"")+(pnl/dayRiskMax).toFixed(1)}R</span>):<span style={{fontSize:9,color:col,fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1}}>{(pnl>=0?"+$":"-$")+Math.abs(pnl).toFixed(0)}</span>)}
               {isNoTrade&&!isToday&&<span style={{fontSize:9,color:"#fbbf24",fontWeight:800,letterSpacing:0.3,lineHeight:1}}>⊘ NT</span>}
               {earlyClose&&<div style={{position:"absolute",top:1,right:2,width:4,height:4,borderRadius:"50%",background:"#f59e0b"}}/>}
-              {/* CHANGED: Daily goal-hit gold dot in the bottom-right corner. Won't conflict with
-                 the early-close dot (top-right) or the discipline-lock D (top-left). */}
-              {dayGoalHit&&<div style={{position:"absolute",bottom:2,right:2,width:5,height:5,borderRadius:"50%",background:"#facc15",boxShadow:"0 0 4px #facc15"}} title={"Daily goal hit (+$"+pnl.toFixed(0)+" / $"+dailyTarget.toFixed(0)+")"}/>}
+              {/* CHANGED: Daily goal-hit checkmark in the bottom-right — clearly a glyph, not a dot,
+                 so it can't be confused with the early-close indicator. */}
+              {dayGoalHit&&<div style={{position:"absolute",bottom:0,right:3,fontSize:11,color:"#facc15",fontWeight:900,lineHeight:1,textShadow:"0 0 3px rgba(250,204,21,0.6)"}} title={"Daily goal hit (+$"+pnl.toFixed(0)+" / $"+dailyTarget.toFixed(0)+")"}>✓</div>}
               {/* CHANGED: Discipline-lock marker — small "D" badge in top-left corner when day's discipline score fell below threshold. */}
               {dayData&&dayData.wasLocked&&<div style={{position:"absolute",top:1,left:2,fontSize:8,fontWeight:800,color:"#fff",background:"#ef4444",borderRadius:3,padding:"0 3px",lineHeight:"11px",letterSpacing:0.3}} title="Discipline lock triggered">D</div>}
             </button>
