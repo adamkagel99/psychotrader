@@ -6272,6 +6272,10 @@ function PerformanceTab(props){
   var [range,setRange]=useState(function(){try{var r=localStorage.getItem("tf-stats-range")||"all";return r==="custom"?"all":r;}catch(e){return "all";}});
   // CHANGED: Selected metric for the combined Overview / chart block. Default = totalPnl (equity curve).
   var [selectedMetric,setSelectedMetric]=useState("totalPnl");
+  // CHANGED: Expectancy mode toggle — "account" (% of account balance, default) or "r" (R-multiple).
+  // Persists across reloads via localStorage.
+  var [expectancyMode,setExpectancyMode]=useState(function(){try{return localStorage.getItem("tf-expectancy-mode")||"account";}catch(e){return "account";}});
+  useEffect(function(){try{localStorage.setItem("tf-expectancy-mode",expectancyMode);}catch(e){}},[expectancyMode]);
   // CHANGED: Custom mode tracks whether the Custom pill's date inputs are revealed. The actual
   // `range` value stays on the previously-selected preset until the user picks at least one
   // date — so the displayed data doesn't change the moment Custom is tapped.
@@ -6406,6 +6410,40 @@ function PerformanceTab(props){
   function avgWinPct(){var arr=wins.map(function(t){return parseFloat(t.pctPnl);}).filter(function(v){return !isNaN(v);});if(!arr.length)return "0%";return pct(arr.reduce(function(s,v){return s+v;},0)/arr.length);}
   function avgLossPct(){var arr=losses.map(function(t){return parseFloat(t.pctPnl);}).filter(function(v){return !isNaN(v);});if(!arr.length)return "0%";return pct(arr.reduce(function(s,v){return s+v;},0)/arr.length);}
   function expPct(){var arr=allTrades.map(function(t){return parseFloat(t.pctPnl);}).filter(function(v){return !isNaN(v);});if(!arr.length)return "0%";return pct(arr.reduce(function(s,v){return s+v;},0)/arr.length);}
+  // CHANGED: Two account-aware expectancy variants. Account-relative averages each trade's
+  // pnl-as-a-percentage-of-account-balance-at-trade-date — this is what most traders mean by
+  // "what's my edge per trade." R-multiple averages each trade's pnl divided by the day's
+  // stamped riskMax — useful when risk per trade is roughly constant. Both replace the older
+  // instrument-relative expPct() (avg price-move on the asset), which can be misleading
+  // when single big-% winners drag the mean.
+  function expAccountPct(){
+    var nums=[];
+    filtered.forEach(function(r){
+      var bal=0;try{bal=getAccountBalanceAtDate(r.date)||0;}catch(e){}
+      if(bal<=0)return;
+      (r.trades||[]).forEach(function(t){
+        if(t.status==="open")return;
+        var p=parseFloat(t.pnl);if(isNaN(p))return;
+        nums.push(p/bal*100);
+      });
+    });
+    if(!nums.length)return null;
+    return nums.reduce(function(s,v){return s+v;},0)/nums.length;
+  }
+  function expR(){
+    var nums=[];
+    filtered.forEach(function(r){
+      var rm=parseFloat(r.riskMax)||0;
+      if(rm<=0)return;
+      (r.trades||[]).forEach(function(t){
+        if(t.status==="open")return;
+        var p=parseFloat(t.pnl);if(isNaN(p))return;
+        nums.push(p/rm);
+      });
+    });
+    if(!nums.length)return null;
+    return nums.reduce(function(s,v){return s+v;},0)/nums.length;
+  }
   // Sec/Row defined at module scope below — they're collapsible.
   return (
     <div>
@@ -6596,7 +6634,23 @@ function PerformanceTab(props){
                 <StatTile label="Breakeven" active={selectedMetric==="breakeven"} onClick={function(){setSelectedMetric("breakeven");}} value={breakevenRate+"%"} color="#94a3b8" sub={breakevens.length+" BE"}/>
                 <StatTile label="Avg Win" active={selectedMetric==="avgWin"} onClick={function(){setSelectedMetric("avgWin");}} value={HIDE_DOLLAR_PNL?avgWinPct():("+$"+avgWin.toFixed(0))} color="#22c55e" sub={HIDE_DOLLAR_PNL?"":(avgWinPct())}/>
                 <StatTile label="Avg Loss" active={selectedMetric==="avgLoss"} onClick={function(){setSelectedMetric("avgLoss");}} value={HIDE_DOLLAR_PNL?avgLossPct():("-$"+Math.abs(avgLoss).toFixed(0))} color="#ef4444" sub={HIDE_DOLLAR_PNL?"":(avgLossPct())}/>
-                <StatTile label="Expectancy" active={selectedMetric==="expectancy"} onClick={function(){setSelectedMetric("expectancy");}} value={HIDE_DOLLAR_PNL?expPct():((expValue>=0?"+":"-")+"$"+Math.abs(expValue).toFixed(2))} color={expValue>=0?"#22c55e":"#ef4444"} sub={HIDE_DOLLAR_PNL?"":expPct()}/>
+                {(function(){
+                  // CHANGED: Expectancy tile renders one of two views depending on toggle:
+                  //   "account" → avg per-trade % of account balance (default)
+                  //   "r"       → avg per-trade R-multiple (pnl / day's stamped riskMax)
+                  // Tiny toggle pill on the tile lets the user swap; tap is stopPropagation'd
+                  // so it doesn't also activate the chart selection.
+                  var v=expectancyMode==="r"?expR():expAccountPct();
+                  var label=expectancyMode==="r"?(v==null?"—":(v>=0?"+":"")+v.toFixed(2)+"R"):(v==null?"—":(v>=0?"+":"")+v.toFixed(2)+"%");
+                  var color=v==null?"#94a3b8":(v>=0?"#22c55e":"#ef4444");
+                  var toggle=(
+                    <span onClick={function(e){e.stopPropagation();setExpectancyMode(expectancyMode==="r"?"account":"r");}} style={{display:"inline-flex",gap:2,padding:"2px 4px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:4,cursor:"pointer",fontSize:9,fontWeight:700,letterSpacing:0.3}}>
+                      <span style={{padding:"1px 5px",borderRadius:3,background:expectancyMode==="account"?"#1e1b4b":"transparent",color:expectancyMode==="account"?"#a5b4fc":"#64748b"}}>%</span>
+                      <span style={{padding:"1px 5px",borderRadius:3,background:expectancyMode==="r"?"#1e1b4b":"transparent",color:expectancyMode==="r"?"#a5b4fc":"#64748b"}}>R</span>
+                    </span>
+                  );
+                  return <StatTile label="Expectancy" active={selectedMetric==="expectancy"} onClick={function(){setSelectedMetric("expectancy");}} value={label} color={color} sub={toggle}/>;
+                })()}
               </div>
               {/* CHANGED: Chart embedded directly under Overview tiles — clicking a tile swaps the chart. */}
               <div style={{marginTop:14,paddingTop:12,borderTop:"1px solid #1e293b"}}>{renderChart()}</div>
@@ -6621,9 +6675,10 @@ function PerformanceTab(props){
                 // CHANGED: Carry raw pnl + pcts forward — totalContrib computation downstream needs them.
                 return {k:k,n:g.n,wr:wr,avgPct:avgPct,exp:exp,pnl:g.pnl,pcts:g.pcts};
               });
-              // CHANGED: Sort by trade count desc — most-traded patterns surface first, since
-              // they carry the most signal. Expectancy is shown on each row for context.
-              rows.sort(function(a,b){return b.n-a.n;});
+              // CHANGED: Sort by win rate descending. Trade count is the tiebreaker (descending),
+              // so a 100% WR on 10 trades sits above a 100% WR on 1 trade. Within the same WR,
+              // more samples are more meaningful.
+              rows.sort(function(a,b){if(b.wr!==a.wr)return b.wr-a.wr;return b.n-a.n;});
               var max=Math.max.apply(null,rows.map(function(r){return Math.abs(HIDE_DOLLAR_PNL?r.avgPct:r.exp);}).concat([0.0001]));
               // CHANGED: Bar length now represents TOTAL contribution (sum across trades) instead
                // of per-trade expectancy, so frequently-traded patterns get more visual weight
