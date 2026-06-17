@@ -1163,7 +1163,8 @@ function MonthlyTargetBanner(props){
       </div>
       <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap"}}>
         <button onClick={function(){setMonthHalfsizeActive(!halfOn);if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:halfOn?"#facc15":"#0a0a0f44",border:"1px solid #facc15",borderRadius:6,color:halfOn?"#422006":"#fde68a",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>{halfOn?"✓ Half-size on — tap to turn off":"Half-size rest of month"}</button>
-        {props.onWithdraw&&allowance>0&&<button onClick={function(){props.onWithdraw(Math.round(allowance));dismissMonthGoalBanner();if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"#0a0a0f44",border:"1px solid #facc15",borderRadius:6,color:"#fde68a",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Withdraw {fmt(allowance)} →</button>}
+        {/* CHANGED: Withdraw button removed — other surfaces (allowance banner, profit-take
+           streak nudge, Settings transfer form) already cover that action. */}
         {!halfOn&&<button onClick={function(){dismissMonthGoalBanner();if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"transparent",border:"1px solid #78350f",borderRadius:6,color:"#fde68a",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Dismiss</button>}
       </div>
     </div>
@@ -3867,10 +3868,16 @@ function TradesTab(props){
   var allGalleryTrades=(function(){
     var all=[];
     try{
+      // CHANGED: Skip today's journal entry in this loop. Today's trades are already in
+      // state.trades (the live source of truth), and journal:today is just a periodically-
+      // refreshed snapshot of that same data. Without this skip every closed trade on today's
+      // date showed up twice in the All-trades view.
+      var todayKeyLocal=todayStr();
       loadJournalRows().forEach(function(entry){
+        if(entry.date===todayKeyLocal)return;
         (entry.trades||[]).forEach(function(t){if(t.status!=="open")all.push(Object.assign({},t,{date:entry.date}));});
       });
-      (state.trades||[]).forEach(function(t){if(t.status!=="open")all.push(Object.assign({},t,{date:todayStr()}));});
+      (state.trades||[]).forEach(function(t){if(t.status!=="open")all.push(Object.assign({},t,{date:todayKeyLocal}));});
     }catch(e){}
     filterDefs.forEach(function(fd){var sel=filters[fd.key];if(!sel||!sel.length)return;all=all.filter(function(t){if(fd.key==="emotions"||fd.key==="violations")return(t[fd.key]||[]).some(function(e){return sel.indexOf(e)>=0;});return sel.indexOf(t[fd.key])>=0;});});
     all.sort(makeChainCmp(sortChain,true));
@@ -3881,7 +3888,7 @@ function TradesTab(props){
   var isAllScope=galleryScope==="all";
   var filterResultCount=isAllScope?allGalleryTrades.length:displayTrades.length;
   var filterTotalCount=isAllScope
-    ?(function(){var n=0;try{loadJournalRows().forEach(function(e){(e.trades||[]).forEach(function(t){if(t.status!=="open")n++;});});(state.trades||[]).forEach(function(t){if(t.status!=="open")n++;});}catch(e){}return n;})()
+    ?(function(){var n=0;try{var todayKeyLocal=todayStr();loadJournalRows().forEach(function(e){if(e.date===todayKeyLocal)return;(e.trades||[]).forEach(function(t){if(t.status!=="open")n++;});});(state.trades||[]).forEach(function(t){if(t.status!=="open")n++;});}catch(e){}return n;})()
     :rawTrades.filter(function(t){return t.status!=="open";}).length;
   var slippagePct=settings.slippagePct!=null?settings.slippagePct:20;
   return (
@@ -4834,19 +4841,19 @@ function GoalRing(props){
           {markerEl}
         </svg>
         <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
-          {completed?<span style={{fontSize:cmp?15:22,color:"#22c55e"}}>✓</span>:<span style={{fontSize:cmp?12:17,fontWeight:800,color:ringColor,fontVariantNumeric:"tabular-nums"}}>{Math.round(pct)}<span style={{fontSize:cmp?7:9}}>%</span></span>}
+          {/* CHANGED: Show the actual percentage (e.g. 117%) even when over target — keeps every
+             card visually consistent. The check-mark is removed; ring color already signals
+             goal-met (greener accent). */}
+          <span style={{fontSize:cmp?12:17,fontWeight:800,color:ringColor,fontVariantNumeric:"tabular-nums"}}>{Math.round(pct)}<span style={{fontSize:cmp?7:9}}>%</span></span>
         </div>
       </div>
-      {/* CHANGED: % goals show target as a ring marker (with a tiny target legend) instead of a readout.
-          $/R goals show the value readout when dollars are visible; nothing when hidden. */}
+      {/* CHANGED: Keep the original "target X%" / "of $Y" footer text when over target — don't
+         replace with "Goal reached". The ring color shift already conveys completion. */}
       {isPercent?(
-        over?<div style={{fontSize:cmp?9:11,color:"#86efac",marginTop:1,textAlign:"center",fontWeight:700}}>Goal reached</div>
-        :(HIDE_DOLLAR_PNL?null:<div style={{fontSize:cmp?8:10,color:"#475569",marginTop:1,textAlign:"center"}}>target {(typeof tgt==="number"?Math.round(tgt):tgt)}%</div>)
-      ):HIDE_DOLLAR_PNL?(
-        over&&<div style={{fontSize:cmp?9:11,color:"#86efac",marginTop:1,textAlign:"center",fontWeight:700}}>Goal reached</div>
-      ):(<>
+        HIDE_DOLLAR_PNL?null:<div style={{fontSize:cmp?8:10,color:"#475569",marginTop:1,textAlign:"center"}}>target {(typeof tgt==="number"?Math.round(tgt):tgt)}%</div>
+      ):HIDE_DOLLAR_PNL?null:(<>
         <div style={{fontSize:cmp?15:21,fontWeight:800,color:valColor,fontVariantNumeric:"tabular-nums",lineHeight:1.1,textAlign:"center"}}>{fv}</div>
-        <div style={{fontSize:cmp?9:11,color:"#64748b",marginTop:3,textAlign:"center"}}>{over?"Goal reached":"of "+ft}</div>
+        <div style={{fontSize:cmp?9:11,color:"#64748b",marginTop:3,textAlign:"center"}}>of {ft}</div>
       </>)}
       {!cmp&&gp.subtext&&<div style={{fontSize:10,color:"#475569",marginTop:7,textAlign:"center",lineHeight:1.4,borderTop:"1px solid #1e293b",paddingTop:7,width:"100%"}}>{gp.subtext}</div>}
       {gp.deadline&&(function(){
@@ -6643,15 +6650,17 @@ function PerformanceTab(props){
                 </StatSec>
               );
             }
-            var setupG={},cpG={},indG={};
+            var setupG={},tfG={},cpG={},indG={};
             allTrades.forEach(function(t){
               var p=parseFloat(t.pnl)||0,pp=parseFloat(t.pctPnl);
               function bump(g,k){if(!g[k])g[k]={n:0,w:0,pnl:0,pcts:[]};g[k].n++;g[k].pnl+=p;if(p>0)g[k].w++;if(!isNaN(pp))g[k].pcts.push(pp);}
               if(t.setup)bump(setupG,t.setup);
+              // CHANGED: Add timeframe breakdown — same row format as setups/patterns/indicators.
+              if(t.timeframe)bump(tfG,t.timeframe);
               if(t.candlePattern)bump(cpG,t.candlePattern);
               (t.indicators||[]).forEach(function(ind){bump(indG,ind);});
             });
-            return <>{renderBreakdown("Setups",setupG)}{renderBreakdown("Candle Patterns",cpG)}{renderBreakdown("Indicators",indG)}</>;
+            return <>{renderBreakdown("Setups",setupG)}{renderBreakdown("Time Frames",tfG)}{renderBreakdown("Candle Patterns",cpG)}{renderBreakdown("Indicators",indG)}</>;
           })()}
           {(function(){
             if(allTrades.length===0)return null;
@@ -6679,9 +6688,10 @@ function PerformanceTab(props){
               return {best:qualified[0],worst:qualified[qualified.length-1]};
             }
             var setupBW=bestWorst("setup",false);
+            var tfBW=bestWorst("timeframe",false);
             var cpBW=bestWorst("candlePattern",false);
             var indBW=bestWorst("indicators",true);
-            if(!setupBW&&!cpBW&&!indBW)return null;
+            if(!setupBW&&!tfBW&&!cpBW&&!indBW)return null;
             function row(label,bw,isLast){
               if(!bw)return null;
               var same=bw.best.name===bw.worst.name;
@@ -6712,6 +6722,8 @@ function PerformanceTab(props){
             // Determine which row is last (for proper border handling).
             var rows=[];
             if(setupBW)rows.push(["Setup",setupBW]);
+            // CHANGED: Time Frame row — same Best/Worst treatment as setup/pattern/indicator.
+            if(tfBW)rows.push(["Time Frame",tfBW]);
             if(cpBW)rows.push(["Candle Pattern",cpBW]);
             if(indBW)rows.push(["Indicator",indBW]);
             return (
