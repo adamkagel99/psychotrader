@@ -6683,13 +6683,14 @@ function PerformanceTab(props){
                 <StatSec key={title} title={title} colSpan={props.mobile?1:6}>
                   {rowsTotal.length===0&&<div style={{fontSize:13,color:"#64748b",fontStyle:"italic",padding:"4px 0"}}>No data yet.</div>}
                   {rowsTotal.map(function(r,i){
-                    // CHANGED: Bars removed — they were noisy and not informative once WR + count + dollar value are shown. Plain rows now.
+                    // CHANGED: Bars removed earlier — they were noisy. Now also dropping the trailing
+                    // per-trade expectancy readout — WR + trade count are the signal; the % return
+                    // tail was adding clutter without surfacing anything not already in Best/Worst.
                     var wrColor=r.wr>=50?"#22c55e":r.wr>=33?"#fbbf24":"#ef4444";
-                    var pnlText=HIDE_DOLLAR_PNL?((r.avgPct>=0?"+":"")+r.avgPct.toFixed(1)+"%"):((r.exp>=0?"+":"-")+"$"+Math.abs(r.exp).toFixed(0));
                     return (
                       <div key={r.k} style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:"7px 0",borderBottom:i===rowsTotal.length-1?"none":"1px solid #1e293b",gap:8}}>
                         <span style={{fontSize:13,color:"#e2e8f0",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,minWidth:0}}>{r.k}</span>
-                        <span style={{fontSize:12,fontWeight:700,color:wrColor,fontVariantNumeric:"tabular-nums",flexShrink:0}}>{r.wr}% wr<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:6}}>· {r.n}t · {pnlText}</span></span>
+                        <span style={{fontSize:12,fontWeight:700,color:wrColor,fontVariantNumeric:"tabular-nums",flexShrink:0}}>{r.wr}% wr<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:6}}>· {r.n}t</span></span>
                       </div>
                     );
                   })}
