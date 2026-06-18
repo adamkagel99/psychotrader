@@ -1325,9 +1325,10 @@ function doRecalc(entries,exits,assetClassId,instrument,direction){
   var futMult=(assetClassId==="futures"&&instrument)?getFuturesPointValue(instrument):1;
   var mult=assetClassId==="futures"?futMult:baseMult;
   var sign=(direction==="SHORT"||direction==="SELL")?-1:1;
-  // CHANGED: Read the global per-contract-per-side commission from settings. Charged on both
-  // entry and exit, so total fees = commission × (entry_contracts + exit_contracts). Default 0.
-  var commission=0;try{var s=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}");commission=parseFloat(s.commissionPerContract)||0;}catch(e){}
+  // CHANGED: Per-asset-class commission. Stored under settings.assetClassSettings[id].commissionPerContract.
+  // Charged on both entry and exit, so total fees = commission × (entry_contracts + exit_contracts).
+  // Default 0 per class.
+  var commission=0;try{var s=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}");var acs=(s.assetClassSettings||{})[assetClassId]||{};commission=parseFloat(acs.commissionPerContract)||0;}catch(e){}
   var entryContracts=tc;
   var exitContracts=0;exits.forEach(function(ex){var ec=parseFloat(ex.contracts);if(!isNaN(ec))exitContracts+=ec;});
   var feesPaid=commission>0?((entryContracts+exitContracts)*commission):0;
@@ -2032,13 +2033,17 @@ function TradeTile(props){
 
       {/* P&L ROW: when $ is hidden, show % in the large slot; otherwise show $ + smaller %. */}
       {hasPnl&&(
-        <div style={{display:"flex",alignItems:"baseline",gap:10,marginTop:8}}>
+        <div style={{display:"flex",alignItems:"baseline",gap:10,marginTop:8,flexWrap:"wrap"}}>
           {HIDE_DOLLAR_PNL
             ? (hasPct&&<div style={{fontSize:18,fontWeight:800,color:pnlColor,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>{pctPnl>=0?"+":""}{pctPnl.toFixed(2)}%</div>)
             : (<>
                 <div style={{fontSize:18,fontWeight:800,color:pnlColor,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>{(pnl>=0?"+":"-")+"$"+Math.abs(pnl).toFixed(2)}</div>
                 {hasPct&&<div style={{fontSize:13,color:pctPnl>=0?"#86efac":"#fca5a5",fontWeight:600,fontVariantNumeric:"tabular-nums"}}>({pctPnl>=0?"+":""}{pctPnl.toFixed(2)}%)</div>}
               </>)}
+          {/* CHANGED: Surface commission/fees when they apply. PnL above is already net of fees;
+             this just makes the deduction visible so the math is transparent. Hidden when $ is
+             hidden or no fees were charged. */}
+          {!HIDE_DOLLAR_PNL&&parseFloat(t.feesPaid||0)>0&&<div style={{fontSize:11,color:"#64748b",fontWeight:500,fontVariantNumeric:"tabular-nums"}} title="Commission fees deducted from gross P&L">fees −${parseFloat(t.feesPaid).toFixed(2)}</div>}
         </div>
       )}
 
@@ -7464,19 +7469,6 @@ function SettingsTab(props){
             <div><label style={lbl}>Risk Max ($)</label><input type="number" step="1" value={settings.riskMaxDollar!=null?settings.riskMaxDollar:165} onChange={function(e){setSettings(function(s){return Object.assign({},s,{riskMaxDollar:parseFloat(e.target.value)||0});});}} style={fld}/></div>
           </div>
         )}
-        {/* CHANGED: Commission setting — per contract per side. Applies to both entries and
-           exits, so a full round-trip on N contracts pays (N × 2 × commission). PnL on new
-           trades is recorded NET of fees; historical trades are not retroactively re-derived. */}
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:8,marginTop:4}}>
-          <div>
-            <label style={lbl}>Commission per Contract (per side)</label>
-            <div style={{position:"relative"}}>
-              <input type="number" step="0.01" min="0" value={settings.commissionPerContract!=null?settings.commissionPerContract:0} onChange={function(e){setSettings(function(s){return Object.assign({},s,{commissionPerContract:parseFloat(e.target.value)||0});});}} style={Object.assign({},fld,{paddingRight:90})}/>
-              <div style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",fontSize:12,color:"#475569",fontWeight:500,pointerEvents:"none"}}>$ / contract</div>
-            </div>
-            <div style={{fontSize:10,color:"#64748b",marginTop:4,lineHeight:1.4}}>Charged on entry AND exit. A 10-contract round-trip at $0.65/side = $13 total fees.</div>
-          </div>
-        </div>
         <div style={{fontSize:12,color:"#94a3b8",marginTop:4,padding:"6px 10px",background:"#0a0a0f",borderRadius:6,border:"1px solid #1e293b"}}>
           Computed: Position ${settings.positionMin}–${settings.positionMax} · Risk ${settings.riskMin}–${settings.riskMax}
         </div>
@@ -7578,6 +7570,37 @@ function SettingsTab(props){
 
       <SettingsSection title="Asset Classes & Instruments">
         <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Enable the asset classes you trade. Add instruments under each enabled class to pre-fill them in the trade form.</div>
+        {/* CHANGED: One-time backfill — re-derives every saved trade's pnl using the CURRENT
+           per-class commission settings. Useful after you set up commissions for the first time
+           or change them. Confirms before applying since it overwrites historical pnl. */}
+        <div style={{display:"flex",justifyContent:"flex-end",marginBottom:10}}>
+          <button onClick={function(){
+            if(!window.confirm("Recalculate fees on all saved trades using your current commission settings?\n\nThis updates every historical trade's net pnl. The price data (entries/exits/contracts) is unchanged. Cannot be undone except by editing commissions back and re-running."))return;
+            var updated=0,scanned=0;
+            try{
+              var keys=[];for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf("journal:")===0)keys.push(k);}
+              keys.forEach(function(k){
+                try{
+                  var raw=localStorage.getItem(k);if(!raw)return;
+                  var entry=JSON.parse(raw);if(!entry||!Array.isArray(entry.trades))return;
+                  var changed=false,sumPnl=0;
+                  entry.trades=entry.trades.map(function(t){
+                    scanned++;
+                    if(t.status==="open"||!t.entries||!t.exits||!t.exits.length){if(t.status!=="open"){sumPnl+=parseFloat(t.pnl)||0;}return t;}
+                    var r=doRecalc(t.entries,t.exits,t.assetClass,t.instrument,t.direction);
+                    if(r.pnl!==t.pnl||r.feesPaid!==t.feesPaid){changed=true;updated++;}
+                    var nt=Object.assign({},t,{pnl:r.pnl,pctPnl:r.pctPnl,feesPaid:r.feesPaid});
+                    sumPnl+=parseFloat(nt.pnl)||0;
+                    return nt;
+                  });
+                  if(changed){entry.pnl=sumPnl;localStorage.setItem(k,JSON.stringify(entry));}
+                }catch(e){}
+              });
+            }catch(e){}
+            window.alert("Recalculated "+updated+" of "+scanned+" trades. Refreshing.");
+            window.location.reload();
+          }} style={{padding:"6px 12px",background:"#0a0a0f",border:"1px solid #4338ca",borderRadius:6,color:"#a5b4fc",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Apply commissions to saved trades</button>
+        </div>
         {ASSET_CLASS_ORDER.map(function(c){
           var enabled=(settings.enabledAssetClasses||{})[c];
           var classInsts=instruments.filter(function(it){return it.classId===c;});
@@ -7592,6 +7615,25 @@ function SettingsTab(props){
               </div>
               {enabled&&(
                 <div style={{padding:"8px 12px"}}>
+                  {/* CHANGED: Commission per contract — per asset class. Different markets have
+                     different conventions ($0.65/contract for options, $1-5/contract for futures,
+                     $0/share for many stock brokers). Stored under
+                     settings.assetClassSettings[c].commissionPerContract. */}
+                  {(function(){
+                    var acs=((settings.assetClassSettings||{})[c])||{};
+                    var cur=acs.commissionPerContract!=null?acs.commissionPerContract:0;
+                    var unit=c==="stocks"?"share":c==="forex"?"lot":c==="crypto"?"unit":"contract";
+                    return (
+                      <div style={{marginBottom:10,padding:"8px 10px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:5,display:"flex",alignItems:"center",gap:10}}>
+                        <div style={{fontSize:11,color:"#cbd5e1",fontWeight:600,flexShrink:0}}>Commission</div>
+                        <div style={{position:"relative",flex:1,maxWidth:180}}>
+                          <input type="number" step="0.01" min="0" value={cur} onChange={function(e){var v=parseFloat(e.target.value)||0;setSettings(function(s){var ac=Object.assign({},s.assetClassSettings||{});var cc=Object.assign({},ac[c]||{});cc.commissionPerContract=v;ac[c]=cc;return Object.assign({},s,{assetClassSettings:ac});});}} style={{width:"100%",padding:"6px 70px 6px 10px",background:"#15151f",border:"1px solid #1e293b",borderRadius:5,color:"#e2e8f0",fontSize:12,fontFamily:"inherit",boxSizing:"border-box"}}/>
+                          <div style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",fontSize:10,color:"#475569",fontWeight:500,pointerEvents:"none"}}>$ / {unit}</div>
+                        </div>
+                        <div style={{fontSize:10,color:"#64748b",lineHeight:1.4,flex:1,minWidth:0}}>per side · charged on entry &amp; exit</div>
+                      </div>
+                    );
+                  })()}
                   {/* Form Field Toggles */}
                   {(function(){var fs=getFormSectionsForClass(settings,c);var toggle=function(key,v){setSettings(function(s){var acs=Object.assign({},s.assetClassSettings||{});var cur=Object.assign({},acs[c]||{});var sec=Object.assign({},defaultFormSections(),cur.formSections||{});sec[key]=v;cur.formSections=sec;acs[c]=cur;return Object.assign({},s,{assetClassSettings:acs});});};return (
                     <div style={{marginBottom:10,padding:"8px 10px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:5}}>
