@@ -1465,12 +1465,29 @@ function PnLChart(props){
   );
 }
 
+// CHANGED: Module-level shared hover-date pub/sub for cross-chart sync. When any daily-aggregated
+// chart's hover changes, all subscribers re-render so their highlight tracks the same date.
+// Only used when a chart is rendering one point per day (not weekly buckets) — see callsites.
+var __sharedHoverDate=null;
+var __sharedHoverListeners=new Set();
+function __setSharedHoverDate(d){if(d===__sharedHoverDate)return;__sharedHoverDate=d;__sharedHoverListeners.forEach(function(fn){try{fn(d);}catch(e){}});}
+function useSharedHoverDate(enabled){
+  var [d,setD]=useState(__sharedHoverDate);
+  useEffect(function(){if(!enabled)return;__sharedHoverListeners.add(setD);return function(){__sharedHoverListeners.delete(setD);};},[enabled]);
+  return enabled?[d,__setSharedHoverDate]:[null,function(){}];
+}
+
 function DailyPnLBar(props){
   var entries=props.entries||[];
   var [hoverIdx,setHoverIdx]=useState(null);
+  // CHANGED: Subscribe to shared hover-date pub/sub. We don't know yet if we're weekly-bucketed
+  // (need to look at entries to decide), so subscribe unconditionally and only invoke
+  // setSharedDate / read sharedDate when the chart turns out to be daily. Hooks must run on
+  // every render regardless.
+  var sh=useSharedHoverDate(true);
+  var sharedDate=sh[0],setSharedDate=sh[1];
   if(entries.length===0)return null;
   var sortedRaw=entries.slice().sort(function(a,b){return new Date(a.date)-new Date(b.date);});
-  // CHANGED: When the range spans > ~60 days, aggregate by week (Sunday-start) so the chart stays readable.
   var spanMs=new Date(sortedRaw[sortedRaw.length-1].date)-new Date(sortedRaw[0].date);
   var weekly=spanMs>60*24*3600*1000;
   var sorted;
@@ -1527,8 +1544,15 @@ function DailyPnLBar(props){
       var dist=Math.abs(svgX-cx);
       if(dist<nearestDist){nearestDist=dist;nearest=i;}
     }
-    if(svgX>=PL&&svgX<=PL+chartW)setHoverIdx(nearest);
-    else setHoverIdx(null);
+    if(svgX>=PL&&svgX<=PL+chartW){setHoverIdx(nearest);if(!weekly)setSharedDate(sorted[nearest]&&sorted[nearest].date||null);}
+    else {setHoverIdx(null);if(!weekly)setSharedDate(null);}
+  }
+  // CHANGED: When external (shared) hover changes and this chart is daily, compute the matching
+  // index. Falls back to the local hoverIdx when no shared date or when weekly-bucketed.
+  var effectiveHoverIdx=hoverIdx;
+  if(!weekly&&sharedDate&&hoverIdx==null){
+    var found=sorted.findIndex(function(e){return e.date===sharedDate;});
+    if(found>=0)effectiveHoverIdx=found;
   }
   return (
     <div>
@@ -1553,7 +1577,7 @@ function DailyPnLBar(props){
         onMouseLeave={function(){setHoverIdx(null);}}>
         {yTicks.map(function(v,i){var y=zeroY-(v/maxAbs)*(chartH/2);return <g key={i}><line x1={PL} y1={y} x2={PL+chartW} y2={y} stroke={v===0?"#334155":"#1e293b"} strokeWidth="1" strokeDasharray={v===0?"":"3,3"}/>{!HIDE_DOLLAR_PNL&&<text x={PL-4} y={y+4} textAnchor="end" fontSize="8" fill="#94a3b8">{v>=0?"+$"+Math.abs(v):"-$"+Math.abs(v)}</text>}</g>;})}
         {sorted.map(function(e,i){
-          var pnl=parseFloat(e.pnl)||0,pct=pcts[i],bx=barX(i),bh=barH(pnl,pct),by=barY(pnl,pct),isHov=hoverIdx===i;
+          var pnl=parseFloat(e.pnl)||0,pct=pcts[i],bx=barX(i),bh=barH(pnl,pct),by=barY(pnl,pct),isHov=effectiveHoverIdx===i;
           var color=pnl>=0?"#22c55e":"#ef4444",hc2=pnl>=0?"#4ade80":"#f87171";
           return (
             <g key={i}>
@@ -1568,9 +1592,9 @@ function DailyPnLBar(props){
         })}
         {/* CHANGED: Tooltip moved OUT of the per-bar loop and rendered last so later bars can't
            paint over it. Also given an opaque fill + border so it's readable against any bar. */}
-        {hoverIdx!=null&&(function(){
-          var e=sorted[hoverIdx];if(!e)return null;
-          var pnl=parseFloat(e.pnl)||0,bx=barX(hoverIdx),bh=barH(pnl,pcts[hoverIdx]),by=barY(pnl,pcts[hoverIdx]);
+        {effectiveHoverIdx!=null&&(function(){
+          var e=sorted[effectiveHoverIdx];if(!e)return null;
+          var pnl=parseFloat(e.pnl)||0,bx=barX(effectiveHoverIdx),bh=barH(pnl,pcts[effectiveHoverIdx]),by=barY(pnl,pcts[effectiveHoverIdx]);
           var color=pnl>=0?"#22c55e":"#ef4444";
           var tx=bx+barW/2,ty=pnl>=0?by-6:by+bh+14;
           var dateStr=fmtDate(e.date),pnlStr=HIDE_DOLLAR_PNL?((function(){var sb=getAccountBalanceAtDate(e.date);var p=sb>0?(pnl/sb*100):0;return (p>=0?"+":"")+p.toFixed(2)+"%";})()):(fmtPnl(pnl));
@@ -5619,6 +5643,10 @@ function MetricChart(props){
   var compute=props.compute;
   var [hoverIdx,setHoverIdx]=useState(null);
   var svgRef=React.useRef(null);
+  // CHANGED: Subscribe to shared hover-date so this chart highlights the same day as
+  // DailyPnLBar (and any other daily chart) when the user scrubs across either one.
+  var sh=useSharedHoverDate(true);
+  var sharedDate=sh[0],setSharedDate=sh[1];
   if(entries.length===0||typeof compute!=="function")return null;
   var sorted=entries.slice().sort(function(a,b){return new Date(a.date)-new Date(b.date);});
   // CHANGED: minTrades prop gates the chart until enough trades have accumulated. For rate-based
@@ -5655,7 +5683,13 @@ function MetricChart(props){
   var first=pts[0];
   var last=pts[pts.length-1];
   var peak=pts.reduce(function(m,p){return p.v>m.v?p:m;},pts[0]);
-  var display=hoverIdx!=null?pts[hoverIdx]:last;
+  // CHANGED: If an external chart broadcast a hover, find the matching point here.
+  var effectiveHoverIdx=hoverIdx;
+  if(sharedDate&&hoverIdx==null){
+    var found=pts.findIndex(function(p){return p.date===sharedDate;});
+    if(found>=0)effectiveHoverIdx=found;
+  }
+  var display=effectiveHoverIdx!=null?pts[effectiveHoverIdx]:last;
   var delta=display.v-first.v;
   var fmt=props.format||function(v){return v.toFixed(2);};
   function handleMove(e){
@@ -5667,8 +5701,9 @@ function MetricChart(props){
     var idx=Math.round(ratio*(pts.length-1));
     if(idx<0)idx=0;if(idx>pts.length-1)idx=pts.length-1;
     setHoverIdx(idx);
+    setSharedDate(pts[idx]&&pts[idx].date||null);
   }
-  function handleLeave(){setHoverIdx(null);}
+  function handleLeave(){setHoverIdx(null);setSharedDate(null);}
   return (
     <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid #1e293b",borderRadius:10,display:"flex",flexDirection:"column",height:"100%",boxSizing:"border-box"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8,gap:8}}>
@@ -5691,17 +5726,17 @@ function MetricChart(props){
         {anchorZero&&<line x1={padX} x2={W-padX} y1={yFor(0)} y2={yFor(0)} stroke="#334155" strokeWidth="0.5" strokeDasharray="2,2"/>}
         <path d={areaPath} fill={color+"22"} stroke="none"/>
         <path d={linePath} fill="none" stroke={color} strokeWidth="1.5"/>
-        {hoverIdx!=null&&(
+        {effectiveHoverIdx!=null&&(
           <g>
-            <line x1={xFor(hoverIdx)} x2={xFor(hoverIdx)} y1={padY} y2={H-padY} stroke="#cbd5e1" strokeWidth="0.6" strokeDasharray="2,2"/>
-            <circle cx={xFor(hoverIdx)} cy={yFor(display.v)} r="2.5" fill={color} stroke="#fff" strokeWidth="0.8"/>
+            <line x1={xFor(effectiveHoverIdx)} x2={xFor(effectiveHoverIdx)} y1={padY} y2={H-padY} stroke="#cbd5e1" strokeWidth="0.6" strokeDasharray="2,2"/>
+            <circle cx={xFor(effectiveHoverIdx)} cy={yFor(display.v)} r="2.5" fill={color} stroke="#fff" strokeWidth="0.8"/>
           </g>
         )}
       </svg>
       {/* CHANGED: Hovered date pinned under the cursor line at the bottom. */}
-      {hoverIdx!=null?(
+      {effectiveHoverIdx!=null?(
         <div style={{position:"relative",height:14,marginTop:6}}>
-          <span style={{position:"absolute",left:((xFor(hoverIdx)/W)*100)+"%",transform:"translateX(-50%)",fontSize:10,color:"#cbd5e1",fontWeight:700,letterSpacing:0.5,whiteSpace:"nowrap"}}>{display.date}</span>
+          <span style={{position:"absolute",left:((xFor(effectiveHoverIdx)/W)*100)+"%",transform:"translateX(-50%)",fontSize:10,color:"#cbd5e1",fontWeight:700,letterSpacing:0.5,whiteSpace:"nowrap"}}>{display.date}</span>
         </div>
       ):(
         <div style={{display:"flex",justifyContent:"space-between",marginTop:6,fontSize:10,color:"#64748b",fontWeight:600}}>
@@ -5716,6 +5751,12 @@ function MetricChart(props){
 
 function EquityCurve(props){
   var entries=props.entries||[];
+  // CHANGED: Hooks must be unconditional. useSharedHoverDate runs every render; we decide
+  // whether to broadcast/read based on `granular` further below.
+  var [hoverIdx,setHoverIdx]=useState(null);
+  var sh=useSharedHoverDate(true);
+  var sharedDate=sh[0],setSharedDate=sh[1];
+  var svgRef=React.useRef(null);
   if(entries.length===0)return null;
   // CHANGED: starting balance before the first entry, for % change / % drawdown when $ is hidden.
   var startBal=0;
@@ -5793,8 +5834,8 @@ function EquityCurve(props){
   // CHANGED: Drawdown also reframed to use the same denominator so it's apples-to-apples with the headline %.
   var fmtDD=function(){if(maxDD>=0)return "—";if(HIDE_DOLLAR_PNL){var pct=pctDenom>0?(maxDD/pctDenom*100):maxDDPct;return pct.toFixed(2)+"%";}return fmt(maxDD);};
   // CHANGED: Interactive hover/drag — readout switches to the value at the hovered point.
-  var [hoverIdx,setHoverIdx]=useState(null);
-  var svgRef=React.useRef(null);
+  // Broadcasts the hovered date to other charts via shared pub/sub (skipped in per-trade
+  // "granular" mode since other daily charts don't share that index space).
   function handleMove(e){
     if(!svgRef.current)return;
     var rect=svgRef.current.getBoundingClientRect();
@@ -5804,9 +5845,15 @@ function EquityCurve(props){
     var idx=Math.round(ratio*(pts.length-1));
     if(idx<0)idx=0;if(idx>pts.length-1)idx=pts.length-1;
     setHoverIdx(idx);
+    if(!granular)setSharedDate(pts[idx]&&pts[idx].date||null);
   }
-  function handleLeave(){setHoverIdx(null);}
-  var display=hoverIdx!=null?pts[hoverIdx]:null;
+  function handleLeave(){setHoverIdx(null);if(!granular)setSharedDate(null);}
+  var effectiveHoverIdx=hoverIdx;
+  if(!granular&&sharedDate&&hoverIdx==null){
+    var found=pts.findIndex(function(p){return p.date===sharedDate;});
+    if(found>=0)effectiveHoverIdx=found;
+  }
+  var display=effectiveHoverIdx!=null?pts[effectiveHoverIdx]:null;
   var displayVal=display?display.cum:cum;
   var displayDate=display?display.date:null;
   return (
@@ -5826,19 +5873,19 @@ function EquityCurve(props){
         <path d={areaPath} fill={positive?"#22c55e22":"#ef444422"} stroke="none"/>
         {/* CHANGED: Peak line removed; the peak value is still shown in the readout text. */}
         <path d={linePath} fill="none" stroke={positive?"#22c55e":"#ef4444"} strokeWidth="1.5"/>
-        {hoverIdx!=null&&(
+        {effectiveHoverIdx!=null&&(
           <g>
-            <line x1={xFor(hoverIdx)} x2={xFor(hoverIdx)} y1={padY} y2={H-padY} stroke="#cbd5e1" strokeWidth="0.6" strokeDasharray="2,2"/>
-            <circle cx={xFor(hoverIdx)} cy={yFor(pts[hoverIdx].cum)} r="2.5" fill={pts[hoverIdx].cum>=0?"#22c55e":"#ef4444"} stroke="#fff" strokeWidth="0.8"/>
+            <line x1={xFor(effectiveHoverIdx)} x2={xFor(effectiveHoverIdx)} y1={padY} y2={H-padY} stroke="#cbd5e1" strokeWidth="0.6" strokeDasharray="2,2"/>
+            <circle cx={xFor(effectiveHoverIdx)} cy={yFor(pts[effectiveHoverIdx].cum)} r="2.5" fill={pts[effectiveHoverIdx].cum>=0?"#22c55e":"#ef4444"} stroke="#fff" strokeWidth="0.8"/>
           </g>
         )}
       </svg>
       {/* CHANGED: Bottom row — when hovering, replace start/peak/end with a single centered date
          pinned to the cursor column, so the reader's eye stays on the cursor instead of darting
          up to a top-corner label. */}
-      {hoverIdx!=null?(
+      {effectiveHoverIdx!=null?(
         <div style={{position:"relative",height:14,marginTop:6}}>
-          <span style={{position:"absolute",left:((xFor(hoverIdx)/W)*100)+"%",transform:"translateX(-50%)",fontSize:10,color:"#cbd5e1",fontWeight:700,letterSpacing:0.5,whiteSpace:"nowrap"}}>{displayDate}</span>
+          <span style={{position:"absolute",left:((xFor(effectiveHoverIdx)/W)*100)+"%",transform:"translateX(-50%)",fontSize:10,color:"#cbd5e1",fontWeight:700,letterSpacing:0.5,whiteSpace:"nowrap"}}>{displayDate}</span>
         </div>
       ):(
         <div style={{display:"flex",justifyContent:"space-between",marginTop:6,fontSize:10,color:"#64748b",fontWeight:600}}>
