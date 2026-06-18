@@ -5702,19 +5702,7 @@ function MetricChart(props){
   var anchorZero=(minV<=0&&maxV>=0)||(minV>=0&&minV<(maxV-minV)*0.25);
   if(anchorZero){if(minV>0)minV=0;if(maxV<0)maxV=0;}
   if(minV===maxV){minV-=1;maxV+=1;}
-  // CHANGED: X-axis spans the FULL filtered date range (sorted), not just the metric's pts.
-  // Without this, the minTrades-gated start of pts compressed the metric chart's domain — same
-  // screen X meant different dates on each chart and cross-chart hover landed in the wrong place.
-  // xFor now maps an index in `pts` to its position along the full date timeline of `sorted`.
-  var firstMs=new Date(sorted[0].date).getTime();
-  var lastMs=new Date(sorted[sorted.length-1].date).getTime();
-  var spanRange=Math.max(1,lastMs-firstMs);
-  function xForDate(ds){
-    var t=new Date(ds).getTime();
-    var ratio=(t-firstMs)/spanRange;
-    return padX+ratio*(W-padX*2);
-  }
-  function xFor(i){return xForDate(pts[i].date);}
+  function xFor(i){return padX+(pts.length<=1?W/2:(i/(pts.length-1))*(W-padX*2));}
   function yFor(v){return H-padY-((v-minV)/(maxV-minV))*(H-padY*2);}
   var linePath=pts.map(function(p,i){return (i===0?"M":"L")+xFor(i).toFixed(1)+","+yFor(p.v).toFixed(1);}).join("");
   // Area fill back down to the baseline (0 if anchored there, else minV).
@@ -5723,33 +5711,30 @@ function MetricChart(props){
   var first=pts[0];
   var last=pts[pts.length-1];
   var peak=pts.reduce(function(m,p){return p.v>m.v?p:m;},pts[0]);
-  // CHANGED: If an external chart broadcast a hover, find the matching point here.
-  var effectiveHoverIdx=hoverIdx;
-  if(sharedDate&&hoverIdx==null){
-    var found=pts.findIndex(function(p){return p.date===sharedDate;});
-    if(found>=0)effectiveHoverIdx=found;
-  }
-  var display=effectiveHoverIdx!=null?pts[effectiveHoverIdx]:last;
-  var delta=display.v-first.v;
-  var fmt=props.format||function(v){return v.toFixed(2);};
   function handleMove(e){
     if(!svgRef.current)return;
     var rect=svgRef.current.getBoundingClientRect();
     var clientX=e.touches?e.touches[0].clientX:e.clientX;
     var px=clientX-rect.left;
     var ratio=Math.max(0,Math.min(1,px/rect.width));
-    // CHANGED: Map cursor X to a date along the FULL range, then snap to the nearest metric pt.
-    // This keeps hover X position in temporal sync with DailyPnLBar (which uses the same range).
-    var cursorMs=firstMs+ratio*spanRange;
-    var bestIdx=0,bestDist=Infinity;
-    for(var pi=0;pi<pts.length;pi++){
-      var d=Math.abs(new Date(pts[pi].date).getTime()-cursorMs);
-      if(d<bestDist){bestDist=d;bestIdx=pi;}
-    }
-    setHoverIdx(bestIdx);
-    setSharedDate(pts[bestIdx]&&pts[bestIdx].date||null);
+    var idx=Math.round(ratio*(pts.length-1));
+    if(idx<0)idx=0;if(idx>pts.length-1)idx=pts.length-1;
+    setHoverIdx(idx);
+    // CHANGED: Sync broadcasts only when this chart's domain matches DailyPnLBar's full range —
+    // i.e. no minTrades filter dropped early days. Otherwise the same screen X represents
+    // different dates on the two charts, so cross-chart hover would land wrong.
+    if(minTrades<=0)setSharedDate(pts[idx]&&pts[idx].date||null);
   }
-  function handleLeave(){setHoverIdx(null);setSharedDate(null);}
+  function handleLeave(){setHoverIdx(null);if(minTrades<=0)setSharedDate(null);}
+  // CHANGED: Same gate — only accept inbound shared hover when domains match.
+  var effectiveHoverIdx=hoverIdx;
+  if(minTrades<=0&&sharedDate&&hoverIdx==null){
+    var found=pts.findIndex(function(p){return p.date===sharedDate;});
+    if(found>=0)effectiveHoverIdx=found;
+  }
+  var display=effectiveHoverIdx!=null?pts[effectiveHoverIdx]:last;
+  var delta=display.v-first.v;
+  var fmt=props.format||function(v){return v.toFixed(2);};
   return (
     <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid #1e293b",borderRadius:10,display:"flex",flexDirection:"column",height:"100%",boxSizing:"border-box"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8,gap:8}}>
