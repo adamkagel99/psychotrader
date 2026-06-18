@@ -1134,6 +1134,10 @@ function getStreakNudgeThreshold(){try{var v=parseFloat(localStorage.getItem("tf
 // banner can stop nagging once the user takes any action (or explicitly dismisses for the month).
 function getCurrentMonthKey(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");}
 function isMonthHalfsizeActive(){try{return localStorage.getItem("tf-month-halfsize-active")===getCurrentMonthKey();}catch(e){return false;}}
+// CHANGED: When half-size trading is committed for the rest of the month, daily and weekly P&L
+// targets are halved to match the lower expected output. Monthly target is unchanged — it's
+// the trigger for half-size in the first place and we don't want to retroactively lower it.
+function applyHalfsizeToTarget(target){return isMonthHalfsizeActive()?(parseFloat(target)||0)/2:(parseFloat(target)||0);}
 function setMonthHalfsizeActive(on){try{if(on)localStorage.setItem("tf-month-halfsize-active",getCurrentMonthKey());else localStorage.removeItem("tf-month-halfsize-active");}catch(e){}}
 function isMonthGoalBannerDismissed(){try{return localStorage.getItem("tf-month-goal-banner-dismissed")===getCurrentMonthKey();}catch(e){return false;}}
 function dismissMonthGoalBanner(){try{localStorage.setItem("tf-month-goal-banner-dismissed",getCurrentMonthKey());}catch(e){}}
@@ -1700,9 +1704,9 @@ function CalendarGrid(props){
   // CHANGED: Load goal targets here so the grid can highlight goal-met days/weeks/months.
   var goals=(function(){try{return JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};}catch(e){return {};}})();
   var settingsForTarget=(function(){try{return JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};}catch(e){return {};}})();
-  var dailyTarget=parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(computeDailyTarget(settingsForTarget)||0);
+  var dailyTarget=applyHalfsizeToTarget(parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(computeDailyTarget(settingsForTarget)||0));
   var weeklyMultiplier=parseFloat(goals.weeklyMultiplier)||4;
-  var weeklyTarget=parseFloat(goals.weeklyPnL)>0?parseFloat(goals.weeklyPnL):(dailyTarget*weeklyMultiplier);
+  var weeklyTarget=applyHalfsizeToTarget(parseFloat(goals.weeklyPnL)>0?parseFloat(goals.weeklyPnL):((parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(computeDailyTarget(settingsForTarget)||0))*weeklyMultiplier));
   var monthlyTarget=parseFloat(goals.monthlyPnL)||0;
   var now=getPT();
   var [calYear,setCalYear]=useState(now.getFullYear());
@@ -3423,7 +3427,9 @@ function GoalsSnapshot(props){
   var aDisc=rows.length>0?rows.reduce(function(s,e){return s+calcDiscipline(e.trades||[],e.riskMax,{commitment:e.commitment||null});},0)/rows.length:0;
   var autoDaily=computeDailyTarget(settings);
   var weeklyMultiplier=parseFloat(goals.weeklyMultiplier)||4;
-  var dailyTarget=autoDaily,weeklyTarget=autoDaily*weeklyMultiplier;
+  // CHANGED: Daily and weekly targets honor half-size mode — halved when committed for the
+  // rest of the month so progress rings reflect the realistic ceiling.
+  var dailyTarget=applyHalfsizeToTarget(autoDaily),weeklyTarget=applyHalfsizeToTarget(autoDaily*weeklyMultiplier);
   var monthlyTarget=parseFloat(goals.monthlyPnL)||0;
   var winRateTarget=parseFloat(goals.winRate)||0;
   var disciplineTarget=loadDisciplineLockThreshold();
@@ -5096,13 +5102,14 @@ function GoalsTab(props){
   var wWR=weekTrades.length>0?weekWins/weekTrades.length*100:0;
 
   var autoDaily=computeDailyTarget(settings);
-  var dailyTarget=autoDaily;
+  // CHANGED: Daily and weekly targets respect half-size mode for the rest of the month.
+  var dailyTarget=applyHalfsizeToTarget(autoDaily);
   // CHANGED: when $ is hidden, P&L goal cards display in R (value ÷ risk-per-trade).
   var gtRiskMax=parseFloat(settings.riskMax)||0;
   function gtRFmt(v){var r=gtRiskMax>0?v/gtRiskMax:0;return (r>=0?"+":"")+r.toFixed(1)+"R";}
   var pnlFmt=HIDE_DOLLAR_PNL?{formatValue:gtRFmt,formatTarget:gtRFmt}:{};
   var weeklyMultiplier=parseFloat(goals.weeklyMultiplier)||4;
-  var weeklyTarget=autoDaily*weeklyMultiplier;
+  var weeklyTarget=applyHalfsizeToTarget(autoDaily*weeklyMultiplier);
   var monthlyTarget=parseFloat(goals.monthlyPnL)||0;
   var winRateTarget=parseFloat(goals.winRate)||0;
   // CHANGED: Discipline Score goal is tied directly to the discipline LOCK THRESHOLD setting and
