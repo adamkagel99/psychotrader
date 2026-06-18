@@ -7621,14 +7621,12 @@ function SettingsTab(props){
                   }
                 }
               }catch(e){}
-            }catch(e){}
-            // CHANGED: Wait ~1s for sync.js's debounced cloud push to flush before re-rendering.
-            // Without this, a quick reload by the user can race the push and the cloud pull will
-            // restore the old (pre-backfill) data.
-            setTimeout(function(){
-              window.alert("Recalculated "+updated+" of "+scanned+" trades.");
-              if(props.bumpReloadKey)props.bumpReloadKey();
-            },1100);
+            }catch(e){console.error("[backfill] outer error",e);}
+            // CHANGED: 2s wait for sync push, then full reload. Refresh ensures React state
+            // (which can't be updated from a localStorage write) picks up the new fees.
+            console.log("[backfill] done. scanned:",scanned,"updated:",updated);
+            window.alert("Recalculated "+updated+" of "+scanned+" trades.\n\nPage will reload in 2 seconds.");
+            setTimeout(function(){window.location.reload();},2000);
           }} style={{padding:"6px 12px",background:"#0a0a0f",border:"1px solid #4338ca",borderRadius:6,color:"#a5b4fc",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Apply commissions to saved trades</button>
         </div>
         {ASSET_CLASS_ORDER.map(function(c){
