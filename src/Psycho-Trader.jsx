@@ -7587,8 +7587,12 @@ function SettingsTab(props){
                   entry.trades=entry.trades.map(function(t){
                     scanned++;
                     if(t.status==="open"||!t.entries||!t.exits||!t.exits.length){if(t.status!=="open"){sumPnl+=parseFloat(t.pnl)||0;}return t;}
-                    var r=doRecalc(t.entries,t.exits,t.assetClass,t.instrument,t.direction);
-                    if(r.pnl!==t.pnl||r.feesPaid!==t.feesPaid){changed=true;updated++;}
+                    // CHANGED: Always recompute & update — earlier change-detection was unreliable
+                    // (string vs number type comparison), causing the loop to no-op even when the
+                    // gross pnl needed re-deriving for fees.
+                    var r;try{r=doRecalc(t.entries,t.exits,t.assetClass,t.instrument,t.direction);}catch(e){console.error("doRecalc failed",t.id,e);sumPnl+=parseFloat(t.pnl)||0;return t;}
+                    if(r.pnl===""){sumPnl+=parseFloat(t.pnl)||0;return t;}
+                    changed=true;updated++;
                     var nt=Object.assign({},t,{pnl:r.pnl,pctPnl:r.pctPnl,feesPaid:r.feesPaid});
                     sumPnl+=parseFloat(nt.pnl)||0;
                     return nt;
