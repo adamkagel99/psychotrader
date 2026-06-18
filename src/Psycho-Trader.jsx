@@ -5767,7 +5767,11 @@ function MetricChart(props){
       {/* CHANGED: Hovered date pinned under the cursor line at the bottom. */}
       {effectiveHoverIdx!=null?(
         <div style={{position:"relative",height:14,marginTop:6}}>
-          <span style={{position:"absolute",left:((xFor(effectiveHoverIdx)/W)*100)+"%",transform:"translateX(-50%)",fontSize:10,color:"#cbd5e1",fontWeight:700,letterSpacing:0.5,whiteSpace:"nowrap"}}>{display.date}</span>
+          {/* CHANGED: Clamp translate so the label can't spill past the chart edges. At ≤10%
+             cursor position, anchor left; at ≥90%, anchor right; in between, center on cursor. */}
+          {(function(){var ratio=xFor(effectiveHoverIdx)/W;var leftPct=ratio*100;var tx=ratio<0.1?"0%":ratio>0.9?"-100%":"-50%";return (
+            <span style={{position:"absolute",left:leftPct+"%",transform:"translateX("+tx+")",fontSize:10,color:"#cbd5e1",fontWeight:700,letterSpacing:0.5,whiteSpace:"nowrap"}}>{display.date}</span>
+          );})()}
         </div>
       ):(
         <div style={{display:"flex",justifyContent:"space-between",marginTop:6,fontSize:10,color:"#64748b",fontWeight:600}}>
@@ -5923,7 +5927,9 @@ function EquityCurve(props){
          up to a top-corner label. */}
       {effectiveHoverIdx!=null?(
         <div style={{position:"relative",height:14,marginTop:6}}>
-          <span style={{position:"absolute",left:((xFor(effectiveHoverIdx)/W)*100)+"%",transform:"translateX(-50%)",fontSize:10,color:"#cbd5e1",fontWeight:700,letterSpacing:0.5,whiteSpace:"nowrap"}}>{displayDate}</span>
+          {(function(){var ratio=xFor(effectiveHoverIdx)/W;var leftPct=ratio*100;var tx=ratio<0.1?"0%":ratio>0.9?"-100%":"-50%";return (
+            <span style={{position:"absolute",left:leftPct+"%",transform:"translateX("+tx+")",fontSize:10,color:"#cbd5e1",fontWeight:700,letterSpacing:0.5,whiteSpace:"nowrap"}}>{displayDate}</span>
+          );})()}
         </div>
       ):(
         <div style={{display:"flex",justifyContent:"space-between",marginTop:6,fontSize:10,color:"#64748b",fontWeight:600}}>
