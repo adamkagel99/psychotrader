@@ -1325,13 +1325,22 @@ function doRecalc(entries,exits,assetClassId,instrument,direction){
   var futMult=(assetClassId==="futures"&&instrument)?getFuturesPointValue(instrument):1;
   var mult=assetClassId==="futures"?futMult:baseMult;
   var sign=(direction==="SHORT"||direction==="SELL")?-1:1;
+  // CHANGED: Read the global per-contract-per-side commission from settings. Charged on both
+  // entry and exit, so total fees = commission × (entry_contracts + exit_contracts). Default 0.
+  var commission=0;try{var s=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}");commission=parseFloat(s.commissionPerContract)||0;}catch(e){}
+  var entryContracts=tc;
+  var exitContracts=0;exits.forEach(function(ex){var ec=parseFloat(ex.contracts);if(!isNaN(ec))exitContracts+=ec;});
+  var feesPaid=commission>0?((entryContracts+exitContracts)*commission):0;
   if(!isNaN(avg)&&exits.length>0){
     var tp=0,tv=0,txc=0;
     exits.forEach(function(ex){var ec=parseFloat(ex.contracts),ep=parseFloat(ex.price);if(!isNaN(ec)&&!isNaN(ep)){tp+=(ep-avg)*ec*mult*sign;tv+=ep*ec;txc+=ec;}});
-    pnl=tp.toFixed(2);
+    // CHANGED: Subtract round-trip fees from gross pnl. pctPnl stays computed off price (price
+    // move on the instrument is unaffected by fees) — so the Profit Factor / per-trade % readout
+    // remains the right unit, while pnl reflects net cash.
+    pnl=(tp-feesPaid).toFixed(2);
     pctPnl=txc>0&&avg!==0?(((tv/txc-avg)/avg*100)*sign).toFixed(2):"0.00";
   }
-  return {entries:entries,exits:exits,contracts:tc||"",positionSize:tc>0&&!isNaN(avg)?(rawCost*baseMult).toFixed(2):"",stopLoss:!isNaN(avg)?(avg*0.7).toFixed(2):"",pnl:pnl,pctPnl:pctPnl};
+  return {entries:entries,exits:exits,contracts:tc||"",positionSize:tc>0&&!isNaN(avg)?(rawCost*baseMult).toFixed(2):"",stopLoss:!isNaN(avg)?(avg*0.7).toFixed(2):"",pnl:pnl,pctPnl:pctPnl,feesPaid:feesPaid.toFixed(2)};
 }
 // CHANGED: Account balance = transfers + all journal P&L. Used for day-% calculation.
 // CHANGED: Canonical account balance — transfers + journal P&L + today's live P&L (only if today isn't yet in journal). Use this everywhere to avoid mismatches.
@@ -7411,6 +7420,19 @@ function SettingsTab(props){
             <div><label style={lbl}>Risk Max ($)</label><input type="number" step="1" value={settings.riskMaxDollar!=null?settings.riskMaxDollar:165} onChange={function(e){setSettings(function(s){return Object.assign({},s,{riskMaxDollar:parseFloat(e.target.value)||0});});}} style={fld}/></div>
           </div>
         )}
+        {/* CHANGED: Commission setting — per contract per side. Applies to both entries and
+           exits, so a full round-trip on N contracts pays (N × 2 × commission). PnL on new
+           trades is recorded NET of fees; historical trades are not retroactively re-derived. */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:8,marginTop:4}}>
+          <div>
+            <label style={lbl}>Commission per Contract (per side)</label>
+            <div style={{position:"relative"}}>
+              <input type="number" step="0.01" min="0" value={settings.commissionPerContract!=null?settings.commissionPerContract:0} onChange={function(e){setSettings(function(s){return Object.assign({},s,{commissionPerContract:parseFloat(e.target.value)||0});});}} style={Object.assign({},fld,{paddingRight:90})}/>
+              <div style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",fontSize:12,color:"#475569",fontWeight:500,pointerEvents:"none"}}>$ / contract</div>
+            </div>
+            <div style={{fontSize:10,color:"#64748b",marginTop:4,lineHeight:1.4}}>Charged on entry AND exit. A 10-contract round-trip at $0.65/side = $13 total fees.</div>
+          </div>
+        </div>
         <div style={{fontSize:12,color:"#94a3b8",marginTop:4,padding:"6px 10px",background:"#0a0a0f",borderRadius:6,border:"1px solid #1e293b"}}>
           Computed: Position ${settings.positionMin}–${settings.positionMax} · Risk ${settings.riskMin}–${settings.riskMax}
         </div>
