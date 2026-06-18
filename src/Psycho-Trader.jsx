@@ -1489,9 +1489,27 @@ function DailyPnLBar(props){
   if(entries.length===0)return null;
   var sortedRaw=entries.slice().sort(function(a,b){return new Date(a.date)-new Date(b.date);});
   var spanMs=new Date(sortedRaw[sortedRaw.length-1].date)-new Date(sortedRaw[0].date);
-  var weekly=spanMs>60*24*3600*1000;
+  // CHANGED: Three bucket modes by range span:
+  //   ≤ 42 days → daily bars (one per day)
+  //   43–168 days → weekly bars (Sunday-week buckets)
+  //   > 168 days → monthly bars (calendar month buckets)
+  // This keeps bar count manageable across any filter range without obscuring detail.
+  var DAY_MS=24*3600*1000;
+  var bucketMode=spanMs>168*DAY_MS?"monthly":(spanMs>42*DAY_MS?"weekly":"daily");
+  var weekly=bucketMode==="weekly";
+  var monthly=bucketMode==="monthly";
   var sorted;
-  if(weekly){
+  if(monthly){
+    var mBuckets={};
+    sortedRaw.forEach(function(e){
+      var d=new Date(e.date);d.setHours(0,0,0,0);
+      var mk=new Date(d.getFullYear(),d.getMonth(),1);
+      var k=mk.getFullYear()+"-"+(mk.getMonth()+1);
+      if(!mBuckets[k])mBuckets[k]={date:k,sortKey:mk.getTime(),pnl:0,_rep:e.date};
+      mBuckets[k].pnl+=parseFloat(e.pnl)||0;
+    });
+    sorted=Object.keys(mBuckets).map(function(k){return mBuckets[k];}).sort(function(a,b){return a.sortKey-b.sortKey;});
+  }else if(weekly){
     var buckets={};
     sortedRaw.forEach(function(e){
       var d=new Date(e.date);d.setHours(0,0,0,0);
@@ -1532,7 +1550,16 @@ function DailyPnLBar(props){
   function barX(i){return PL+i*gap+gap/2-barW/2;}
   function barH(pnl,pct){var v=HIDE_DOLLAR_PNL?pct:pnl;return Math.abs(v)/maxAbs*(chartH/2-4);}
   function barY(pnl,pct){return (HIDE_DOLLAR_PNL?pct:pnl)>=0?zeroY-barH(pnl,pct):zeroY;}
-  function fmtDate(ds){var d=new Date(ds);return (d.getMonth()+1)+"/"+(d.getDate());}
+  // CHANGED: Handles three formats — monthly bucket keys ("2026-6"), weekly bucket keys
+  // ("2026-6-7"), and full ISO/date strings. Monthly returns short month name; others return M/D.
+  function fmtDate(ds){
+    if(monthly&&/^\d{4}-\d{1,2}$/.test(ds)){
+      var parts=ds.split("-");
+      var d=new Date(parseInt(parts[0],10),parseInt(parts[1],10)-1,1);
+      return d.toLocaleDateString([],{month:"short"});
+    }
+    var d=new Date(ds);return (d.getMonth()+1)+"/"+(d.getDate());
+  }
   function fmtPnl(v){return (v>=0?"+":"")+"$"+v.toFixed(2);}
   var yTicks=[-maxAbs,0,maxAbs].map(function(v){return Math.round(v);});
   function onMouseMove(e){
@@ -1544,13 +1571,13 @@ function DailyPnLBar(props){
       var dist=Math.abs(svgX-cx);
       if(dist<nearestDist){nearestDist=dist;nearest=i;}
     }
-    if(svgX>=PL&&svgX<=PL+chartW){setHoverIdx(nearest);if(!weekly)setSharedDate(sorted[nearest]&&sorted[nearest].date||null);}
-    else {setHoverIdx(null);if(!weekly)setSharedDate(null);}
+    if(svgX>=PL&&svgX<=PL+chartW){setHoverIdx(nearest);if(bucketMode==="daily")setSharedDate(sorted[nearest]&&sorted[nearest].date||null);}
+    else {setHoverIdx(null);if(bucketMode==="daily")setSharedDate(null);}
   }
   // CHANGED: When external (shared) hover changes and this chart is daily, compute the matching
   // index. Falls back to the local hoverIdx when no shared date or when weekly-bucketed.
   var effectiveHoverIdx=hoverIdx;
-  if(!weekly&&sharedDate&&hoverIdx==null){
+  if(bucketMode==="daily"&&sharedDate&&hoverIdx==null){
     var found=sorted.findIndex(function(e){return e.date===sharedDate;});
     if(found>=0)effectiveHoverIdx=found;
   }
@@ -1567,7 +1594,8 @@ function DailyPnLBar(props){
           <div style={{fontSize:11,fontWeight:700,marginTop:2,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}><span style={{color:"#22c55e"}}>{fmt(bestDay,bestPct)}</span><span style={{color:"#94a3b8"}}> / </span><span style={{color:"#ef4444"}}>{fmt(worstDay,worstPct)}</span></div>
         </div>
         <div style={{padding:"6px 9px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:6}}>
-          <div style={{fontSize:9,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Avg / Day</div>
+          {/* CHANGED: "Avg / Day" label adapts to bucket mode so it reads correctly when bars are weekly or monthly. */}
+          <div style={{fontSize:9,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Avg / {monthly?"Month":weekly?"Week":"Day"}</div>
           <div style={{fontSize:12,fontWeight:700,marginTop:2,color:avgDay>=0?"#22c55e":"#ef4444",fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{fmt(avgDay,avgPct)}</div>
         </div>
       </div>
@@ -5674,7 +5702,19 @@ function MetricChart(props){
   var anchorZero=(minV<=0&&maxV>=0)||(minV>=0&&minV<(maxV-minV)*0.25);
   if(anchorZero){if(minV>0)minV=0;if(maxV<0)maxV=0;}
   if(minV===maxV){minV-=1;maxV+=1;}
-  function xFor(i){return padX+(pts.length<=1?W/2:(i/(pts.length-1))*(W-padX*2));}
+  // CHANGED: X-axis spans the FULL filtered date range (sorted), not just the metric's pts.
+  // Without this, the minTrades-gated start of pts compressed the metric chart's domain — same
+  // screen X meant different dates on each chart and cross-chart hover landed in the wrong place.
+  // xFor now maps an index in `pts` to its position along the full date timeline of `sorted`.
+  var firstMs=new Date(sorted[0].date).getTime();
+  var lastMs=new Date(sorted[sorted.length-1].date).getTime();
+  var spanRange=Math.max(1,lastMs-firstMs);
+  function xForDate(ds){
+    var t=new Date(ds).getTime();
+    var ratio=(t-firstMs)/spanRange;
+    return padX+ratio*(W-padX*2);
+  }
+  function xFor(i){return xForDate(pts[i].date);}
   function yFor(v){return H-padY-((v-minV)/(maxV-minV))*(H-padY*2);}
   var linePath=pts.map(function(p,i){return (i===0?"M":"L")+xFor(i).toFixed(1)+","+yFor(p.v).toFixed(1);}).join("");
   // Area fill back down to the baseline (0 if anchored there, else minV).
@@ -5698,10 +5738,16 @@ function MetricChart(props){
     var clientX=e.touches?e.touches[0].clientX:e.clientX;
     var px=clientX-rect.left;
     var ratio=Math.max(0,Math.min(1,px/rect.width));
-    var idx=Math.round(ratio*(pts.length-1));
-    if(idx<0)idx=0;if(idx>pts.length-1)idx=pts.length-1;
-    setHoverIdx(idx);
-    setSharedDate(pts[idx]&&pts[idx].date||null);
+    // CHANGED: Map cursor X to a date along the FULL range, then snap to the nearest metric pt.
+    // This keeps hover X position in temporal sync with DailyPnLBar (which uses the same range).
+    var cursorMs=firstMs+ratio*spanRange;
+    var bestIdx=0,bestDist=Infinity;
+    for(var pi=0;pi<pts.length;pi++){
+      var d=Math.abs(new Date(pts[pi].date).getTime()-cursorMs);
+      if(d<bestDist){bestDist=d;bestIdx=pi;}
+    }
+    setHoverIdx(bestIdx);
+    setSharedDate(pts[bestIdx]&&pts[bestIdx].date||null);
   }
   function handleLeave(){setHoverIdx(null);setSharedDate(null);}
   return (
@@ -6752,10 +6798,24 @@ function PerformanceTab(props){
               <div style={{marginTop:14,paddingTop:12,borderTop:"1px solid #1e293b"}}>{renderChart()}</div>
             </StatSec>;
           })()}
-          {/* CHANGED: Order per user spec — EquityCurve, then Daily P&L (under it), then Heatmap. */}
-          <StatSec title="Daily P&L">
-            <DailyPnLBar entries={filtered}/>
-          </StatSec>
+          {/* CHANGED: Order per user spec — EquityCurve, then bucketed P&L, then Heatmap. */}
+          {(function(){
+            // CHANGED: Title matches the same 42 / 168 day thresholds that DailyPnLBar uses
+            // internally to switch bucket modes.
+            var dpSorted=filtered.slice().sort(function(a,b){return new Date(a.date)-new Date(b.date);});
+            var bucketTitle="Daily P&L";
+            if(dpSorted.length>=2){
+              var span=new Date(dpSorted[dpSorted.length-1].date)-new Date(dpSorted[0].date);
+              var DAY_MS=24*3600*1000;
+              if(span>168*DAY_MS)bucketTitle="Monthly P&L";
+              else if(span>42*DAY_MS)bucketTitle="Weekly P&L";
+            }
+            return (
+              <StatSec title={bucketTitle}>
+                <DailyPnLBar entries={filtered}/>
+              </StatSec>
+            );
+          })()}
           <div style={{breakInside:"avoid",WebkitColumnBreakInside:"avoid",marginBottom:16}}><StreakTracker rows={filtered} settings={settings}/></div>
           {/* CHANGED: R-Multiple + Discipline Scatter rendered consecutively so they group in the masonry. */}
           <div style={{breakInside:"avoid",WebkitColumnBreakInside:"avoid",marginBottom:16}}><RMultipleHistogram rows={filtered} fallbackRiskMax={parseFloat(settings.riskMax)||0}/></div>
