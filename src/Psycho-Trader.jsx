@@ -7600,6 +7600,27 @@ function SettingsTab(props){
                   if(changed){entry.pnl=sumPnl;localStorage.setItem(k,JSON.stringify(entry));}
                 }catch(e){}
               });
+              // CHANGED: Also recompute today's live trades held in tf-state. These never hit
+              // the journal: keys above (state.trades is today's live working copy), so without
+              // this they'd remain at gross pnl and the card would show no fees.
+              try{
+                var stRaw=localStorage.getItem(STORAGE_KEY);
+                if(stRaw){
+                  var st=JSON.parse(stRaw);
+                  if(st&&Array.isArray(st.trades)){
+                    var stChanged=false;
+                    st.trades=st.trades.map(function(t){
+                      scanned++;
+                      if(t.status==="open"||!t.entries||!t.exits||!t.exits.length)return t;
+                      var r;try{r=doRecalc(t.entries,t.exits,t.assetClass,t.instrument,t.direction);}catch(e){return t;}
+                      if(r.pnl==="")return t;
+                      stChanged=true;updated++;
+                      return Object.assign({},t,{pnl:r.pnl,pctPnl:r.pctPnl,feesPaid:r.feesPaid});
+                    });
+                    if(stChanged)localStorage.setItem(STORAGE_KEY,JSON.stringify(st));
+                  }
+                }
+              }catch(e){}
             }catch(e){}
             // CHANGED: Wait ~1s for sync.js's debounced cloud push to flush before re-rendering.
             // Without this, a quick reload by the user can race the push and the cloud pull will
