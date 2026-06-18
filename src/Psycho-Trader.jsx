@@ -7597,8 +7597,13 @@ function SettingsTab(props){
                 }catch(e){}
               });
             }catch(e){}
-            window.alert("Recalculated "+updated+" of "+scanned+" trades. Refreshing.");
-            window.location.reload();
+            // CHANGED: Wait ~1s for sync.js's debounced cloud push to flush before re-rendering.
+            // Without this, a quick reload by the user can race the push and the cloud pull will
+            // restore the old (pre-backfill) data.
+            setTimeout(function(){
+              window.alert("Recalculated "+updated+" of "+scanned+" trades.");
+              if(props.bumpReloadKey)props.bumpReloadKey();
+            },1100);
           }} style={{padding:"6px 12px",background:"#0a0a0f",border:"1px solid #4338ca",borderRadius:6,color:"#a5b4fc",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Apply commissions to saved trades</button>
         </div>
         {ASSET_CLASS_ORDER.map(function(c){

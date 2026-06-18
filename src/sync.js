@@ -281,7 +281,10 @@ function numOrNull(v) {
 // ------------------------------------------------------------
 // PUSH: debounced flush of pending writes to Supabase
 // ------------------------------------------------------------
-async function flush() {
+// CHANGED: Exported so callers (e.g. the commission-backfill button) can force-push pending
+// writes before navigating or reloading. Without this, debounced pushes can be lost when
+// reload happens before the 800ms timer fires.
+export async function flush() {
   if (!currentUserId) { flushTimer = null; return; }
   const batch = [...pending.entries()];
   pending.clear();
