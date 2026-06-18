@@ -2152,6 +2152,26 @@ function FormSection(props){
 // "pill" (rounded chip). Options is an array of {v, l} (value, label).
 function Dropdown(props){
   var [open,setOpen]=React.useState(false);
+  var triggerRef=React.useRef(null);
+  // CHANGED: Compute menu position from trigger's bounding rect so the menu can render with
+  // position:fixed and escape any ancestor overflow:hidden clipping. Recomputed each open and
+  // on scroll/resize while open.
+  var [menuPos,setMenuPos]=React.useState(null);
+  React.useEffect(function(){
+    if(!open)return;
+    function recompute(){
+      var el=triggerRef.current;if(!el)return;
+      var r=el.getBoundingClientRect();
+      setMenuPos({top:r.bottom+6,left:r.left,minWidth:r.width});
+    }
+    recompute();
+    window.addEventListener("scroll",recompute,true);
+    window.addEventListener("resize",recompute);
+    return function(){
+      window.removeEventListener("scroll",recompute,true);
+      window.removeEventListener("resize",recompute);
+    };
+  },[open]);
   var value=props.value;
   var options=props.options||[];
   var variant=props.variant||"field";
@@ -2166,14 +2186,16 @@ function Dropdown(props){
   var trigStyle=Object.assign({},triggerBase,props.style||{});
   return (
     <div style={rootStyle}>
-      <button type="button" disabled={disabled} onClick={function(){if(!disabled)setOpen(function(o){return !o;});}} style={trigStyle}>
+      <button ref={triggerRef} type="button" disabled={disabled} onClick={function(){if(!disabled)setOpen(function(o){return !o;});}} style={trigStyle}>
         <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{current?current.l:placeholder}</span>
         <svg width="9" height="9" viewBox="0 0 10 10" style={{flexShrink:0,transform:open?"rotate(180deg)":"none",transition:"transform 0.15s ease"}}><path d="M2 4l3 3 3-3" stroke={variant==="pill"&&hasValue?"#fff":(variant==="field"?"#94a3b8":"#94a3b8")} strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
       </button>
-      {open&&(
+      {open&&menuPos&&(
         <>
           <div onClick={function(){setOpen(false);}} style={{position:"fixed",inset:0,zIndex:30}}/>
-          <div style={{position:"absolute",top:"calc(100% + 6px)",left:0,minWidth:"100%",zIndex:31,background:"#0a0a0f",border:"1px solid #334155",borderRadius:10,padding:4,boxShadow:"0 8px 24px #00000080",maxHeight:280,overflowY:"auto"}}>
+          {/* CHANGED: Fixed positioning anchored to the trigger's viewport rect — escapes any
+             ancestor overflow:hidden so all options render regardless of container clipping. */}
+          <div style={{position:"fixed",top:menuPos.top,left:menuPos.left,minWidth:menuPos.minWidth,zIndex:31,background:"#0a0a0f",border:"1px solid #334155",borderRadius:10,padding:4,boxShadow:"0 8px 24px #00000080",maxHeight:280,overflowY:"auto"}}>
             {options.map(function(o){
               var on=o.v===value;
               return (
@@ -3298,7 +3320,8 @@ function TodayStrip(props){
     <div style={CS({marginBottom:18,padding:0,overflow:"hidden"})}>
       <button onClick={function(){if(props.onNavigateToJournal)props.onNavigateToJournal();}} style={{width:"100%",padding:"11px 16px",background:"linear-gradient(135deg,#0f1a14 0%,#15151f 70%)",borderBottom:"1px solid #1e293b",border:"none",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
         <span style={{fontSize:13,color:"#86efac",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700}}>Today</span>
-        <span style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:12,color:"#64748b"}}>{todayDisplay()}</span><span style={{fontSize:12,color:"#86efac",fontWeight:600}}>Journal →</span></span>
+        {/* CHANGED: Date removed — duplicated the header date that's already pinned at the top. */}
+        <span style={{fontSize:12,color:"#86efac",fontWeight:600}}>Journal →</span>
       </button>
       <div style={{display:"grid",gridTemplateColumns:props.mobile?"repeat(5,1fr)":"repeat(auto-fit,minmax(120px,1fr))",gap:1,background:"#1e293b"}}>
         {tiles.map(function(t){return (
@@ -3416,7 +3439,20 @@ function GoalsSnapshot(props){
 }
 
 function PerfProgressCard(props){
-  var rows=loadJournalRows();
+  // CHANGED: Time-period selector for the KPI strip. Filters the trades that feed Win Rate,
+  // Profit Factor, Expectancy, Green Streak, and Days Since Lock — Account Balance below
+  // stays current-state (it's always "now"). Choice persists per-device.
+  var [range,setRange]=useState(function(){try{return localStorage.getItem("tf-home-perf-range")||"all";}catch(e){return "all";}});
+  useEffect(function(){try{localStorage.setItem("tf-home-perf-range",range);}catch(e){}},[range]);
+  function rangeStart(){
+    var now=new Date();
+    if(range==="week"){var d=new Date(now);d.setDate(d.getDate()-d.getDay());d.setHours(0,0,0,0);return d;}
+    if(range==="month")return new Date(now.getFullYear(),now.getMonth(),1);
+    if(range==="year")return new Date(now.getFullYear(),0,1);
+    return null;
+  }
+  var rsStart=rangeStart();
+  var rows=loadJournalRows().filter(function(r){if(!rsStart)return true;var d=new Date(r.date);return !isNaN(d.getTime())&&d>=rsStart;});
   var todayKey=todayStr();
   var hasTodayRow=rows.some(function(r){return r.date===todayKey;});
   var liveTrades=(props.todayTrades||[]).filter(function(t){return t&&t.status!=="open";});
@@ -3455,10 +3491,18 @@ function PerfProgressCard(props){
   var [open,setOpen]=useState(false);
   return (
     <div style={CS({marginBottom:18,padding:0,overflow:"hidden"})}>
-      <button onClick={function(){setOpen(function(o){return !o;});}} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"13px 16px",background:"linear-gradient(135deg,#1e1b4b 0%,#15151f 70%)",border:"none",borderBottom:"1px solid #312e81",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
-        <span style={{fontSize:13,color:"#c7d2fe",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700}}>Performance &amp; Progress</span>
-        <svg width="13" height="13" viewBox="0 0 12 12" fill="none" style={{transition:"transform 0.2s",transform:open?"rotate(180deg)":"rotate(0deg)"}}><path d="M2 4l4 4 4-4" stroke="#a5b4fc" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-      </button>
+      <div style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"13px 16px",background:"linear-gradient(135deg,#1e1b4b 0%,#15151f 70%)",borderBottom:"1px solid #312e81"}}>
+        <button onClick={function(){setOpen(function(o){return !o;});}} style={{background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",textAlign:"left",padding:0,flexShrink:0}}>
+          <span style={{fontSize:13,color:"#c7d2fe",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700}}>Performance &amp; Progress</span>
+        </button>
+        {/* CHANGED: Dropdown shrinks to its content width — no flex:1, no stretch. */}
+        <div onClick={function(e){e.stopPropagation();}} style={{display:"flex",marginLeft:12,marginRight:"auto"}}>
+          <Dropdown variant="pill" value={range} onChange={function(v){setRange(v);}} options={[{v:"week",l:"This Week"},{v:"month",l:"Month to Date"},{v:"year",l:"Year to Date"},{v:"all",l:"All Time"}]} style={{padding:"4px 10px",fontSize:11}}/>
+        </div>
+        <button onClick={function(){setOpen(function(o){return !o;});}} aria-label={open?"Collapse":"Expand"} style={{background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",padding:4,display:"flex",alignItems:"center",flexShrink:0}}>
+          <svg width="13" height="13" viewBox="0 0 12 12" fill="none" style={{transition:"transform 0.2s",transform:open?"rotate(180deg)":"rotate(0deg)"}}><path d="M2 4l4 4 4-4" stroke="#a5b4fc" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </button>
+      </div>
       {/* CHANGED: On mobile, KPI tiles wrap to a 2-column grid so labels aren't truncated and
          each value has room to breathe. Desktop unchanged. */}
       <div style={{display:"grid",gridTemplateColumns:props.mobile?"repeat(2,1fr)":"repeat(auto-fit,minmax(132px,1fr))",gap:1,background:"#1e293b"}}>
