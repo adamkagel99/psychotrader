@@ -5776,6 +5776,13 @@ function MetricChart(props){
           <span>{last.date}</span>
         </div>
       )}
+      {/* CHANGED: Inline note explaining why the line doesn't start at the range's left edge on
+         charts that require a minimum-trade warm-up. Rate-based metrics (win rate, profit factor,
+         expectancy) are noise for the first few trades; the chart hides them until the threshold
+         is met. Without this note the gap looks like missing data. */}
+      {minTrades>0&&(
+        <div style={{fontSize:9,color:"#64748b",marginTop:4,lineHeight:1.4,fontStyle:"italic"}}>{label} starts plotting once {minTrades} trades have accumulated — early-range values are too noisy to be meaningful.</div>
+      )}
     </div>
   );
 }
