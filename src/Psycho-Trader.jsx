@@ -1769,7 +1769,14 @@ function CalendarGrid(props){
           return (
             <button key={i} onClick={function(){onSelect(ds);}} style={{height:46,background:bg,border:(isNoTrade?"1.5px ":"1px ")+noTradeBorderStyle+" "+bd,borderRadius:5,color:col,fontSize:13,fontWeight:isToday||isSelected||isNoTrade?700:500,cursor:"pointer",fontFamily:"inherit",position:"relative",padding:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2}} title={holiday||(isNoTrade?"No-trade day (deliberately sat out)":(pnl!=null?(pnl>=0?"+":"")+"$"+pnl.toFixed(0):""))}>
               <span style={{lineHeight:1}}>{d}</span>
-              {pnl!=null&&dayData&&dayData.tradeCount>0&&(HIDE_DOLLAR_PNL?(dayRiskMax>0&&<span style={{fontSize:9,color:col,fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1}}>{(pnl/dayRiskMax>=0?"+":"")+(pnl/dayRiskMax).toFixed(1)}R</span>):<span style={{fontSize:9,color:col,fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1}}>{(pnl>=0?"+$":"-$")+Math.abs(pnl).toFixed(0)}</span>)}
+              {/* CHANGED: Day cell readout — driven by summaryMode passed from DashboardCalendar.
+                 "trades" → show trade count, "pnl" → R when Hide-$ on, $ otherwise. */}
+              {dayData&&dayData.tradeCount>0&&(function(){
+                if(props.summaryMode==="trades")return <span style={{fontSize:9,color:"#94a3b8",fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1}}>{dayData.tradeCount}t</span>;
+                if(pnl==null)return null;
+                if(HIDE_DOLLAR_PNL)return dayRiskMax>0?<span style={{fontSize:9,color:col,fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1}}>{(pnl/dayRiskMax>=0?"+":"")+(pnl/dayRiskMax).toFixed(1)}R</span>:null;
+                return <span style={{fontSize:9,color:col,fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1}}>{(pnl>=0?"+$":"-$")+Math.abs(pnl).toFixed(0)}</span>;
+              })()}
               {isNoTrade&&!isToday&&<span style={{fontSize:9,color:"#fbbf24",fontWeight:800,letterSpacing:0.3,lineHeight:1}}>⊘ NT</span>}
               {earlyClose&&<div style={{position:"absolute",top:1,right:2,width:4,height:4,borderRadius:"50%",background:"#f59e0b"}}/>}
               {/* CHANGED: Daily goal-hit checkmark in the bottom-right — clearly a glyph, not a dot,
@@ -1790,6 +1797,11 @@ function DashboardCalendar(props){
   // collapse the user's chosen view.
   var [open,setOpen]=useState(function(){try{var v=localStorage.getItem("tf-dash-cal-open");return v===null?(props.defaultOpen||false):v==="1";}catch(e){return props.defaultOpen||false;}});
   useEffect(function(){try{localStorage.setItem("tf-dash-cal-open",open?"1":"0");}catch(e){}},[open]);
+  // CHANGED: Summary readout mode — "pnl" (default, follows Hide-$ toggle for $/R) or "trades"
+  // (count of trades). Clicking the readout toggles between these. Persisted per-device. The
+  // mode also controls what each day cell shows in the strip / grid.
+  var [summaryMode,setSummaryMode]=useState(function(){try{return localStorage.getItem("tf-cal-summary-mode")||"pnl";}catch(e){return "pnl";}});
+  useEffect(function(){try{localStorage.setItem("tf-cal-summary-mode",summaryMode);}catch(e){}},[summaryMode]);
   var sessionMap=buildSessionMap(props.totalPnL,props.riskMax,(props.todayTrades||[]).filter(function(t){return t&&t.status!=="open";}).length);
   var todayDateStr=todayStr();
   // CHANGED: Week strip starts on Sunday to match the calendar grid (S M T W T F S).
@@ -1812,14 +1824,47 @@ function DashboardCalendar(props){
   var weekPnL=weekDays.reduce(function(sum,d){return sum+(d.pnl||0);},0);
   var weekRiskTotal=weekDays.reduce(function(sum,d){return sum+((d.tradeCount>0&&d.riskMax>0)?d.riskMax:0);},0);
   var weekR=weekDays.reduce(function(sum,d){return sum+((d.tradeCount>0&&d.riskMax>0)?(d.pnl/d.riskMax):0);},0);
+  var weekTradeCount=weekDays.reduce(function(sum,d){return sum+(d.tradeCount||0);},0);
   var weekRiskMax=weekRiskTotal; // kept for the display gating condition below
   var weekRColor=weekR>=0?"#86efac":"#fca5a5";
+  // CHANGED: Month totals — used by the header readout when the calendar is expanded so the
+  // same chip naturally scales with the user's view (week ↔ month).
+  var monthStart=new Date(calNow.getFullYear(),calNow.getMonth(),1);
+  var monthEnd=new Date(calNow.getFullYear(),calNow.getMonth()+1,0);
+  var monthPnL=0,monthR=0,monthTradeCount=0,monthHasRisk=false;
+  for(var di=0;di<=monthEnd.getDate()-1;di++){
+    var md=new Date(calNow.getFullYear(),calNow.getMonth(),di+1);
+    var mds=(md.getMonth()+1)+"/"+md.getDate()+"/"+md.getFullYear();
+    var mdData=sessionMap[mds];
+    if(!mdData)continue;
+    monthPnL+=mdData.pnl||0;
+    monthTradeCount+=mdData.tradeCount||0;
+    if(mdData.tradeCount>0&&mdData.riskMax>0){monthR+=mdData.pnl/mdData.riskMax;monthHasRisk=true;}
+  }
+  var monthRColor=monthR>=0?"#86efac":"#fca5a5";
+  // CHANGED: One readout used in both collapsed (week) and expanded (month) states. In "trades"
+  // mode shows a count; in "pnl" mode shows R when Hide-$ is on or $ otherwise.
+  var headerScope=open?{pnl:monthPnL,r:monthR,trades:monthTradeCount,hasRisk:monthHasRisk,hasAny:monthTradeCount>0}:{pnl:weekPnL,r:weekR,trades:weekTradeCount,hasRisk:weekRiskMax>0,hasAny:weekDays.some(function(d){return d.tradeCount>0;})};
+  var readoutText="";
+  var readoutColor="#94a3b8";
+  if(headerScope.hasAny){
+    if(summaryMode==="trades"){
+      readoutText=headerScope.trades+"t";
+    }else if(HIDE_DOLLAR_PNL){
+      if(headerScope.hasRisk){readoutText=(headerScope.r>=0?"+":"")+headerScope.r.toFixed(1)+"R";readoutColor=headerScope.r>=0?"#86efac":"#fca5a5";}
+    }else{
+      readoutText=(headerScope.pnl>=0?"+$":"-$")+Math.abs(headerScope.pnl).toFixed(0);
+      readoutColor=headerScope.pnl>=0?"#86efac":"#fca5a5";
+    }
+  }
   return (
     <div style={CS({marginBottom:16,padding:0,overflow:"hidden"})}>
       <button onClick={function(){setOpen(function(o){return !o;});}} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",padding:"12px 18px 8px",textAlign:"left"}}>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           <span style={{fontSize:13,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{open?"Calendar":"This Week"}</span>
-          {!open&&weekRiskMax>0&&weekDays.some(function(d){return d.tradeCount>0;})&&<span style={{fontSize:12,fontWeight:700,color:weekRColor,fontVariantNumeric:"tabular-nums"}}>{(weekR>=0?"+":"")+weekR.toFixed(1)}R</span>}
+          {/* CHANGED: Always-visible readout (week-or-month scope) — clickable to swap between
+             pnl ($/R) and trade-count modes. The mode also drives the per-day cell readout. */}
+          {readoutText&&<span onClick={function(e){e.stopPropagation();setSummaryMode(summaryMode==="trades"?"pnl":"trades");}} title={summaryMode==="trades"?"Tap to show P&L":"Tap to show trade count"} style={{fontSize:12,fontWeight:700,color:readoutColor,fontVariantNumeric:"tabular-nums",padding:"2px 7px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:6,cursor:"pointer"}}>{readoutText}</span>}
         </div>
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{display:"inline-block",verticalAlign:"middle",transition:"transform 0.2s",transform:open?"rotate(180deg)":"rotate(0deg)"}}><path d="M2 4l4 4 4-4" stroke="#64748b" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
       </button>
@@ -1847,6 +1892,9 @@ function DashboardCalendar(props){
                   <span style={{fontSize:17,color:col,fontWeight:d.isToday?700:600,lineHeight:1}}>{d.date.getDate()}</span>
                   {d.noTradeDay?(
                     <span style={{fontSize:10,color:"#fbbf24",fontWeight:800,letterSpacing:0.3,lineHeight:1,marginTop:2}}>⊘ NT</span>
+                  ):summaryMode==="trades"?(
+                    // CHANGED: trade count mode — show "Nt" when there are trades, blank otherwise.
+                    d.tradeCount>0?<span style={{fontSize:10,color:"#94a3b8",fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1,marginTop:2}}>{d.tradeCount}t</span>:<span style={{fontSize:10,lineHeight:1,marginTop:2,color:"transparent"}}>·</span>
                   ):pnl!=null&&(d.tradeCount>0||pnl!==0)?(
                     HIDE_DOLLAR_PNL?(
                       dayRiskMax>0?<span style={{fontSize:10,color:col,fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1,marginTop:2}}>{(pnl/dayRiskMax>=0?"+":"")+(pnl/dayRiskMax).toFixed(1)}R</span>:<span style={{fontSize:10,lineHeight:1,marginTop:2,color:"transparent"}}>·</span>
@@ -1860,7 +1908,7 @@ function DashboardCalendar(props){
       )}
       {open&&(
         <div style={{padding:"4px 18px 14px",borderTop:"1px solid #1e293b"}}>
-          <CalendarGrid sessionMap={sessionMap} todayDateStr={todayDateStr} selectedDate={null} onSelect={function(d){if(props.onSelectDate)props.onSelectDate(d);}}/>
+          <CalendarGrid summaryMode={summaryMode} sessionMap={sessionMap} todayDateStr={todayDateStr} selectedDate={null} onSelect={function(d){if(props.onSelectDate)props.onSelectDate(d);}}/>
           <CalendarLegend/>
         </div>
       )}
@@ -1877,7 +1925,7 @@ function CalendarPicker(props){
     <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",background:"#00000088"}} onClick={onClose}>
       <div style={{background:"#111118",border:"1px solid #334155",borderRadius:14,padding:"16px 16px 12px",width:380,maxWidth:"94vw",maxHeight:"92vh",overflowY:"auto",boxShadow:"0 16px 48px #000000bb"}} onClick={function(e){e.stopPropagation();}}>
         <button onClick={function(){onSelect(todayDateStr);}} style={{width:"100%",padding:"8px",background:"#1e1b4b",border:"1px solid #4338ca",borderRadius:8,color:"#a5b4fc",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginBottom:10}}>Today — {todayDateStr}</button>
-        <CalendarGrid sessionMap={sessionMap} todayDateStr={todayDateStr} selectedDate={selectedDate} onSelect={onSelect}/>
+        <CalendarGrid summaryMode={summaryMode} sessionMap={sessionMap} todayDateStr={todayDateStr} selectedDate={selectedDate} onSelect={onSelect}/>
         <CalendarLegend/>
       </div>
     </div>
