@@ -1744,6 +1744,9 @@ function CalendarGrid(props){
         <button onClick={function(){moveMonth(1);}} style={{background:"none",border:"1px solid #334155",borderRadius:5,color:"#94a3b8",fontSize:13,cursor:"pointer",fontFamily:"inherit",padding:"4px 10px"}}>›</button>
       </div>
       {showPicker&&<MonthYearPicker year={calYear} month={calMonth} onChange={function(y,m){setCal(y,m);setShowPicker(false);}}/>}
+      {/* CHANGED: Hide the day grid + DOW header while the month-year picker is open so the
+         picker is the sole focus. */}
+      {!showPicker&&<>
       <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3,marginBottom:6}}>
         {["S","M","T","W","T","F","S"].map(function(c,i){return <div key={i} style={{textAlign:"center",fontSize:11,color:"#475569",fontWeight:700}}>{c}</div>;})}
       </div>
@@ -1794,6 +1797,7 @@ function CalendarGrid(props){
           );
         })}
       </div>
+      </>}
     </div>
   );
 }
