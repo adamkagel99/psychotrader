@@ -7696,8 +7696,13 @@ function SettingsTab(props){
                   <ScaleMilestonesScroller currentTier={currentTier}>
                     <div style={{display:"grid",gridTemplateColumns:"auto 1fr 1fr",gap:6,fontSize:11,alignItems:"center"}}>
                       {milestones.map(function(m){
-                        var sizes=calcPosSizes(m,{useDirect:true,sizingMode:settings.sizingMode,slippagePct:slip,positionMaxPct:posMaxPct,riskMaxPct:riskMaxPct,positionMaxDollar:settings.positionMaxDollar,riskMaxDollar:settings.riskMaxDollar});
                         var isCurrent=m===currentTier;
+                        // CHANGED: For the highlighted current-tier row, calculate ranges from
+                        // the LIVE account balance (matching the "Computed:" readout above the
+                        // table). Non-current tiers still use the tier value itself, which
+                        // shows what you'd be sized to upon reaching that milestone.
+                        var sizesBase=isCurrent?balance:m;
+                        var sizes=calcPosSizes(sizesBase,{useDirect:true,sizingMode:settings.sizingMode,slippagePct:slip,positionMaxPct:posMaxPct,riskMaxPct:riskMaxPct,positionMaxDollar:settings.positionMaxDollar,riskMaxDollar:settings.riskMaxDollar});
                         var isReached=balance>m*1.05;
                         var color=isCurrent?"#86efac":(isReached?"#64748b":"#cbd5e1");
                         var bg=isCurrent?"#0a1f10":"transparent";
