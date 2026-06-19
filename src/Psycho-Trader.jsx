@@ -1606,7 +1606,7 @@ function DailyPnLBar(props){
       <div style={{background:"#0a0a0f",borderRadius:8,padding:"4px 0 0",border:"1px solid #1e293b"}}>
       <svg width="100%" viewBox={"0 0 "+W+" "+H} style={{overflow:"visible",userSelect:"none"}}
         onMouseMove={onMouseMove}
-        onMouseLeave={function(){setHoverIdx(null);}}>
+        onMouseLeave={function(){setHoverIdx(null);if(bucketMode==="daily")setSharedDate(null);}}>
         {yTicks.map(function(v,i){var y=zeroY-(v/maxAbs)*(chartH/2);return <g key={i}><line x1={PL} y1={y} x2={PL+chartW} y2={y} stroke={v===0?"#334155":"#1e293b"} strokeWidth="1" strokeDasharray={v===0?"":"3,3"}/>{!HIDE_DOLLAR_PNL&&<text x={PL-4} y={y+4} textAnchor="end" fontSize="8" fill="#94a3b8">{v>=0?"+$"+Math.abs(v):"-$"+Math.abs(v)}</text>}</g>;})}
         {sorted.map(function(e,i){
           var pnl=parseFloat(e.pnl)||0,pct=pcts[i],bx=barX(i),bh=barH(pnl,pct),by=barY(pnl,pct),isHov=effectiveHoverIdx===i;
@@ -1738,11 +1738,12 @@ function CalendarGrid(props){
   var monthGoalHit=monthlyTarget>0&&monthPnLTotal>=monthlyTarget;
   return (
     <div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+      {/* CHANGED: Hide the month-nav row while the picker is open so it's the sole focus. */}
+      {!showPicker&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
         <button onClick={function(){moveMonth(-1);}} style={{background:"none",border:"1px solid #334155",borderRadius:5,color:"#94a3b8",fontSize:13,cursor:"pointer",fontFamily:"inherit",padding:"4px 10px"}}>‹</button>
         <button onClick={function(){setShowPicker(function(o){return !o;});}} style={{background:"none",border:"none",fontSize:15,fontWeight:700,color:"#e2e8f0",cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:6}}>{MONTH_NAMES[calMonth]} {calYear}{monthGoalHit&&<span style={{fontSize:12,color:"#fbbf24",fontWeight:800}} title={"Monthly P&L goal met ($"+monthPnLTotal.toFixed(0)+" / $"+monthlyTarget.toFixed(0)+")"}>🏁</span>}</button>
         <button onClick={function(){moveMonth(1);}} style={{background:"none",border:"1px solid #334155",borderRadius:5,color:"#94a3b8",fontSize:13,cursor:"pointer",fontFamily:"inherit",padding:"4px 10px"}}>›</button>
-      </div>
+      </div>}
       {showPicker&&<MonthYearPicker year={calYear} month={calMonth} onChange={function(y,m){setCal(y,m);setShowPicker(false);}}/>}
       {/* CHANGED: Hide the day grid + DOW header while the month-year picker is open so the
          picker is the sole focus. */}
