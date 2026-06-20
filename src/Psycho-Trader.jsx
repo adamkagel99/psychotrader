@@ -8752,7 +8752,7 @@ function App(props){
         <div style={{display:"flex",alignItems:"center",justifyContent:sidebarCollapsed?"center":"space-between",marginBottom:18,minHeight:24,gap:8}}>
           {!sidebarCollapsed&&<div style={{padding:"0 4px"}}><div style={{fontSize:17,fontWeight:800,color:"#e2e8f0",letterSpacing:-0.5,lineHeight:1.1}}>Psycho</div><div style={{fontSize:17,fontWeight:800,color:"#a5b4fc",letterSpacing:-0.5,lineHeight:1.1}}>Trader</div></div>}
           <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
-            {!sidebarCollapsed&&<button onClick={function(){setSettings(function(s){return Object.assign({},s,{hideDollarPnL:!s.hideDollarPnL});});}} aria-label={settings.hideDollarPnL?"Show $ amounts":"Hide $ amounts"} title={settings.hideDollarPnL?"Showing %. Tap to show $.":"Showing $. Tap to hide."} style={{width:32,height:32,flexShrink:0,background:settings.hideDollarPnL?"#1e1b4b":"#0a0a0f",border:"1px solid "+(settings.hideDollarPnL?"#4338ca":"#334155"),borderRadius:8,color:settings.hideDollarPnL?"#a5b4fc":"#94a3b8",fontSize:16,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center"}}>{settings.hideDollarPnL?"%":"$"}</button>}
+            {/* CHANGED: Hide-$ moved to the sidebar bottom; only the collapse toggle stays up here. */}
             <button onClick={function(){setSidebarCollapsed(function(c){return !c;});}} aria-label={sidebarCollapsed?"Expand sidebar":"Collapse sidebar"} title={sidebarCollapsed?"Expand":"Collapse"} style={{width:32,height:32,flexShrink:0,background:"#0a0a0f",border:"1px solid #334155",borderRadius:8,color:"#94a3b8",fontSize:16,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center"}}>{sidebarCollapsed?"»":"«"}</button>
           </div>
         </div>
@@ -8763,6 +8763,14 @@ function App(props){
             {!sidebarCollapsed&&t.label}
           </button>;
         })}
+        {/* CHANGED: Hide-$ toggle pinned to the bottom of the sidebar. marginTop:"auto" pushes
+           it down regardless of sidebar collapse state. In collapsed mode it shows just $/%;
+           expanded mode shows the matching label so the affordance is obvious. */}
+        <button onClick={function(){setSettings(function(s){return Object.assign({},s,{hideDollarPnL:!s.hideDollarPnL});});}} aria-label={settings.hideDollarPnL?"Show $ amounts":"Hide $ amounts"} title={settings.hideDollarPnL?"Showing %. Tap to show $.":"Showing $. Tap to hide."} style={{marginTop:"auto",textAlign:"left",padding:sidebarCollapsed?"11px 0":"11px 12px",background:settings.hideDollarPnL?"#1e1b4b":"none",border:"1px solid "+(settings.hideDollarPnL?"#4338ca":"#1e293b"),borderRadius:8,color:settings.hideDollarPnL?"#a5b4fc":"#94a3b8",fontSize:14,fontWeight:settings.hideDollarPnL?700:500,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:sidebarCollapsed?"center":"flex-start",gap:10}}>
+          {/* CHANGED: collapsed glyph and expanded label use the same font size so the "$"
+             doesn't visually jump when the sidebar collapses/expands. */}
+          {sidebarCollapsed?<span style={{width:20,textAlign:"center",flexShrink:0}}>{settings.hideDollarPnL?"%":"$"}</span>:(settings.hideDollarPnL?"Show $":"Hide $")}
+        </button>
       </div>}
       <div style={{flex:1,minWidth:0}}>
       <div style={{maxWidth:mobile?560:"min(1800px, 96vw)",margin:"0 auto",padding:mobile?"0 12px 84px":"0 28px 60px"}}>
