@@ -395,6 +395,25 @@ function getBase(a){
 // CHANGED: positionMin and riskMin are now derived from slippagePct (% below max).
 // CHANGED: Risk Max % is now a percentage of Position Max (not the account balance).
 // CHANGED: Also supports fixed-dollar sizing mode (positionMaxDollar, riskMaxDollar).
+// CHANGED: Single source of truth for the scaling milestone schedule. Tiers step by $1k up to
+// $10k, then $5k up to $20k, then $10k after. Used by Settings, Dashboard, and the sizing
+// effect so they all agree on which tier the user is in.
+function getMilestones(){
+  var m=[500];
+  for(var k=1;k<=10;k++)m.push(k*1000);
+  m.push(15000);m.push(20000);
+  for(var m10=30000;m10<=100000;m10+=10000)m.push(m10);
+  return m;
+}
+// CHANGED: A tier "activates" only once balance is at least 5% above the tier value — the
+// step-up buffer prevents instant re-sizing the moment you cross a tier line. Returns the
+// highest milestone whose 5%-above threshold the balance has cleared.
+function getCurrentTier(balance){
+  var ms=getMilestones();
+  var t=ms[0];
+  for(var i=0;i<ms.length;i++){if(balance>ms[i]*1.05)t=ms[i];}
+  return t;
+}
 function calcPosSizes(a,pcts){
   // CHANGED: When useDirect=true (milestone preview), use 'a' as the base directly instead of getBase(a).
   var b=(pcts&&pcts.useDirect)?a:getBase(a);
@@ -3167,15 +3186,11 @@ function ScalingTargetCard(props){
   var balance=computeAccountBalance(liveTotalPnL);
   // CHANGED: Target is auto-derived as the next tier in the scaling-milestone schedule (matches
   // Settings → Auto-Sizing Parameters → Scale Milestones). No dropdown, nothing to configure.
-  var milestones=[500];
-  for(var k=1;k<=10;k++)milestones.push(k*1000);
-  milestones.push(15000);milestones.push(20000);
-  for(var m10=30000;m10<=100000;m10+=10000)milestones.push(m10);
+  var milestones=getMilestones();
   var targetVal=milestones.find(function(m){return m>balance;})||milestones[milestones.length-1];
-  // CHANGED: Position Now sizes use the CURRENT TIER (largest milestone ≤ balance), not the raw
-  // balance — the live trade-sizing logic bands to the current tier so values stay stable across
-  // each band. Without this, the card disagrees with the Settings preview which IS banded.
-  var currentTier=(function(){var t=milestones[0];for(var i=0;i<milestones.length;i++){if(milestones[i]<=balance)t=milestones[i];else break;}return t;})();
+  // CHANGED: Position Now sizes use the CURRENT TIER (largest milestone with 5%-above buffer
+  // cleared), matching the live trade-sizing logic in App's sizing effect.
+  var currentTier=getCurrentTier(balance);
   var pctToTarget=targetVal>0?Math.min(100,Math.max(0,(balance/targetVal)*100)):0;
   var reached=targetVal>0&&balance>=targetVal;
   var slip=settings.slippagePct!=null?settings.slippagePct:20;
@@ -7654,16 +7669,10 @@ function SettingsTab(props){
           var slip=settings.slippagePct!=null?settings.slippagePct:20;
           var posMaxPct=settings.positionMaxPct!=null?settings.positionMaxPct:7.5;
           var riskMaxPct=settings.riskMaxPct!=null?settings.riskMaxPct:33;
-          // CHANGED: Tier schedule — $1k steps up to $10k, then $5k steps to $20k (so $15k and
-          // $20k are included), then $10k steps to $100k. Keeps early scaling fine-grained where
-          // it matters and stretches out the larger bands.
-          var milestones=[500];
-          for(var k=1;k<=10;k++)milestones.push(k*1000);
-          milestones.push(15000);
-          milestones.push(20000);
-          for(var m10=30000;m10<=100000;m10+=10000)milestones.push(m10);
-          // Find current tier (highest milestone where balance > tier*1.05).
-          var currentTier=500;milestones.forEach(function(m){if(balance>m*1.05)currentTier=m;});
+          // CHANGED: Use the shared milestone schedule + tier helper so this table agrees with
+          // the live sizing logic in App.
+          var milestones=getMilestones();
+          var currentTier=getCurrentTier(balance);
           return (
             <div style={{marginTop:8,padding:"8px 10px",background:"#0a0a0f",border:"1px solid #4338ca44",borderRadius:6}}>
               <button onClick={function(){setScaleOpen(function(o){return !o;});}} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",background:"transparent",border:"none",padding:0,cursor:"pointer",fontFamily:"inherit",marginBottom:scaleOpen?8:0}}>
@@ -7696,13 +7705,8 @@ function SettingsTab(props){
                   <ScaleMilestonesScroller currentTier={currentTier}>
                     <div style={{display:"grid",gridTemplateColumns:"auto 1fr 1fr",gap:6,fontSize:11,alignItems:"center"}}>
                       {milestones.map(function(m){
+                        var sizes=calcPosSizes(m,{useDirect:true,sizingMode:settings.sizingMode,slippagePct:slip,positionMaxPct:posMaxPct,riskMaxPct:riskMaxPct,positionMaxDollar:settings.positionMaxDollar,riskMaxDollar:settings.riskMaxDollar});
                         var isCurrent=m===currentTier;
-                        // CHANGED: For the highlighted current-tier row, calculate ranges from
-                        // the LIVE account balance (matching the "Computed:" readout above the
-                        // table). Non-current tiers still use the tier value itself, which
-                        // shows what you'd be sized to upon reaching that milestone.
-                        var sizesBase=isCurrent?balance:m;
-                        var sizes=calcPosSizes(sizesBase,{useDirect:true,sizingMode:settings.sizingMode,slippagePct:slip,positionMaxPct:posMaxPct,riskMaxPct:riskMaxPct,positionMaxDollar:settings.positionMaxDollar,riskMaxDollar:settings.riskMaxDollar});
                         var isReached=balance>m*1.05;
                         var color=isCurrent?"#86efac":(isReached?"#64748b":"#cbd5e1");
                         var bg=isCurrent?"#0a1f10":"transparent";
@@ -8463,12 +8467,16 @@ function App(props){
   },[]);
   // Persist hide-dollar setting globally.
   useEffect(function(){setHideDollarPnL(!!settings.hideDollarPnL);},[settings.hideDollarPnL]);
-  // CHANGED: Recalc derived position/risk from canonical account balance helper.
+  // CHANGED: Recalc derived position/risk from the user's CURRENT TIER (banded scaling), not the
+  // raw live balance. Within a tier band the size stays constant — so trading at $13k uses the
+  // same size as trading at $10.5k, until the balance clears the next tier's 5% buffer. This
+  // matches the Scale Milestones table the user sees in Settings.
   useEffect(function(){
     var live=(state.trades||[]).filter(function(t){return t.status!=="open";}).reduce(function(s,t){return s+(parseFloat(t.pnl)||0);},0);
     var computedAcct=computeAccountBalance(live);
+    var tierBase=getCurrentTier(computedAcct);
     var p={sizingMode:settings.sizingMode,slippagePct:settings.slippagePct,positionMaxPct:settings.positionMaxPct,riskMaxPct:settings.riskMaxPct,positionMaxDollar:settings.positionMaxDollar,riskMaxDollar:settings.riskMaxDollar};
-    var sizes=calcPosSizes(computedAcct,p);
+    var sizes=calcPosSizes(tierBase,p);
     if(sizes.positionMin!==settings.positionMin||sizes.positionMax!==settings.positionMax||sizes.riskMin!==settings.riskMin||sizes.riskMax!==settings.riskMax){
       setSettings(function(s){return Object.assign({},s,{positionMin:sizes.positionMin,positionMax:sizes.positionMax,riskMin:sizes.riskMin,riskMax:sizes.riskMax});});
     }
