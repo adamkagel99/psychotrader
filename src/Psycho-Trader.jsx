@@ -5335,12 +5335,16 @@ function GoalsTab(props){
           </div>
           <div style={{display:"flex",gap:8,marginTop:12}}>
             <button onClick={function(){setEditingCustomId(null);setCustomDraft(null);}} style={{flex:1,padding:"9px",background:"none",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Cancel</button>
-            <button onClick={function(){if(!editCanSave)return;
-              // CHANGED: Normalize section — a freshly-named new section becomes "namedCustom" with sectionName.
+            <button onClick={function(){
+              console.log("[goal-edit] Save clicked. editCanSave=",editCanSave,"customDraft=",customDraft);
+              if(!editCanSave)return;
               var sec=customDraft.section||"custom";var sname=customDraft.sectionName||null;
               if(sec==="newCustom"){if(sname&&sname.trim().length>0){sec="namedCustom";sname=sname.trim();}else{sec="custom";sname=null;}}
               if(sec!=="namedCustom")sname=null;
-              updateCustom(cg.id,{title:customDraft.title.trim(),target:customDraft.target,metric:customDraft.metric,period:customDraft.period,prefix:customDraft.prefix||"",suffix:customDraft.suffix||"",deadline:customDraft.deadline||null,customName:customDraft.metric==="custom"?(customDraft.customName||"").trim():null,filterField:customDraft.filterField||"",filterValue:customDraft.filterValue||"",section:sec,sectionName:sname});
+              var patch={title:customDraft.title.trim(),target:customDraft.target,metric:customDraft.metric,period:customDraft.period,prefix:customDraft.prefix||"",suffix:customDraft.suffix||"",deadline:customDraft.deadline||null,customName:customDraft.metric==="custom"?(customDraft.customName||"").trim():null,filterField:customDraft.filterField||"",filterValue:customDraft.filterValue||"",section:sec,sectionName:sname};
+              console.log("[goal-edit] calling updateCustom",cg.id,patch);
+              updateCustom(cg.id,patch);
+              setTimeout(function(){console.log("[goal-edit] after save, localStorage tf-goals=",localStorage.getItem(GOALS_KEY));},100);
               setEditingCustomId(null);setCustomDraft(null);
             }} disabled={!editCanSave} style={{flex:2,padding:"9px",background:editCanSave?"#4f46e5":"#1e293b",border:"none",borderRadius:6,color:editCanSave?"#fff":"#475569",fontSize:13,cursor:editCanSave?"pointer":"not-allowed",fontFamily:"inherit",fontWeight:700}}>Save</button>
           </div>
