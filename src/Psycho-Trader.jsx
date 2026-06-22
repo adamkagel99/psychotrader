@@ -1028,21 +1028,20 @@ function scoreCommitment(state){
 function getTotalWithdrawn(){
   return loadTransfers().filter(function(t){return String(t.type||"").toLowerCase()==="withdrawal";}).reduce(function(s,t){return s+Math.abs(parseFloat(t.amount)||0);},0);
 }
-// CHANGED: Daily target now derives from each enabled session's position size (sizeFraction) and
-// gain hard stop (gainStopR): for one winning trade per enabled session that hits its gain stop,
-// $ = riskMax × sizeFraction × gainStopR. Summed across enabled sessions = the "good day" target.
+// CHANGED: Daily target = the FIRST enabled session's gain-stop $ only ($ = riskMax × sizeFraction
+// × gainStopR). Rationale: hitting the gain stop in the first session is a hard stop for the day,
+// so no later session contributes to "the goal." Sessions are evaluated in chronological order.
 function computeDailyTarget(sp){
   if(!sp)return 0;
   var rm=parseFloat(sp.riskMax)||0;
   if(rm<=0)return 0;
   var sessions=getSessions(sp).filter(function(s){return s.enabled!==false;});
   if(sessions.length===0)return rm*(parseFloat(sp.gainMultiplier)||0); // fallback to legacy if no sessions
-  return sessions.reduce(function(sum,s){
-    var f=s.sizeFraction!=null?parseFloat(s.sizeFraction):1;
-    var g=s.gainStopR!=null?parseFloat(s.gainStopR):2.5;
-    if(isNaN(f))f=1;if(isNaN(g))g=2.5;
-    return sum+rm*f*g;
-  },0);
+  var first=sessions[0];
+  var f=first.sizeFraction!=null?parseFloat(first.sizeFraction):1;
+  var g=first.gainStopR!=null?parseFloat(first.gainStopR):2.5;
+  if(isNaN(f))f=1;if(isNaN(g))g=2.5;
+  return rm*f*g;
 }
 // Daily target derived from session sizing + gain hard stops. Falls back to 0 if unset.
 function getDailyTarget(){
@@ -1817,14 +1816,13 @@ function CalendarGrid(props){
           // CHANGED: Daily goal-hit marker. Distinguished from the early-close orange dot by
           // using a checkmark glyph instead of a dot. Weekly border override removed — users
           // found it looked too similar to other states and added little signal.
-          // CHANGED: Per-day target scales by that day's stamped riskMax. A full-size day always
-          // needs the full target; a half-size day needs half. Toggling current half-size mode
-          // no longer retroactively flips past days' ✓ markers.
-          var perDayTarget=dailyTarget;
-          if(fullDailyTarget>0&&fullRiskMax>0&&dayRiskMax>0){
-            perDayTarget=fullDailyTarget*(dayRiskMax/fullRiskMax);
-          }
-          var dayGoalHit=perDayTarget>0&&pnl!=null&&pnl>=perDayTarget;
+          // CHANGED: Daily goal-hit is R-based. A day's rTotal already sums per-trade R against
+          // each trade's stamped sizeFraction, so a half-size day hitting +3R counts the same as
+          // a full-size day hitting +3R. Threshold = fullDailyTarget / fullRiskMax (the R-equiv
+          // of the dollar target at full size).
+          var dailyTargetR=(fullDailyTarget>0&&fullRiskMax>0)?(fullDailyTarget/fullRiskMax):0;
+          var dayRTotal=dayData?(dayData.rTotal||0):0;
+          var dayGoalHit=dailyTargetR>0&&dayData&&dayData.tradeCount>0&&dayRTotal>=dailyTargetR;
           return (
             <button key={i} onClick={function(){onSelect(ds);}} style={{height:46,background:bg,border:(isNoTrade?"1.5px ":"1px ")+noTradeBorderStyle+" "+bd,borderRadius:5,color:col,fontSize:13,fontWeight:isToday||isSelected||isNoTrade?700:500,cursor:"pointer",fontFamily:"inherit",position:"relative",padding:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2}} title={holiday||(isNoTrade?"No-trade day (deliberately sat out)":(pnl!=null?(pnl>=0?"+":"")+"$"+pnl.toFixed(0):""))}>
               <span style={{lineHeight:1}}>{d}</span>
@@ -1846,7 +1844,7 @@ function CalendarGrid(props){
               {earlyClose&&<div style={{position:"absolute",top:1,right:2,width:4,height:4,borderRadius:"50%",background:"#f59e0b"}}/>}
               {/* CHANGED: Daily goal-hit checkmark in the bottom-right — clearly a glyph, not a dot,
                  so it can't be confused with the early-close indicator. */}
-              {dayGoalHit&&<div style={{position:"absolute",bottom:0,right:3,fontSize:11,color:"#facc15",fontWeight:900,lineHeight:1,textShadow:"0 0 3px rgba(250,204,21,0.6)"}} title={"Daily goal hit (+$"+pnl.toFixed(0)+" / $"+perDayTarget.toFixed(0)+")"}>✓</div>}
+              {dayGoalHit&&<div style={{position:"absolute",bottom:0,right:3,fontSize:11,color:"#facc15",fontWeight:900,lineHeight:1,textShadow:"0 0 3px rgba(250,204,21,0.6)"}} title={"Daily goal hit (+"+dayRTotal.toFixed(1)+"R / "+dailyTargetR.toFixed(1)+"R)"}>✓</div>}
               {/* CHANGED: Discipline-lock marker — small "D" badge in top-left corner when day's discipline score fell below threshold. */}
               {dayData&&dayData.wasLocked&&<div style={{position:"absolute",top:1,left:2,fontSize:8,fontWeight:800,color:"#fff",background:"#ef4444",borderRadius:3,padding:"0 3px",lineHeight:"11px",letterSpacing:0.3}} title="Discipline lock triggered">D</div>}
             </button>
@@ -5309,7 +5307,7 @@ function GoalsTab(props){
           <div style={{fontSize:18,fontWeight:700,color:"#e2e8f0"}}>Edit Goals</div>
           <button onClick={function(){setEditing(false);}} style={{background:"none",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:14,cursor:"pointer",fontFamily:"inherit",padding:"6px 14px"}}>Cancel</button>
         </div>
-        <div style={{padding:"10px 12px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:8,marginBottom:12,fontSize:13,color:"#94a3b8",lineHeight:1.5}}>Daily P&L target is auto-calculated from each enabled session's position size and gain hard stop: <span style={{color:"#22c55e",fontWeight:700}}>${Math.round(autoDaily)}</span> (one winning trade per session at its gain stop, sized by risk max ${(parseFloat(settings.riskMax)||0)}). Adjust sessions and gain stops in Settings.</div>
+        <div style={{padding:"10px 12px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:8,marginBottom:12,fontSize:13,color:"#94a3b8",lineHeight:1.5}}>Daily P&L target is auto-calculated from the first enabled session's position size and gain hard stop: <span style={{color:"#22c55e",fontWeight:700}}>${Math.round(autoDaily)}</span> (hitting the first session's gain stop is a hard stop for the day, sized by risk max ${(parseFloat(settings.riskMax)||0)}). Adjust sessions and gain stops in Settings.</div>
         {[{key:"weeklyMultiplier",label:"Weekly P&L Multiplier (× Daily Target)",ph:"e.g. 4"},{key:"monthlyPnL",label:"Monthly P&L Target ($)",ph:"e.g. 3000"},{key:"winRate",label:"Win Rate Target (%)",ph:"e.g. 60"},{key:"accountTarget",label:"Account Milestone ($)",ph:"e.g. 5000"},{key:"withdrawals",label:"Total Withdrawn Target ($)",ph:"e.g. 10000"}].map(function(f){
           return <div key={f.key} style={{marginBottom:12}}><label style={lbl}>{f.label}</label><input type="number" value={draft[f.key]||""} onChange={function(e){var v=e.target.value;setDraft(function(g){return Object.assign({},g,{[f.key]:v});});}} placeholder={f.ph} style={fld}/></div>;
         })}
