@@ -5335,16 +5335,11 @@ function GoalsTab(props){
           </div>
           <div style={{display:"flex",gap:8,marginTop:12}}>
             <button onClick={function(){setEditingCustomId(null);setCustomDraft(null);}} style={{flex:1,padding:"9px",background:"none",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Cancel</button>
-            <button onClick={function(){
-              console.log("[goal-edit] Save clicked. editCanSave=",editCanSave,"customDraft=",customDraft);
-              if(!editCanSave)return;
+            <button onClick={function(){if(!editCanSave)return;
               var sec=customDraft.section||"custom";var sname=customDraft.sectionName||null;
               if(sec==="newCustom"){if(sname&&sname.trim().length>0){sec="namedCustom";sname=sname.trim();}else{sec="custom";sname=null;}}
               if(sec!=="namedCustom")sname=null;
-              var patch={title:customDraft.title.trim(),target:customDraft.target,metric:customDraft.metric,period:customDraft.period,prefix:customDraft.prefix||"",suffix:customDraft.suffix||"",deadline:customDraft.deadline||null,customName:customDraft.metric==="custom"?(customDraft.customName||"").trim():null,filterField:customDraft.filterField||"",filterValue:customDraft.filterValue||"",section:sec,sectionName:sname};
-              console.log("[goal-edit] calling updateCustom",cg.id,patch);
-              updateCustom(cg.id,patch);
-              setTimeout(function(){console.log("[goal-edit] after save, localStorage tf-goals=",localStorage.getItem(GOALS_KEY));},100);
+              updateCustom(cg.id,{title:customDraft.title.trim(),target:customDraft.target,metric:customDraft.metric,period:customDraft.period,prefix:customDraft.prefix||"",suffix:customDraft.suffix||"",deadline:customDraft.deadline||null,customName:customDraft.metric==="custom"?(customDraft.customName||"").trim():null,filterField:customDraft.filterField||"",filterValue:customDraft.filterValue||"",section:sec,sectionName:sname});
               setEditingCustomId(null);setCustomDraft(null);
             }} disabled={!editCanSave} style={{flex:2,padding:"9px",background:editCanSave?"#4f46e5":"#1e293b",border:"none",borderRadius:6,color:editCanSave?"#fff":"#475569",fontSize:13,cursor:editCanSave?"pointer":"not-allowed",fontFamily:"inherit",fontWeight:700}}>Save</button>
           </div>
@@ -8704,7 +8699,10 @@ function App(props){
     // CHANGED: Daily R stops now use the session-/lock-scaled riskMax so a half-size day hits
     // its hard stops at half the dollar movement (1R loss = half the dollars).
     if(rule){
-      var riskMaxNum=(parseFloat(settings.riskMax)||0)*effSF;
+      // CHANGED: Use full riskMax (no effSF halving) so R-based stops use the same unit as the
+      // Approaching-gain-stop banner. Was triggering "Daily gain stop hit" while the banner
+      // still showed 84% — the gate doubled R when half-size was on.
+      var riskMaxNum=parseFloat(settings.riskMax)||0;
       if(riskMaxNum>0){
         var rStops=getSessionRStops(rule);
         var dayR=totalPnL/riskMaxNum;
