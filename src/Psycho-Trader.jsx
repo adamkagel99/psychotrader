@@ -3567,7 +3567,7 @@ function GoalsSnapshot(props){
   if(!hidden.withdrawals&&withdrawalTarget>0)account.push({key:"withdrawals",label:"Total Withdrawn",value:totalWithdrawn,target:withdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:money,formatTarget:money,compact:true});
   if(!hidden.winRate&&winRateTarget>0)perf.push({key:"winRate",label:"Win Rate",value:oWR,target:winRateTarget,suffix:"%",decimals:0,targetDecimals:0,wrColor:true,compact:true});
   if(!hidden.discipline&&disciplineTarget>0)perf.push({key:"discipline",label:"Discipline",value:aDisc,target:disciplineTarget,suffix:"%",decimals:0,targetDecimals:0,discColor:true,compact:true});
-  if(!hidden.daily&&dailyTarget>0)pnl.push({key:"daily",label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
+  if(!hidden.daily&&dailyTarget>0)pnl.push({key:"daily",label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
   if(!hidden.weekly&&weeklyTarget>0)pnl.push({key:"weekly",label:"Week P&L",value:weekPnL,target:weeklyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
   if(!hidden.monthly&&monthlyTarget>0)pnl.push({key:"monthly",label:"Month P&L",value:monthPnL,target:monthlyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
   // CHANGED: Inject custom goals into the appropriate default section so they show on Home alongside built-ins.
@@ -5550,7 +5550,7 @@ function GoalsTab(props){
               <div style={{marginBottom:20}}>
                 <SectionHead icon="💰" title="P&L"/>
                 <div style={gridStyle}>
-                  {dailyTarget>0&&renderStandardCard("daily",Object.assign({label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0},pnlFmt))}
+                  {dailyTarget>0&&renderStandardCard("daily",Object.assign({label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true},pnlFmt))}
                   {weeklyTarget>0&&renderStandardCard("weekly",Object.assign({label:"Week P&L",value:weekPnL,target:weeklyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true},pnlFmt))}
                   {monthlyTarget>0&&renderStandardCard("monthly",Object.assign({label:"Month P&L",value:monthPnL,target:monthlyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true},pnlFmt))}
                   {customByBucket.pnl.map(renderInlineCustom)}
