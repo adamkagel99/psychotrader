@@ -1742,6 +1742,11 @@ function CalendarGrid(props){
   var goals=(function(){try{return JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};}catch(e){return {};}})();
   var settingsForTarget=(function(){try{return JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};}catch(e){return {};}})();
   var dailyTarget=applyHalfsizeToTarget(parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(computeDailyTarget(settingsForTarget)||0));
+  // CHANGED: Per-day daily target scales by that day's stamped riskMax relative to the current
+  // full risk setting. Prevents past full-size days from being marked "target met" against a
+  // halved threshold (or vice-versa) when half-size mode is toggled later.
+  var fullDailyTarget=parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(computeDailyTarget(settingsForTarget)||0);
+  var fullRiskMax=parseFloat(settingsForTarget.riskMax)||0;
   var weeklyMultiplier=parseFloat(goals.weeklyMultiplier)||4;
   var weeklyTarget=applyHalfsizeToTarget(parseFloat(goals.weeklyPnL)>0?parseFloat(goals.weeklyPnL):((parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(computeDailyTarget(settingsForTarget)||0))*weeklyMultiplier));
   var monthlyTarget=parseFloat(goals.monthlyPnL)||0;
@@ -1812,7 +1817,14 @@ function CalendarGrid(props){
           // CHANGED: Daily goal-hit marker. Distinguished from the early-close orange dot by
           // using a checkmark glyph instead of a dot. Weekly border override removed — users
           // found it looked too similar to other states and added little signal.
-          var dayGoalHit=dailyTarget>0&&pnl!=null&&pnl>=dailyTarget;
+          // CHANGED: Per-day target scales by that day's stamped riskMax. A full-size day always
+          // needs the full target; a half-size day needs half. Toggling current half-size mode
+          // no longer retroactively flips past days' ✓ markers.
+          var perDayTarget=dailyTarget;
+          if(fullDailyTarget>0&&fullRiskMax>0&&dayRiskMax>0){
+            perDayTarget=fullDailyTarget*(dayRiskMax/fullRiskMax);
+          }
+          var dayGoalHit=perDayTarget>0&&pnl!=null&&pnl>=perDayTarget;
           return (
             <button key={i} onClick={function(){onSelect(ds);}} style={{height:46,background:bg,border:(isNoTrade?"1.5px ":"1px ")+noTradeBorderStyle+" "+bd,borderRadius:5,color:col,fontSize:13,fontWeight:isToday||isSelected||isNoTrade?700:500,cursor:"pointer",fontFamily:"inherit",position:"relative",padding:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2}} title={holiday||(isNoTrade?"No-trade day (deliberately sat out)":(pnl!=null?(pnl>=0?"+":"")+"$"+pnl.toFixed(0):""))}>
               <span style={{lineHeight:1}}>{d}</span>
@@ -1834,7 +1846,7 @@ function CalendarGrid(props){
               {earlyClose&&<div style={{position:"absolute",top:1,right:2,width:4,height:4,borderRadius:"50%",background:"#f59e0b"}}/>}
               {/* CHANGED: Daily goal-hit checkmark in the bottom-right — clearly a glyph, not a dot,
                  so it can't be confused with the early-close indicator. */}
-              {dayGoalHit&&<div style={{position:"absolute",bottom:0,right:3,fontSize:11,color:"#facc15",fontWeight:900,lineHeight:1,textShadow:"0 0 3px rgba(250,204,21,0.6)"}} title={"Daily goal hit (+$"+pnl.toFixed(0)+" / $"+dailyTarget.toFixed(0)+")"}>✓</div>}
+              {dayGoalHit&&<div style={{position:"absolute",bottom:0,right:3,fontSize:11,color:"#facc15",fontWeight:900,lineHeight:1,textShadow:"0 0 3px rgba(250,204,21,0.6)"}} title={"Daily goal hit (+$"+pnl.toFixed(0)+" / $"+perDayTarget.toFixed(0)+")"}>✓</div>}
               {/* CHANGED: Discipline-lock marker — small "D" badge in top-left corner when day's discipline score fell below threshold. */}
               {dayData&&dayData.wasLocked&&<div style={{position:"absolute",top:1,left:2,fontSize:8,fontWeight:800,color:"#fff",background:"#ef4444",borderRadius:3,padding:"0 3px",lineHeight:"11px",letterSpacing:0.3}} title="Discipline lock triggered">D</div>}
             </button>
