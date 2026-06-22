@@ -5046,7 +5046,9 @@ function GoalRing(props){
   var gp=props;
   var tgt=gp.target||0;
   var isPercent=gp.wrColor||gp.discColor;
-  var pct=isPercent?Math.min(Math.max(gp.value,0),100):(tgt>0?Math.min(Math.max(gp.value/tgt*100,0),100):0);
+  // CHANGED: pctRaw is the true progress (can exceed 100); pct is capped for the ring fill.
+  var pctRaw=isPercent?Math.max(gp.value,0):(tgt>0?Math.max(gp.value/tgt*100,0):0);
+  var pct=Math.min(pctRaw,100);
   var over=tgt>0&&gp.value>=tgt;
   var dec=gp.decimals!=null?gp.decimals:2;
   var tdec=gp.targetDecimals!=null?gp.targetDecimals:dec;
@@ -5087,7 +5089,7 @@ function GoalRing(props){
           {/* CHANGED: Show the actual percentage (e.g. 117%) even when over target — keeps every
              card visually consistent. The check-mark is removed; ring color already signals
              goal-met (greener accent). */}
-          <span style={{fontSize:cmp?12:17,fontWeight:800,color:ringColor,fontVariantNumeric:"tabular-nums"}}>{Math.round(pct)}<span style={{fontSize:cmp?7:9}}>%</span></span>
+          <span style={{fontSize:cmp?12:17,fontWeight:800,color:ringColor,fontVariantNumeric:"tabular-nums"}}>{Math.round(pctRaw)}<span style={{fontSize:cmp?7:9}}>%</span></span>
         </div>
       </div>
       {/* CHANGED: Keep the original "target X%" / "of $Y" footer text when over target — don't
