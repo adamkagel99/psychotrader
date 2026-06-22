@@ -875,23 +875,27 @@ function loadJournalRows(){
 }
 // CHANGED: Track per-day trade count so the calendar can render R only for days that actually
 // had trades. A day with zero trades (even one with saved pnl=0 / a riskMax) shows blank, not "+0.0R".
-function buildSessionMap(todayPnL,todayRiskMax,todayTradeCount){
+function buildSessionMap(todayPnL,todayRiskMax,todayTradeCount,todayTrades){
   var map={};
   loadJournalRows().forEach(function(s){
-    var tc=Array.isArray(s.trades)?s.trades.filter(function(t){return t&&t.status!=="open";}).length:((parseFloat(s.wins)||0)+(parseFloat(s.losses)||0));
-    // CHANGED: Include wasLocked so calendars can flag days where discipline lock triggered.
-    map[s.date]={pnl:parseFloat(s.pnl)||0,riskMax:parseFloat(s.riskMax)||0,tradeCount:tc,noTradeDay:!!s.noTradeDay,wasLocked:!!s.wasLocked};
+    var trades=Array.isArray(s.trades)?s.trades.filter(function(t){return t&&t.status!=="open";}):[];
+    var tc=trades.length||((parseFloat(s.wins)||0)+(parseFloat(s.losses)||0));
+    // CHANGED: rTotal sums per-trade R against each trade's stamped sizeFraction (canonical R
+    // model). Falls back to pnl/riskMax for legacy rows without a trades array.
+    var rTotal=0;
+    if(trades.length>0){rTotal=dayR(trades,s.riskMax);}
+    else if((parseFloat(s.riskMax)||0)>0){rTotal=(parseFloat(s.pnl)||0)/(parseFloat(s.riskMax)||1);}
+    map[s.date]={pnl:parseFloat(s.pnl)||0,riskMax:parseFloat(s.riskMax)||0,rTotal:rTotal,tradeCount:tc,noTradeDay:!!s.noTradeDay,wasLocked:!!s.wasLocked};
   });
-  // CHANGED: Only inject today's live data when there's no saved journal entry for today.
-  // Otherwise the saved journal pnl gets overwritten by stale/zero live state (e.g. after rollover or
-  // before state.trades hydrates), causing week P&L to drop today's contribution.
   var tc=parseInt(todayTradeCount)||0;
   var todayKey=todayStr();
   if(!map[todayKey]&&(tc>0||todayPnL!==0||todayRiskMax>0)){
-    map[todayKey]={pnl:todayPnL,riskMax:todayRiskMax||0,tradeCount:tc,noTradeDay:false};
+    // CHANGED: Today's R from live trades (each with its own sizeFraction) when available.
+    var todayRTotal=Array.isArray(todayTrades)?dayR(todayTrades.filter(function(t){return t&&t.status!=="open";}),todayRiskMax):(todayRiskMax>0?todayPnL/todayRiskMax:0);
+    map[todayKey]={pnl:todayPnL,riskMax:todayRiskMax||0,rTotal:todayRTotal,tradeCount:tc,noTradeDay:false};
   }else if(map[todayKey]&&tc>map[todayKey].tradeCount){
-    // Journal exists but the live state has more trades than the saved entry — trust the live count.
-    map[todayKey]=Object.assign({},map[todayKey],{tradeCount:tc});
+    var todayRTotal2=Array.isArray(todayTrades)?dayR(todayTrades.filter(function(t){return t&&t.status!=="open";}),todayRiskMax):map[todayKey].rTotal;
+    map[todayKey]=Object.assign({},map[todayKey],{tradeCount:tc,rTotal:todayRTotal2});
   }
   return map;
 }
@@ -1153,6 +1157,20 @@ function getStreakNudgeThreshold(){try{var v=parseFloat(localStorage.getItem("tf
 // banner can stop nagging once the user takes any action (or explicitly dismisses for the month).
 function getCurrentMonthKey(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");}
 function isMonthHalfsizeActive(){try{return localStorage.getItem("tf-month-halfsize-active")===getCurrentMonthKey();}catch(e){return false;}}
+// CHANGED: Canonical R helpers used everywhere. tradeR returns one trade's R against the
+// risk-unit at the time the trade was placed (stamped sizeFraction). dayR sums per-trade R's
+// — self-corrects across mixed-size days and matches what the journal shows. Use these
+// instead of totalPnL/settings.riskMax.
+function tradeR(t,riskMaxSetting){
+  if(!t||t.status==="open")return 0;
+  var pnl=parseFloat(t.pnl);if(isNaN(pnl))return 0;
+  var sf=(t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))?parseFloat(t.sizeFraction):1;
+  var rm=(parseFloat(riskMaxSetting)||0)*sf;
+  return rm>0?pnl/rm:0;
+}
+function dayR(trades,riskMaxSetting){
+  return (trades||[]).reduce(function(s,t){return s+tradeR(t,riskMaxSetting);},0);
+}
 // CHANGED: When half-size trading is committed for the rest of the month, daily and weekly P&L
 // targets are halved to match the lower expected output. Monthly target is unchanged — it's
 // the trigger for half-size in the first place and we don't want to retroactively lower it.
@@ -1803,7 +1821,13 @@ function CalendarGrid(props){
               {dayData&&dayData.tradeCount>0&&(function(){
                 if(props.summaryMode==="trades")return <span style={{fontSize:9,color:col,fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1}}>{dayData.tradeCount}t</span>;
                 if(pnl==null)return null;
-                if(HIDE_DOLLAR_PNL)return dayRiskMax>0?<span style={{fontSize:9,color:col,fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1}}>{(pnl/dayRiskMax>=0?"+":"")+(pnl/dayRiskMax).toFixed(1)}R</span>:null;
+                if(HIDE_DOLLAR_PNL){
+                  // CHANGED: Per-trade-stamped R total (sums each trade's R against its own
+                  // sizeFraction). Matches the journal's per-trade R.
+                  var rT=dayData.rTotal||0;
+                  if(rT===0&&dayRiskMax<=0)return null;
+                  return <span style={{fontSize:9,color:col,fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1}}>{(rT>=0?"+":"")+rT.toFixed(1)}R</span>;
+                }
                 return <span style={{fontSize:9,color:col,fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1}}>{(pnl>=0?"+$":"-$")+Math.abs(pnl).toFixed(0)}</span>;
               })()}
               {isNoTrade&&!isToday&&<span style={{fontSize:9,color:"#fbbf24",fontWeight:800,letterSpacing:0.3,lineHeight:1}}>⊘ NT</span>}
@@ -1837,7 +1861,7 @@ function DashboardCalendar(props){
   var calInitial=getPT();
   var [calYear,setCalYear]=useState(calInitial.getFullYear());
   var [calMonth,setCalMonth]=useState(calInitial.getMonth());
-  var sessionMap=buildSessionMap(props.totalPnL,props.riskMax,(props.todayTrades||[]).filter(function(t){return t&&t.status!=="open";}).length);
+  var sessionMap=buildSessionMap(props.totalPnL,props.riskMax,(props.todayTrades||[]).filter(function(t){return t&&t.status!=="open";}).length,props.todayTrades);
   var todayDateStr=todayStr();
   // CHANGED: Week strip starts on Sunday to match the calendar grid (S M T W T F S).
   var calNow=getPT();
@@ -1853,12 +1877,11 @@ function DashboardCalendar(props){
   }
   var dayLabels=["S","M","T","W","T","F","S"];
   // Calculate week's total PnL and R-value.
-  // CHANGED: weekR is the SUM of each trading day's R (1.7R + 0.8R = 2.5R), not totalPnL / totalRisk
-  // which averages instead of sums. Empty/non-trading days contribute 0. This matches how traders
-  // intuitively read weekly R — each winning day adds, each losing day subtracts.
+  // CHANGED: weekR / monthR sum each day's canonical rTotal (per-trade R against each trade's
+  // stamped sizeFraction). Matches the calendar cell, Today strip, and journal.
   var weekPnL=weekDays.reduce(function(sum,d){return sum+(d.pnl||0);},0);
   var weekRiskTotal=weekDays.reduce(function(sum,d){return sum+((d.tradeCount>0&&d.riskMax>0)?d.riskMax:0);},0);
-  var weekR=weekDays.reduce(function(sum,d){return sum+((d.tradeCount>0&&d.riskMax>0)?(d.pnl/d.riskMax):0);},0);
+  var weekR=weekDays.reduce(function(sum,d){return sum+(d.tradeCount>0?(d.rTotal||0):0);},0);
   var weekTradeCount=weekDays.reduce(function(sum,d){return sum+(d.tradeCount||0);},0);
   var weekRiskMax=weekRiskTotal; // kept for the display gating condition below
   var weekRColor=weekR>=0?"#86efac":"#fca5a5";
@@ -1874,7 +1897,7 @@ function DashboardCalendar(props){
     if(!mdData)continue;
     monthPnL+=mdData.pnl||0;
     monthTradeCount+=mdData.tradeCount||0;
-    if(mdData.tradeCount>0&&mdData.riskMax>0){monthR+=mdData.pnl/mdData.riskMax;monthHasRisk=true;}
+    if(mdData.tradeCount>0){monthR+=mdData.rTotal||0;if(mdData.riskMax>0)monthHasRisk=true;}
   }
   var monthRColor=monthR>=0?"#86efac":"#fca5a5";
   // CHANGED: One readout used in both collapsed (week) and expanded (month) states. In "trades"
@@ -1932,7 +1955,13 @@ function DashboardCalendar(props){
                     d.tradeCount>0?<span style={{fontSize:10,color:col,fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1,marginTop:2}}>{d.tradeCount}t</span>:<span style={{fontSize:10,lineHeight:1,marginTop:2,color:"transparent"}}>·</span>
                   ):pnl!=null&&(d.tradeCount>0||pnl!==0)?(
                     HIDE_DOLLAR_PNL?(
-                      dayRiskMax>0?<span style={{fontSize:10,color:col,fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1,marginTop:2}}>{(pnl/dayRiskMax>=0?"+":"")+(pnl/dayRiskMax).toFixed(1)}R</span>:<span style={{fontSize:10,lineHeight:1,marginTop:2,color:"transparent"}}>·</span>
+                    (function(){
+                      // CHANGED: Use stamped per-trade R (sum of each trade's R against own
+                      // sizeFraction) so half-size days show their true R total.
+                      var rT=d.rTotal||0;
+                      if(rT===0&&dayRiskMax<=0)return <span style={{fontSize:10,lineHeight:1,marginTop:2,color:"transparent"}}>·</span>;
+                      return <span style={{fontSize:10,color:col,fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1,marginTop:2}}>{(rT>=0?"+":"")+rT.toFixed(1)}R</span>;
+                    })()
                     ):<span style={{fontSize:10,color:col,fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1,marginTop:2}}>{(pnl>=0?"+$":"-$")+Math.abs(pnl).toFixed(0)}</span>
                   ):<span style={{fontSize:10,lineHeight:1,marginTop:2,color:"transparent"}}>·</span>}
                 </button>
@@ -3417,7 +3446,9 @@ function TodayStrip(props){
   var riskMax=parseFloat(settings.riskMax)||0;
   var todayTrades=(props.todayTrades||[]).filter(function(t){return t&&t.status!=="open";});
   var pnl=props.totalPnL||0;
-  var rVal=riskMax>0?pnl/riskMax:0;
+  // CHANGED: Use canonical dayR helper (sums per-trade R against each trade's stamped sizeFraction).
+  // Self-corrects across mixed-size days and matches the journal's per-trade R.
+  var rVal=dayR(todayTrades,riskMax);
   // CHANGED: Single source of truth for today's discipline. If today is already saved to journal,
   // use the stored disciplineScore (kept in sync by the migration + commitment-edit handlers) so
   // the Today strip cannot disagree with the Journal / Performance displays.
