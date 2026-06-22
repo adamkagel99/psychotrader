@@ -1883,7 +1883,7 @@ function DashboardCalendar(props){
     var wd=new Date(weekStartDate);wd.setDate(weekStartDate.getDate()+wi);
     var wds=(wd.getMonth()+1)+"/"+wd.getDate()+"/"+wd.getFullYear();
     var dayData=sessionMap[wds];
-    weekDays.push({date:wd,ds:wds,isToday:wds===todayDateStr,pnl:dayData?dayData.pnl:null,riskMax:dayData?dayData.riskMax:0,tradeCount:dayData?dayData.tradeCount:0,noTradeDay:!!(dayData&&dayData.noTradeDay&&dayData.tradeCount===0),wasLocked:!!(dayData&&dayData.wasLocked),holiday:MARKET_HOLIDAYS[wds]});
+    weekDays.push({date:wd,ds:wds,isToday:wds===todayDateStr,pnl:dayData?dayData.pnl:null,riskMax:dayData?dayData.riskMax:0,rTotal:dayData?dayData.rTotal:0,tradeCount:dayData?dayData.tradeCount:0,noTradeDay:!!(dayData&&dayData.noTradeDay&&dayData.tradeCount===0),wasLocked:!!(dayData&&dayData.wasLocked),holiday:MARKET_HOLIDAYS[wds]});
   }
   var dayLabels=["S","M","T","W","T","F","S"];
   // Calculate week's total PnL and R-value.
