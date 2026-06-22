@@ -4150,7 +4150,14 @@ function TradesTab(props){
       {phase!=="closed"&&(function(){
         var rule=getSessions(settings).find(function(x){return x.id===phase;});
         if(!rule)return null;
-        var riskMaxNum=parseFloat(settings.riskMax)||0;
+        // CHANGED: Match the gate's effective size fraction so banner R reads against the
+        // same (potentially halved) risk unit. Without this, a half-size day showed half the
+        // R the gate was measuring.
+        var bEffSF=rule.sizeFraction!=null?parseFloat(rule.sizeFraction)||1:1;
+        var bLock=checkDisciplineLock(state.trades,state.commitment);
+        if(bLock.locked)bEffSF=Math.min(bEffSF,0.5);
+        if(isMonthHalfsizeActive())bEffSF=Math.min(bEffSF,0.5);
+        var riskMaxNum=(parseFloat(settings.riskMax)||0)*bEffSF;
         if(riskMaxNum<=0)return null;
         var rStops=getSessionRStops(rule);
         var dayR=totalPnL/riskMaxNum;
@@ -8699,10 +8706,10 @@ function App(props){
     // CHANGED: Daily R stops now use the session-/lock-scaled riskMax so a half-size day hits
     // its hard stops at half the dollar movement (1R loss = half the dollars).
     if(rule){
-      // CHANGED: Use full riskMax (no effSF halving) so R-based stops use the same unit as the
-      // Approaching-gain-stop banner. Was triggering "Daily gain stop hit" while the banner
-      // still showed 84% — the gate doubled R when half-size was on.
-      var riskMaxNum=parseFloat(settings.riskMax)||0;
+      // CHANGED: riskMax × effSF — when half-size is on, R is measured against the current
+      // (halved) risk unit. A $452 profit at half-size means 5R, not 2.5R, and the gate
+      // triggers accordingly. Banner uses the same denominator below.
+      var riskMaxNum=(parseFloat(settings.riskMax)||0)*effSF;
       if(riskMaxNum>0){
         var rStops=getSessionRStops(rule);
         var dayR=totalPnL/riskMaxNum;
