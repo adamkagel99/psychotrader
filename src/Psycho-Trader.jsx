@@ -520,12 +520,19 @@ function calcDiscipline(trades,riskMaxArg,opts){
     var overIdx=vs.indexOf("Oversized entry");
     if(effPosMax>0&&pos>effPosMax){if(overIdx<0)vs.push("Oversized entry");}
     else if(overIdx>=0){vs.splice(overIdx,1);}
-    // CHANGED: Recompute "Max risk exceeded" — loss % worse than session-scaled risk cap.
-    // Prefer the threshold stamped at entry; else derive from current riskMaxPct × the trade's sizeFraction.
+    // CHANGED: Recompute "Max risk exceeded" using dollar comparison (loss $ vs riskMax × sf).
+    // Prefer the dollar cap stamped at entry; else derive from current settings.riskMax × the
+    // trade's sizeFraction. Legacy %-fallback retained for trades pre-dating the dollar stamp.
     var slPnl=parseFloat(t.pnl),slPct=parseFloat(t.pctPnl);
-    var effStopThresh=(parseFloat(t.stopThreshPctAtEntry)>0)?parseFloat(t.stopThreshPctAtEntry):(riskMaxPctSetting>0?riskMaxPctSetting*((t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))?parseFloat(t.sizeFraction):1):0);
+    var sfT=(t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))?parseFloat(t.sizeFraction):1;
+    var rmSet=parseFloat(riskMax)||0;
+    var effRiskCap=(parseFloat(t.riskCapDollarsAtEntry)>0)?parseFloat(t.riskCapDollarsAtEntry):(rmSet>0?rmSet*sfT:0);
+    var effStopThresh=(parseFloat(t.stopThreshPctAtEntry)>0)?parseFloat(t.stopThreshPctAtEntry):(riskMaxPctSetting>0?riskMaxPctSetting*sfT:0);
     var maxRiskIdx=vs.indexOf("Max risk exceeded");
-    if(!isNaN(slPnl)&&slPnl<0&&!isNaN(slPct)&&effStopThresh>0&&slPct<-effStopThresh){if(maxRiskIdx<0)vs.push("Max risk exceeded");}
+    var exceeded=false;
+    if(effRiskCap>0){exceeded=!isNaN(slPnl)&&slPnl<-effRiskCap;}
+    else{exceeded=!isNaN(slPnl)&&slPnl<0&&!isNaN(slPct)&&effStopThresh>0&&slPct<-effStopThresh;}
+    if(exceeded){if(maxRiskIdx<0)vs.push("Max risk exceeded");}
     else if(maxRiskIdx>=0){vs.splice(maxRiskIdx,1);}
     if(vs.length>0)anyViolation=true;
     processScore-=vs.length*(ds.violationPenalty||15);
@@ -2146,10 +2153,16 @@ function TradeTile(props){
   // CHANGED: Prefer the position max stamped on the trade at save time; fall back to the current setting.
   var posMax=(parseFloat(t.posMaxAtEntry)>0)?parseFloat(t.posMaxAtEntry):(props.posMax||0);
   if(posMax>0&&pos>posMax&&effViolations.indexOf("Oversized entry")<0){effViolations.push("Oversized entry");}
-  // CHANGED: Show "Max risk exceeded" when a losing trade's price-move loss beat the stamped
-  // session-scaled risk cap. Uses the threshold stamped at save time (settings-independent here).
-  var slThresh=parseFloat(t.stopThreshPctAtEntry)||0;
-  if(slThresh>0&&!isNaN(pnl)&&pnl<0&&!isNaN(pctPnl)&&pctPnl<-slThresh&&effViolations.indexOf("Max risk exceeded")<0){effViolations.push("Max risk exceeded");}
+  // CHANGED: "Max risk exceeded" is now dollar-based: flag iff loss $ exceeds the stamped
+  // dollar risk cap (riskMax × sizeFraction at entry). Falls back to the legacy %-based check
+  // only for older trades that pre-date the dollar cap stamp.
+  var riskCapDollars=parseFloat(t.riskCapDollarsAtEntry)||0;
+  if(riskCapDollars>0){
+    if(!isNaN(pnl)&&pnl<-riskCapDollars&&effViolations.indexOf("Max risk exceeded")<0){effViolations.push("Max risk exceeded");}
+  }else{
+    var slThresh=parseFloat(t.stopThreshPctAtEntry)||0;
+    if(slThresh>0&&!isNaN(pnl)&&pnl<0&&!isNaN(pctPnl)&&pctPnl<-slThresh&&effViolations.indexOf("Max risk exceeded")<0){effViolations.push("Max risk exceeded");}
+  }
   var setupChain=[t.setup,t.timeframe,t.candlePattern].filter(function(x){return !!x;});
   var hasSetupInfo=setupChain.length>0;
   var hasTags=emos.length>0||effViolations.length>0;
@@ -8644,8 +8657,15 @@ function App(props){
       v.splice(overIdx,1);
     }
     var stopThreshPct=(riskMaxPct>0)?riskMaxPct*sf:0;
+    // CHANGED: "Max risk exceeded" is dollar-based, not %-based. Previous %-based check
+    // (pctPnl < -(riskMaxPct × sf)) was conceptually wrong: at half-size both the dollar risk
+    // cap AND the position shrink by sf, so the % stays invariant — multiplying by sf made the
+    // threshold artificially tight. Also, for trades sized below max, % loss can exceed
+    // riskMaxPct while the actual dollar loss is still under the cap. Compare $ to $.
+    var rmDollar=parseFloat(settings&&settings.riskMax)||0;
+    var riskCapDollars=rmDollar>0?rmDollar*sf:0;
     var maxRiskIdx=v.indexOf("Max risk exceeded");
-    var stoppedOut=(!isNaN(pnlNum)&&pnlNum<0&&!isNaN(pctNum)&&stopThreshPct>0&&pctNum<-stopThreshPct);
+    var stoppedOut=(!isNaN(pnlNum)&&pnlNum<0&&riskCapDollars>0&&pnlNum<-riskCapDollars);
     if(stoppedOut){
       if(maxRiskIdx<0)v.push("Max risk exceeded");
     }else if(maxRiskIdx>=0){
@@ -8654,6 +8674,7 @@ function App(props){
     var patch={violations:v,sizeFraction:sf};
     if(effPosMax>0)patch.posMaxAtEntry=effPosMax;
     if(stopThreshPct>0)patch.stopThreshPctAtEntry=stopThreshPct;
+    if(riskCapDollars>0)patch.riskCapDollarsAtEntry=riskCapDollars;
     return Object.assign({},t,patch);
   }
   function saveTrade(t){
