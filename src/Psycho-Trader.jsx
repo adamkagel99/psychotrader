@@ -5986,6 +5986,9 @@ function EquityCurve(props){
       });
     }
   }else{
+    // CHANGED: Prepend a $0 baseline so the curve starts at 0 and visualizes change-over-range
+    // (rather than starting at day 1's pnl).
+    if(entries.length>0)pts.push({date:entries[0].date,cum:0,peak:0});
     entries.forEach(function(r){
       cum+=parseFloat(r.pnl)||0;
       if(cum>peak)peak=cum;
