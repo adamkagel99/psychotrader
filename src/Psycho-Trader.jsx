@@ -5868,12 +5868,12 @@ function MetricChart(props){
     var idx=Math.round(ratio*(pts.length-1));
     if(idx<0)idx=0;if(idx>pts.length-1)idx=pts.length-1;
     setHoverIdx(idx);
-    // CHANGED: Always publish the hovered date so the Overview tiles can re-scope to it,
-    // regardless of minTrades. The minTrades gate stays on the INBOUND side (below) to avoid
-    // cross-chart hover indicator drift between charts with different visible domains.
-    setSharedDate(pts[idx]&&pts[idx].date||null);
+    // CHANGED: Sync broadcasts only when this chart's domain matches DailyPnLBar's full range —
+    // i.e. no minTrades filter dropped early days. Otherwise the same screen X represents
+    // different dates on the two charts, so cross-chart hover would land wrong.
+    if(minTrades<=0)setSharedDate(pts[idx]&&pts[idx].date||null);
   }
-  function handleLeave(){setHoverIdx(null);setSharedDate(null);}
+  function handleLeave(){setHoverIdx(null);if(minTrades<=0)setSharedDate(null);}
   // CHANGED: Same gate — only accept inbound shared hover when domains match.
   var effectiveHoverIdx=hoverIdx;
   if(minTrades<=0&&sharedDate&&hoverIdx==null){
@@ -5888,9 +5888,8 @@ function MetricChart(props){
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8,gap:8}}>
         <div style={{display:"flex",alignItems:"baseline",gap:8,flexWrap:"wrap"}}>
           <div style={{fontSize:20,fontWeight:700,color:color,fontVariantNumeric:"tabular-nums"}}>{fmt(display.v)}</div>
-          {/* CHANGED: meta may be a string (static) or a function (display)=>string for hover-aware
-             readouts (e.g. trading time scoped to the hovered day vs the period total). */}
-          {props.meta&&<div style={{fontSize:11,color:"#94a3b8",fontWeight:600,fontVariantNumeric:"tabular-nums"}}>{typeof props.meta==="function"?props.meta(display,effectiveHoverIdx!=null):props.meta}</div>}
+          {/* CHANGED: Optional meta label to the right of the value (e.g. total trading time on the Trades chart). */}
+          {props.meta&&<div style={{fontSize:11,color:"#94a3b8",fontWeight:600,fontVariantNumeric:"tabular-nums"}}>{props.meta}</div>}
         </div>
         <div style={{textAlign:"right"}}>
           <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Change</div>
@@ -6672,10 +6671,6 @@ function PerformanceTab(props){
   }
   var filtered=allRows.filter(function(r){return inRange(r.date);});
   filtered.sort(function(a,b){return new Date(a.date)-new Date(b.date);});
-  // CHANGED: Subscribe to shared hover-date pub/sub. Used ONLY by Overview tiles below to re-scope
-  // their readouts to the hovered day; nothing else in this component is affected.
-  var __ovSh=useSharedHoverDate(true);
-  var hoveredDate=__ovSh[0];
   var allTrades=[];filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status!=="open")allTrades.push(t);});});
   // CHANGED: trading day = row with closed trades OR a non-zero stored pnl (covers entries whose
   // trades array was emptied by an older rollover bug but whose saved pnl is still correct).
@@ -6836,32 +6831,6 @@ function PerformanceTab(props){
           {/* CHANGED: CSS columns for true masonry packing — items flow vertically, balancing column heights. No empty gaps. */}
           <div style={{columnCount:props.mobile?1:3,columnGap:16}}>
           {(function(){
-            // CHANGED: When a chart publishes a hovered date, locally shadow the stats variables
-            // so ONLY the Overview tiles re-scope to that single day. All other sections below
-            // continue to use the full-range `filtered` and its derived stats.
-            var _scope=(hoveredDate&&filtered.some(function(r){return r.date===hoveredDate;}))?filtered.filter(function(r){return r.date===hoveredDate;}):filtered;
-            var _hovering=_scope!==filtered;
-            var allTrades=[];_scope.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status!=="open")allTrades.push(t);});});
-            var tradingDays=_scope.filter(function(r){return (r.trades||[]).some(function(t){return t.status!=="open";})||((parseFloat(r.pnl)||0)!==0);}).length;
-            var totalPnl=_scope.reduce(function(s,r){return s+(parseFloat(r.pnl)||0);},0);
-            var wins=allTrades.filter(function(t){return parseFloat(t.pnl)>0;});
-            var losses=allTrades.filter(function(t){return parseFloat(t.pnl)<0;});
-            var breakevens=allTrades.filter(function(t){return Math.abs(parseFloat(t.pnl)||0)<0.01;});
-            var winRate=allTrades.length>0?Math.round((wins.length/allTrades.length)*100):0;
-            var breakevenRate=allTrades.length>0?Math.round((breakevens.length/allTrades.length)*100):0;
-            var totalTradesCount=_scope.reduce(function(s,r){var n=(r.trades||[]).filter(function(t){return t&&t.status!=="open";}).length;if(n===0)n=(parseInt(r.wins)||0)+(parseInt(r.losses)||0);return s+n;},0);
-            var totalWins=wins.reduce(function(s,t){return s+parseFloat(t.pnl);},0);
-            var totalLosses=Math.abs(losses.reduce(function(s,t){return s+parseFloat(t.pnl);},0));
-            var avgWin=wins.length>0?totalWins/wins.length:0;
-            var avgLoss=losses.length>0?totalLosses/losses.length:0;
-            var pf=totalLosses>0?(totalWins/totalLosses).toFixed(2):totalWins>0?"∞":"0.00";
-            var expValue=allTrades.length>0?totalPnl/allTrades.length:0;
-            var posSizes=allTrades.map(function(t){return parseFloat(t.positionSize);}).filter(function(v){return !isNaN(v)&&v>0;});
-            var avgPosSize=posSizes.length?posSizes.reduce(function(s,v){return s+v;},0)/posSizes.length:0;
-            function pct(n){return (n>=0?"+":"")+n.toFixed(2)+"%";}
-            function avgWinPct(){var arr=wins.map(function(t){return parseFloat(t.pctPnl);}).filter(function(v){return !isNaN(v);});if(!arr.length)return "0%";return pct(arr.reduce(function(s,v){return s+v;},0)/arr.length);}
-            function avgLossPct(){var arr=losses.map(function(t){return parseFloat(t.pctPnl);}).filter(function(v){return !isNaN(v);});if(!arr.length)return "0%";return pct(arr.reduce(function(s,v){return s+v;},0)/arr.length);}
-            function expPct(){if(avgPosSize<=0||allTrades.length===0)return "0%";return pct((expValue/avgPosSize)*100);}
             // Equity sparkline: running cumulative P&L by day.
             var eq=[],c=0;filtered.forEach(function(r){c+=parseFloat(r.pnl)||0;eq.push(c);});
             var pfn=parseFloat(pf);
@@ -6905,17 +6874,9 @@ function PerformanceTab(props){
             function renderChart(){
               if(selectedMetric==="totalPnl")return <EquityCurve entries={filtered} range={range}/>;
               if(selectedMetric==="trades"){
-                // CHANGED: Trading time scoped to hovered day when hovering, else period total.
-                function ttForEntries(entries){var ms=0;entries.forEach(function(r){(r.trades||[]).forEach(function(t){if(t&&t.status!=="open"){var d=tradeDurationMs(t);if(d>0)ms+=d;}});});return ms;}
-                var totalTtMs=ttForEntries(filtered);
-                var ttMeta=function(display,hovering){
-                  if(hovering&&display&&display.date){
-                    var dayEntries=filtered.filter(function(r){return r.date===display.date;});
-                    var dayMs=ttForEntries(dayEntries);
-                    return dayMs>0?(fmtDurationMs(dayMs)+" trading"):"";
-                  }
-                  return totalTtMs>0?(fmtDurationMs(totalTtMs)+" trading"):"";
-                };
+                // CHANGED: Total trading time displayed to the right of the Trades value in the chart readout.
+                var ttMs=0;filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(t&&t.status!=="open"){var d=tradeDurationMs(t);if(d>0)ttMs+=d;}});});
+                var ttMeta=ttMs>0?(fmtDurationMs(ttMs)+" trading"):"";
                 return <MetricChart entries={filtered} label="Trades per Day" color="#a5b4fc" compute={computeTradeCount} format={fmtCount} meta={ttMeta}/>;
               }
               if(selectedMetric==="profitFactor")return <MetricChart entries={filtered} minTrades={20} label="Profit Factor" color={pfColor} compute={computePF} format={fmtNum}/>;
@@ -6955,7 +6916,7 @@ function PerformanceTab(props){
                   // returns the balance BEFORE that day's pnl (it sums journal pnl from days
                   // strictly before), so no further adjustment is needed — match EquityCurve.
                   var startBal=0;
-                  try{if(_scope.length>0){startBal=getAccountBalanceAtDate(_scope[0].date);}}catch(x){}
+                  try{if(filtered.length>0){startBal=getAccountBalanceAtDate(filtered[0].date);}}catch(x){}
                   if(!(startBal>0)){try{(loadTransfers()||[]).forEach(function(tf){var a=parseFloat(tf.amount)||0;if(a>0)startBal+=a;});}catch(x){}}
                   if(startBal>0)return (totalPnl>=0?"+":"")+(totalPnl/startBal*100).toFixed(2)+"%";
                   return "0.00%";
