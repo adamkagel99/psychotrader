@@ -5875,8 +5875,9 @@ function MetricChart(props){
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8,gap:8}}>
         <div style={{display:"flex",alignItems:"baseline",gap:8,flexWrap:"wrap"}}>
           <div style={{fontSize:20,fontWeight:700,color:color,fontVariantNumeric:"tabular-nums"}}>{fmt(display.v)}</div>
-          {/* CHANGED: Optional meta label to the right of the value (e.g. total trading time on the Trades chart). */}
-          {props.meta&&<div style={{fontSize:11,color:"#94a3b8",fontWeight:600,fontVariantNumeric:"tabular-nums"}}>{props.meta}</div>}
+          {/* CHANGED: meta may be a string (static) or a function (display)=>string for hover-aware
+             readouts (e.g. trading time scoped to the hovered day vs the period total). */}
+          {props.meta&&<div style={{fontSize:11,color:"#94a3b8",fontWeight:600,fontVariantNumeric:"tabular-nums"}}>{typeof props.meta==="function"?props.meta(display,effectiveHoverIdx!=null):props.meta}</div>}
         </div>
         <div style={{textAlign:"right"}}>
           <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Change</div>
@@ -6658,23 +6659,28 @@ function PerformanceTab(props){
   }
   var filtered=allRows.filter(function(r){return inRange(r.date);});
   filtered.sort(function(a,b){return new Date(a.date)-new Date(b.date);});
-  var allTrades=[];filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status!=="open")allTrades.push(t);});});
+  // CHANGED: When a chart publishes a hovered date via the shared pub/sub, scope ALL Overview
+  // tile values to just that day. The chart itself still renders against `filtered` (full range).
+  var sh=useSharedHoverDate(true);
+  var hoveredDate=sh[0];
+  var statsScope=(hoveredDate&&filtered.some(function(r){return r.date===hoveredDate;}))?filtered.filter(function(r){return r.date===hoveredDate;}):filtered;
+  var allTrades=[];statsScope.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status!=="open")allTrades.push(t);});});
   // CHANGED: trading day = row with closed trades OR a non-zero stored pnl (covers entries whose
   // trades array was emptied by an older rollover bug but whose saved pnl is still correct).
-  var tradingDays=filtered.filter(function(r){return (r.trades||[]).some(function(t){return t.status!=="open";})||((parseFloat(r.pnl)||0)!==0);}).length;
+  var tradingDays=statsScope.filter(function(r){return (r.trades||[]).some(function(t){return t.status!=="open";})||((parseFloat(r.pnl)||0)!==0);}).length;
   var avgTradesPerDay=tradingDays>0?(allTrades.length/tradingDays):0;
   // CHANGED: Total P&L = sum of each row's stored pnl (snapshot) so it's accurate even when an
   // entry's trades array is empty/corrupted but its pnl was saved correctly.
-  var totalPnl=filtered.reduce(function(s,r){return s+(parseFloat(r.pnl)||0);},0);
+  var totalPnl=statsScope.reduce(function(s,r){return s+(parseFloat(r.pnl)||0);},0);
   var wins=allTrades.filter(function(t){return parseFloat(t.pnl)>0;});
   var losses=allTrades.filter(function(t){return parseFloat(t.pnl)<0;});
   var breakevens=allTrades.filter(function(t){return Math.abs(parseFloat(t.pnl)||0)<0.01;});
   // CHANGED: No-trade days are deliberate breakeven days (zero trades, net $0) — tracked alongside BE.
-  var noTradeDays=filtered.filter(function(r){return r.noTradeDay&&(r.trades||[]).filter(function(t){return t.status!=="open";}).length===0;});
+  var noTradeDays=statsScope.filter(function(r){return r.noTradeDay&&(r.trades||[]).filter(function(t){return t.status!=="open";}).length===0;});
   var winRate=allTrades.length>0?Math.round((wins.length/allTrades.length)*100):0;
   // CHANGED: Snapshot-based trade count — falls back to wins+losses per row when r.trades is empty
   // (legacy corruption case). Prefers actual trades array length when present.
-  var totalTradesCount=filtered.reduce(function(s,r){
+  var totalTradesCount=statsScope.reduce(function(s,r){
     var n=(r.trades||[]).filter(function(t){return t&&t.status!=="open";}).length;
     if(n===0)n=(parseInt(r.wins)||0)+(parseInt(r.losses)||0);
     return s+n;
@@ -6861,9 +6867,17 @@ function PerformanceTab(props){
             function renderChart(){
               if(selectedMetric==="totalPnl")return <EquityCurve entries={filtered} range={range}/>;
               if(selectedMetric==="trades"){
-                // CHANGED: Total trading time displayed to the right of the Trades value in the chart readout.
-                var ttMs=0;filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(t&&t.status!=="open"){var d=tradeDurationMs(t);if(d>0)ttMs+=d;}});});
-                var ttMeta=ttMs>0?(fmtDurationMs(ttMs)+" trading"):"";
+                // CHANGED: Trading time scoped to hovered day when hovering, else period total.
+                function ttForEntries(entries){var ms=0;entries.forEach(function(r){(r.trades||[]).forEach(function(t){if(t&&t.status!=="open"){var d=tradeDurationMs(t);if(d>0)ms+=d;}});});return ms;}
+                var totalTtMs=ttForEntries(filtered);
+                var ttMeta=function(display,hovering){
+                  if(hovering&&display&&display.date){
+                    var dayEntries=filtered.filter(function(r){return r.date===display.date;});
+                    var dayMs=ttForEntries(dayEntries);
+                    return dayMs>0?(fmtDurationMs(dayMs)+" trading"):"";
+                  }
+                  return totalTtMs>0?(fmtDurationMs(totalTtMs)+" trading"):"";
+                };
                 return <MetricChart entries={filtered} label="Trades per Day" color="#a5b4fc" compute={computeTradeCount} format={fmtCount} meta={ttMeta}/>;
               }
               if(selectedMetric==="profitFactor")return <MetricChart entries={filtered} minTrades={20} label="Profit Factor" color={pfColor} compute={computePF} format={fmtNum}/>;
@@ -6903,7 +6917,7 @@ function PerformanceTab(props){
                   // returns the balance BEFORE that day's pnl (it sums journal pnl from days
                   // strictly before), so no further adjustment is needed — match EquityCurve.
                   var startBal=0;
-                  try{if(filtered.length>0){startBal=getAccountBalanceAtDate(filtered[0].date);}}catch(x){}
+                  try{if(statsScope.length>0){startBal=getAccountBalanceAtDate(statsScope[0].date);}}catch(x){}
                   if(!(startBal>0)){try{(loadTransfers()||[]).forEach(function(tf){var a=parseFloat(tf.amount)||0;if(a>0)startBal+=a;});}catch(x){}}
                   if(startBal>0)return (totalPnl>=0?"+":"")+(totalPnl/startBal*100).toFixed(2)+"%";
                   return "0.00%";
