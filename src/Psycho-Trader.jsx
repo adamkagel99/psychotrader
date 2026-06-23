@@ -5986,9 +5986,12 @@ function EquityCurve(props){
       });
     }
   }else{
-    // CHANGED: Prepend a $0 baseline so the curve starts at 0 and visualizes change-over-range
-    // (rather than starting at day 1's pnl).
-    if(entries.length>0)pts.push({date:entries[0].date,cum:0,peak:0});
+    // CHANGED: Prepend a $0 baseline at the day BEFORE the first entry so the curve starts at 0
+    // and rises with each day's P&L, without duplicating the first entry's x-position.
+    if(entries.length>0){
+      var d0=new Date(entries[0].date);d0.setDate(d0.getDate()-1);
+      pts.push({date:d0.toISOString().slice(0,10),cum:0,peak:0});
+    }
     entries.forEach(function(r){
       cum+=parseFloat(r.pnl)||0;
       if(cum>peak)peak=cum;
