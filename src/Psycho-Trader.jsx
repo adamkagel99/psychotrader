@@ -5855,12 +5855,12 @@ function MetricChart(props){
     var idx=Math.round(ratio*(pts.length-1));
     if(idx<0)idx=0;if(idx>pts.length-1)idx=pts.length-1;
     setHoverIdx(idx);
-    // CHANGED: Sync broadcasts only when this chart's domain matches DailyPnLBar's full range —
-    // i.e. no minTrades filter dropped early days. Otherwise the same screen X represents
-    // different dates on the two charts, so cross-chart hover would land wrong.
-    if(minTrades<=0)setSharedDate(pts[idx]&&pts[idx].date||null);
+    // CHANGED: Always publish the hovered date so the Overview tiles can re-scope to it,
+    // regardless of minTrades. The minTrades gate stays on the INBOUND side (below) to avoid
+    // cross-chart hover indicator drift between charts with different visible domains.
+    setSharedDate(pts[idx]&&pts[idx].date||null);
   }
-  function handleLeave(){setHoverIdx(null);if(minTrades<=0)setSharedDate(null);}
+  function handleLeave(){setHoverIdx(null);setSharedDate(null);}
   // CHANGED: Same gate — only accept inbound shared hover when domains match.
   var effectiveHoverIdx=hoverIdx;
   if(minTrades<=0&&sharedDate&&hoverIdx==null){
