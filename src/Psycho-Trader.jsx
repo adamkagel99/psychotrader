@@ -6659,28 +6659,27 @@ function PerformanceTab(props){
   }
   var filtered=allRows.filter(function(r){return inRange(r.date);});
   filtered.sort(function(a,b){return new Date(a.date)-new Date(b.date);});
-  // CHANGED: When a chart publishes a hovered date via the shared pub/sub, scope ALL Overview
-  // tile values to just that day. The chart itself still renders against `filtered` (full range).
-  var sh=useSharedHoverDate(true);
-  var hoveredDate=sh[0];
-  var statsScope=(hoveredDate&&filtered.some(function(r){return r.date===hoveredDate;}))?filtered.filter(function(r){return r.date===hoveredDate;}):filtered;
-  var allTrades=[];statsScope.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status!=="open")allTrades.push(t);});});
+  // CHANGED: Subscribe to shared hover-date pub/sub. Used ONLY by Overview tiles below to re-scope
+  // their readouts to the hovered day; nothing else in this component is affected.
+  var __ovSh=useSharedHoverDate(true);
+  var hoveredDate=__ovSh[0];
+  var allTrades=[];filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status!=="open")allTrades.push(t);});});
   // CHANGED: trading day = row with closed trades OR a non-zero stored pnl (covers entries whose
   // trades array was emptied by an older rollover bug but whose saved pnl is still correct).
-  var tradingDays=statsScope.filter(function(r){return (r.trades||[]).some(function(t){return t.status!=="open";})||((parseFloat(r.pnl)||0)!==0);}).length;
+  var tradingDays=filtered.filter(function(r){return (r.trades||[]).some(function(t){return t.status!=="open";})||((parseFloat(r.pnl)||0)!==0);}).length;
   var avgTradesPerDay=tradingDays>0?(allTrades.length/tradingDays):0;
   // CHANGED: Total P&L = sum of each row's stored pnl (snapshot) so it's accurate even when an
   // entry's trades array is empty/corrupted but its pnl was saved correctly.
-  var totalPnl=statsScope.reduce(function(s,r){return s+(parseFloat(r.pnl)||0);},0);
+  var totalPnl=filtered.reduce(function(s,r){return s+(parseFloat(r.pnl)||0);},0);
   var wins=allTrades.filter(function(t){return parseFloat(t.pnl)>0;});
   var losses=allTrades.filter(function(t){return parseFloat(t.pnl)<0;});
   var breakevens=allTrades.filter(function(t){return Math.abs(parseFloat(t.pnl)||0)<0.01;});
   // CHANGED: No-trade days are deliberate breakeven days (zero trades, net $0) — tracked alongside BE.
-  var noTradeDays=statsScope.filter(function(r){return r.noTradeDay&&(r.trades||[]).filter(function(t){return t.status!=="open";}).length===0;});
+  var noTradeDays=filtered.filter(function(r){return r.noTradeDay&&(r.trades||[]).filter(function(t){return t.status!=="open";}).length===0;});
   var winRate=allTrades.length>0?Math.round((wins.length/allTrades.length)*100):0;
   // CHANGED: Snapshot-based trade count — falls back to wins+losses per row when r.trades is empty
   // (legacy corruption case). Prefers actual trades array length when present.
-  var totalTradesCount=statsScope.reduce(function(s,r){
+  var totalTradesCount=filtered.reduce(function(s,r){
     var n=(r.trades||[]).filter(function(t){return t&&t.status!=="open";}).length;
     if(n===0)n=(parseInt(r.wins)||0)+(parseInt(r.losses)||0);
     return s+n;
@@ -6824,6 +6823,32 @@ function PerformanceTab(props){
           {/* CHANGED: CSS columns for true masonry packing — items flow vertically, balancing column heights. No empty gaps. */}
           <div style={{columnCount:props.mobile?1:3,columnGap:16}}>
           {(function(){
+            // CHANGED: When a chart publishes a hovered date, locally shadow the stats variables
+            // so ONLY the Overview tiles re-scope to that single day. All other sections below
+            // continue to use the full-range `filtered` and its derived stats.
+            var _scope=(hoveredDate&&filtered.some(function(r){return r.date===hoveredDate;}))?filtered.filter(function(r){return r.date===hoveredDate;}):filtered;
+            var _hovering=_scope!==filtered;
+            var allTrades=[];_scope.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status!=="open")allTrades.push(t);});});
+            var tradingDays=_scope.filter(function(r){return (r.trades||[]).some(function(t){return t.status!=="open";})||((parseFloat(r.pnl)||0)!==0);}).length;
+            var totalPnl=_scope.reduce(function(s,r){return s+(parseFloat(r.pnl)||0);},0);
+            var wins=allTrades.filter(function(t){return parseFloat(t.pnl)>0;});
+            var losses=allTrades.filter(function(t){return parseFloat(t.pnl)<0;});
+            var breakevens=allTrades.filter(function(t){return Math.abs(parseFloat(t.pnl)||0)<0.01;});
+            var winRate=allTrades.length>0?Math.round((wins.length/allTrades.length)*100):0;
+            var breakevenRate=allTrades.length>0?Math.round((breakevens.length/allTrades.length)*100):0;
+            var totalTradesCount=_scope.reduce(function(s,r){var n=(r.trades||[]).filter(function(t){return t&&t.status!=="open";}).length;if(n===0)n=(parseInt(r.wins)||0)+(parseInt(r.losses)||0);return s+n;},0);
+            var totalWins=wins.reduce(function(s,t){return s+parseFloat(t.pnl);},0);
+            var totalLosses=Math.abs(losses.reduce(function(s,t){return s+parseFloat(t.pnl);},0));
+            var avgWin=wins.length>0?totalWins/wins.length:0;
+            var avgLoss=losses.length>0?totalLosses/losses.length:0;
+            var pf=totalLosses>0?(totalWins/totalLosses).toFixed(2):totalWins>0?"∞":"0.00";
+            var expValue=allTrades.length>0?totalPnl/allTrades.length:0;
+            var posSizes=allTrades.map(function(t){return parseFloat(t.positionSize);}).filter(function(v){return !isNaN(v)&&v>0;});
+            var avgPosSize=posSizes.length?posSizes.reduce(function(s,v){return s+v;},0)/posSizes.length:0;
+            function pct(n){return (n>=0?"+":"")+n.toFixed(2)+"%";}
+            function avgWinPct(){var arr=wins.map(function(t){return parseFloat(t.pctPnl);}).filter(function(v){return !isNaN(v);});if(!arr.length)return "0%";return pct(arr.reduce(function(s,v){return s+v;},0)/arr.length);}
+            function avgLossPct(){var arr=losses.map(function(t){return parseFloat(t.pctPnl);}).filter(function(v){return !isNaN(v);});if(!arr.length)return "0%";return pct(arr.reduce(function(s,v){return s+v;},0)/arr.length);}
+            function expPct(){if(avgPosSize<=0||allTrades.length===0)return "0%";return pct((expValue/avgPosSize)*100);}
             // Equity sparkline: running cumulative P&L by day.
             var eq=[],c=0;filtered.forEach(function(r){c+=parseFloat(r.pnl)||0;eq.push(c);});
             var pfn=parseFloat(pf);
@@ -6917,7 +6942,7 @@ function PerformanceTab(props){
                   // returns the balance BEFORE that day's pnl (it sums journal pnl from days
                   // strictly before), so no further adjustment is needed — match EquityCurve.
                   var startBal=0;
-                  try{if(statsScope.length>0){startBal=getAccountBalanceAtDate(statsScope[0].date);}}catch(x){}
+                  try{if(_scope.length>0){startBal=getAccountBalanceAtDate(_scope[0].date);}}catch(x){}
                   if(!(startBal>0)){try{(loadTransfers()||[]).forEach(function(tf){var a=parseFloat(tf.amount)||0;if(a>0)startBal+=a;});}catch(x){}}
                   if(startBal>0)return (totalPnl>=0?"+":"")+(totalPnl/startBal*100).toFixed(2)+"%";
                   return "0.00%";
