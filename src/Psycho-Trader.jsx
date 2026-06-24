@@ -4684,7 +4684,7 @@ function TradesTab(props){
               );
             })()}
             <div style={{fontSize:11,color:"#64748b",letterSpacing:1,textTransform:"uppercase",marginBottom:6,fontWeight:600}}>Daily Note</div>
-            <textarea value={entry.note||""} onChange={function(e){var v=e.target.value;var updated=Object.assign({},entry,{note:v});var dateKey=isToday?todayStr():selectedDate;try{localStorage.setItem("journal:"+dateKey.replace(/\//g,"-"),JSON.stringify(updated));}catch(err){}if(isToday){setTodayJournalEntry(updated);}else{setPastSessions(function(arr){return arr.map(function(x){return x.date===selectedDate?updated:x;});});}if(props.bumpReloadKey)props.bumpReloadKey();}} placeholder="What worked? What didn't? Any rules to remember tomorrow?" style={Object.assign({},fld,{minHeight:80,resize:"vertical",fontFamily:"inherit",lineHeight:1.5})}/>
+            <textarea value={entry.note||""} onChange={function(e){var v=e.target.value;var updated=Object.assign({},entry,{note:v});var dateKey=isToday?todayStr():selectedDate;try{localStorage.setItem("journal:"+dateKey.replace(/\//g,"-"),JSON.stringify(updated));}catch(err){}if(isToday){setTodayJournalEntry(updated);/* CHANGED: also keep App state.dailyNote in sync so the autosave effect doesn't overwrite the note with "" when other state (e.g. commitment Yes/No) changes. */if(props.setState)props.setState(function(s){return Object.assign({},s,{dailyNote:v});});}else{setPastSessions(function(arr){return arr.map(function(x){return x.date===selectedDate?updated:x;});});}if(props.bumpReloadKey)props.bumpReloadKey();}} placeholder="What worked? What didn't? Any rules to remember tomorrow?" style={Object.assign({},fld,{minHeight:80,resize:"vertical",fontFamily:"inherit",lineHeight:1.5})}/>
             {/* CHANGED: Render the snapshot of economic events that matched the user's filters
                on this day. Helps re-read past sessions with the macro context they were traded in. */}
             {(function(){
@@ -8479,10 +8479,14 @@ function App(props){
       try{
         var closedT=(state.trades||[]).filter(function(t){return t&&t.status!=="open";});
         var note=state.dailyNote||"";
-        // No closed trades AND no note → don't create an empty journal entry.
-        if(closedT.length===0&&!note)return;
         var key="journal:"+todayStr().replace(/\//g,"-");
         var existing=null;try{var raw=localStorage.getItem(key);if(raw)existing=JSON.parse(raw);}catch(e){}
+        // CHANGED: If state's note is empty but the saved entry has one (e.g. user typed in the
+        // Journal textarea which writes localStorage directly), preserve it. Prevents the autosave
+        // from wiping the note when other state changes (commitment Yes/No, etc.) trigger a save.
+        if(!note&&existing&&existing.note)note=existing.note;
+        // No closed trades AND no note → don't create an empty journal entry.
+        if(closedT.length===0&&!note)return;
         var riskMaxN=parseFloat(settings.riskMax)||0;
         var discScore=0;try{discScore=calcDiscipline(closedT,riskMaxN,{commitment:state.commitment||null});}catch(e){}
         var entry={
