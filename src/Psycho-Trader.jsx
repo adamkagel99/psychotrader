@@ -1926,7 +1926,11 @@ function DashboardCalendar(props){
     if(summaryMode==="trades"){
       readoutText=headerScope.trades+"t";
     }else if(HIDE_DOLLAR_PNL){
-      if(headerScope.hasRisk){readoutText=(headerScope.r>=0?"+":"")+headerScope.r.toFixed(1)+"R";readoutColor=headerScope.r>=0?"#86efac":"#fca5a5";}
+      // CHANGED: When $ is hidden, show R as primary with $ alongside for dollar context.
+      if(headerScope.hasRisk){
+        readoutText=(headerScope.r>=0?"+":"")+headerScope.r.toFixed(1)+"R "+(headerScope.pnl>=0?"+$":"-$")+Math.abs(headerScope.pnl).toFixed(0);
+        readoutColor=headerScope.r>=0?"#86efac":"#fca5a5";
+      }
     }else{
       readoutText=(headerScope.pnl>=0?"+$":"-$")+Math.abs(headerScope.pnl).toFixed(0);
       readoutColor=headerScope.pnl>=0?"#86efac":"#fca5a5";
@@ -2051,10 +2055,19 @@ function ChecklistPanel(props){
             var boxBg=showWarn?"#ef4444":(showOK&&!inv?"#22c55e":"transparent");
             var boxBorder=showWarn?"#ef4444":(showOK&&!inv?"#22c55e":"#475569");
             var labelColor=showWarn?"#fca5a5":(showOK&&!inv?"#86efac":"#cbd5e1");
-            // Substitute position max in label if applicable
+            // Substitute position max in label if applicable. Scale by the day's effective sizing:
+            // first enabled session's sizeFraction × half-size mode (if active for the month).
             var label=item.label;
             if(item.key==="positionSized"&&settings&&settings.positionMin&&settings.positionMax){
-              label=label+" ($"+settings.positionMin+"-$"+settings.positionMax+")";
+              var sf=1;
+              try{
+                var sess=getSessions(settings).filter(function(s){return s.enabled!==false;});
+                if(sess.length>0&&sess[0].sizeFraction!=null){var v=parseFloat(sess[0].sizeFraction);if(!isNaN(v)&&v>0)sf=v;}
+              }catch(e){}
+              if(isMonthHalfsizeActive())sf=sf*0.5;
+              var pMin=Math.round(parseFloat(settings.positionMin)*sf);
+              var pMax=Math.round(parseFloat(settings.positionMax)*sf);
+              label=label+" ($"+pMin+"-$"+pMax+")";
             }
             return (
               <div key={item.key+":"+i}>
@@ -2147,6 +2160,13 @@ function TradeTile(props){
   var pctPnl=parseFloat(t.pctPnl||0);
   var hasPnl=t.pnl!==""&&t.pnl!=null&&!isNaN(pnl);
   var hasPct=t.pctPnl!==""&&t.pctPnl!=null&&!isNaN(pctPnl);
+  // CHANGED: Compute R for this trade — prefer stamped dollar risk cap, else derive from
+  // props.riskMax × sizeFraction. Used as the primary big readout when $ is hidden.
+  var _sf=(t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))?parseFloat(t.sizeFraction):1;
+  var _rmFallback=(parseFloat(props.riskMax)||0)*_sf;
+  var _riskCap=(parseFloat(t.riskCapDollarsAtEntry)>0)?parseFloat(t.riskCapDollarsAtEntry):_rmFallback;
+  var rMul=(hasPnl&&_riskCap>0)?(pnl/_riskCap):NaN;
+  var hasR=!isNaN(rMul);
   var emos=filterEmotions(t.emotions||[]);
   var effViolations=(t.violations||[]).slice();
   var pos=parseFloat(t.positionSize)||0;
@@ -2226,7 +2246,7 @@ function TradeTile(props){
       {hasPnl&&(
         <div style={{display:"flex",alignItems:"baseline",gap:10,marginTop:8,flexWrap:"wrap"}}>
           {HIDE_DOLLAR_PNL
-            ? (hasPct&&<div style={{fontSize:18,fontWeight:800,color:pnlColor,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>{pctPnl>=0?"+":""}{pctPnl.toFixed(2)}%</div>)
+            ? (hasR&&<div style={{fontSize:18,fontWeight:800,color:pnlColor,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>{rMul>=0?"+":""}{rMul.toFixed(2)}R</div>)
             : (<>
                 <div style={{fontSize:18,fontWeight:800,color:pnlColor,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>{(pnl>=0?"+":"-")+"$"+Math.abs(pnl).toFixed(2)}</div>
                 {hasPct&&<div style={{fontSize:13,color:pctPnl>=0?"#86efac":"#fca5a5",fontWeight:600,fontVariantNumeric:"tabular-nums"}}>({pctPnl>=0?"+":""}{pctPnl.toFixed(2)}%)</div>}
@@ -2277,6 +2297,8 @@ function TradeTile(props){
       {timeText&&(
         <div style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"#64748b",marginTop:8,fontVariantNumeric:"tabular-nums"}}>
           <span>{timeText}</span>
+          {/* CHANGED: When $ hidden, R sits in the big slot so % moves down here next to the time. */}
+          {HIDE_DOLLAR_PNL&&hasPct&&<span><span style={{color:"#334155",margin:"0 6px"}}>·</span><span style={{color:pctPnl>=0?"#86efac":"#fca5a5",fontWeight:600}}>{pctPnl>=0?"+":""}{pctPnl.toFixed(2)}%</span></span>}
           {!hasPriceInfo&&contractsText&&<span><span style={{color:"#334155",margin:"0 6px"}}>·</span>{contractsText}</span>}
         </div>
       )}
@@ -4283,9 +4305,11 @@ function TradesTab(props){
                   </div>
                   <span style={{fontSize:11,color:"#fb923c",fontWeight:600,flexShrink:0}}>Manage →</span>
                 </div>
-                <div style={{display:"flex",alignItems:"center",gap:10,marginTop:6,fontSize:11,color:"#94a3b8"}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginTop:6,fontSize:11,color:"#94a3b8",flexWrap:"wrap"}}>
                   {!isNaN(avgEntry)&&<span>Avg entry <span style={{color:"#e2e8f0",fontWeight:600}}>${avgEntry.toFixed(2)}</span></span>}
                   <span>{remaining} {remaining===1?cls.unitSingular:cls.unit} open</span>
+                  {/* CHANGED: Open position size = remaining contracts × avg entry, for at-a-glance exposure. */}
+                  {!isNaN(avgEntry)&&remaining>0&&<span>· <span style={{color:"#e2e8f0",fontWeight:600}}>${(remaining*avgEntry).toFixed(0)}</span> open</span>}
                   {lt.openedAt&&<span style={{color:"#64748b"}}>· opened {fmtTime(new Date(lt.openedAt))}</span>}
                 </div>
               </button>
@@ -4420,7 +4444,7 @@ function TradesTab(props){
                   ):(
                     <div style={{display:"grid",gridTemplateColumns:props.mobile?"1fr":"repeat(3, minmax(0,1fr))",gap:8}}>
                       {g.trades.map(function(t,i){return (
-                        <TradeTile key={(t.id||"")+"_"+i} t={t} i={i} posMax={settings.positionMax} hideControls={true}/>
+                        <TradeTile key={(t.id||"")+"_"+i} t={t} i={i} posMax={settings.positionMax} riskMax={settings.riskMax} hideControls={true}/>
                       );})}
                     </div>
                   )}
@@ -4517,7 +4541,7 @@ function TradesTab(props){
             <div key={t.id||i} style={isEditing?{gridColumn:"1 / -1"}:null}>
               {isEditing
                 ?<TradeForm trade={editDraft||t} setTrade={function(updater){setEditDraft(function(prev){var base=prev||t;return typeof updater==="function"?updater(base):updater;});}} onSave={function(updated){savePastTrade(updated);setEditDraft(null);}} onCancel={cancelEdit} settings={settings} tradeOptions={props.tradeOptions}/>
-                :<TradeTile t={t} i={i} posMax={settings.positionMax} onDelete={function(){deletePastTrade(t.id);}} onEdit={function(){startEdit(t);}}/>
+                :<TradeTile t={t} i={i} posMax={settings.positionMax} riskMax={settings.riskMax} onDelete={function(){deletePastTrade(t.id);}} onEdit={function(){startEdit(t);}}/>
               }
             </div>
           );
@@ -4526,7 +4550,7 @@ function TradesTab(props){
           <div key={t.id} style={isEditing?{gridColumn:"1 / -1"}:null}>
             {isEditing
               ?<TradeForm trade={editDraft||t} setTrade={function(updater){setEditDraft(function(prev){var base=prev||t;return typeof updater==="function"?updater(base):updater;});}} onSave={function(updated){savePastTrade(updated);setEditDraft(null);}} onCancel={cancelEdit} settings={settings} tradeOptions={props.tradeOptions}/>
-              :<TradeTile t={t} i={i} posMax={settings.positionMax} onDelete={function(){deleteTrade(t.id);}} onEdit={function(){startEdit(t);}}/>
+              :<TradeTile t={t} i={i} posMax={settings.positionMax} riskMax={settings.riskMax} onDelete={function(){deleteTrade(t.id);}} onEdit={function(){startEdit(t);}}/>
             }
           </div>
         );
@@ -4851,7 +4875,7 @@ function JournalTab(props){
                     <button onClick={function(){deleteDraftTrade(i);}} aria-label="Remove" style={{padding:"4px 9px",background:"#7f1d1d33",border:"1px solid #7f1d1d",borderRadius:4,color:"#fca5a5",fontSize:13,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>
                   </div>
                 )}
-                <TradeTile t={t} i={i} posMax={settings.positionMax} hideControls={true}/>
+                <TradeTile t={t} i={i} posMax={settings.positionMax} riskMax={settings.riskMax} hideControls={true}/>
               </div>
             );
           })}
@@ -6152,6 +6176,8 @@ function WhatsWorkingPanel(props){
 function RMultipleHistogram(props){
   var rows=props.rows||[],fallback=props.fallbackRiskMax||0;
   var Rs=[];
+  // CHANGED: Also collect dollar P&L per win/loss to show $ alongside R averages.
+  var winsDollar=[],lossesDollar=[];
   rows.forEach(function(r){
     var rowRisk=parseFloat(r.riskMax)||fallback;
     (r.trades||[]).forEach(function(t){
@@ -6161,6 +6187,7 @@ function RMultipleHistogram(props){
       var risk=rowRisk*sf;
       if(risk<=0)return;
       Rs.push(pnl/risk);
+      if(pnl>0)winsDollar.push(pnl);else if(pnl<0)lossesDollar.push(pnl);
     });
   });
   if(Rs.length<3)return null;
@@ -6206,9 +6233,16 @@ function RMultipleHistogram(props){
           )}
         </div>
         <div style={{textAlign:"right",fontSize:10,color:"#94a3b8",lineHeight:1.55}}>
-          <div>Avg win: <span style={{color:"#86efac",fontWeight:700}}>+{avgWinR.toFixed(2)}R</span></div>
-          <div>Avg loss: <span style={{color:"#fca5a5",fontWeight:700}}>{avgLossR.toFixed(2)}R</span></div>
-          <div>n = {Rs.length}</div>
+          {/* CHANGED: $ dollar averages displayed beside R averages so the magnitude is concrete. */}
+          {(function(){
+            var avgWinD=winsDollar.length>0?winsDollar.reduce(function(s,v){return s+v;},0)/winsDollar.length:0;
+            var avgLossD=lossesDollar.length>0?lossesDollar.reduce(function(s,v){return s+v;},0)/lossesDollar.length:0;
+            return (<>
+              <div>Avg win: <span style={{color:"#86efac",fontWeight:700}}>+{avgWinR.toFixed(2)}R</span>{winsDollar.length>0&&<span style={{color:"#86efac",fontWeight:600,marginLeft:4}}>(+${avgWinD.toFixed(0)})</span>}</div>
+              <div>Avg loss: <span style={{color:"#fca5a5",fontWeight:700}}>{avgLossR.toFixed(2)}R</span>{lossesDollar.length>0&&<span style={{color:"#fca5a5",fontWeight:600,marginLeft:4}}>(-${Math.abs(avgLossD).toFixed(0)})</span>}</div>
+              <div>n = {Rs.length}</div>
+            </>);
+          })()}
         </div>
       </div>
       <div ref={barsRef} onMouseMove={moveBars} onMouseLeave={leaveBars} onTouchStart={moveBars} onTouchMove={moveBars} onTouchEnd={leaveBars} style={{display:"flex",alignItems:"flex-end",gap:3,height:120,marginBottom:6,cursor:"crosshair",touchAction:"none"}}>
@@ -6336,8 +6370,16 @@ function DisciplineScatter(props){
           )}
         </div>
         <div style={{textAlign:"right",fontSize:10,color:"#94a3b8",lineHeight:1.55}}>
-          <div>Below thr ({below.length}): <span style={{color:belowAvgR>=0?"#86efac":"#fca5a5",fontWeight:700}}>{fmtR(belowAvgR)}</span></div>
-          <div>At/above ({above.length}): <span style={{color:aboveAvgR>=0?"#86efac":"#fca5a5",fontWeight:700}}>{fmtR(aboveAvgR)}</span></div>
+          {/* CHANGED: $ averages alongside R averages so the magnitude is concrete. */}
+          {(function(){
+            var bAvgD=below.length>0?below.reduce(function(s,p){return s+(p.pnl||0);},0)/below.length:0;
+            var aAvgD=above.length>0?above.reduce(function(s,p){return s+(p.pnl||0);},0)/above.length:0;
+            function fmtD(v){return (v>=0?"+$":"-$")+Math.abs(v).toFixed(0);}
+            return (<>
+              <div>Below thr ({below.length}): <span style={{color:belowAvgR>=0?"#86efac":"#fca5a5",fontWeight:700}}>{fmtR(belowAvgR)}</span>{below.length>0&&<span style={{color:bAvgD>=0?"#86efac":"#fca5a5",fontWeight:600,marginLeft:4}}>({fmtD(bAvgD)})</span>}</div>
+              <div>At/above ({above.length}): <span style={{color:aboveAvgR>=0?"#86efac":"#fca5a5",fontWeight:700}}>{fmtR(aboveAvgR)}</span>{above.length>0&&<span style={{color:aAvgD>=0?"#86efac":"#fca5a5",fontWeight:600,marginLeft:4}}>({fmtD(aAvgD)})</span>}</div>
+            </>);
+          })()}
         </div>
       </div>
       <svg ref={svgRef} viewBox={"0 0 "+W+" "+H} style={{display:"block",width:"100%",height:"100%",flex:1,minHeight:120,cursor:hover!=null&&props.onNavigateToTrade?"pointer":"crosshair",touchAction:"none"}} preserveAspectRatio="none" onMouseMove={onMove} onMouseLeave={onLeave} onTouchStart={onMove} onTouchMove={onMove} onTouchEnd={onLeave} onClick={onSvgClick}>
@@ -7191,7 +7233,7 @@ function PerformanceTab(props){
               var lr=n>0?Math.round((l/n)*100):0;
               var avgPct=pcts.length>0?(pcts.reduce(function(s,v){return s+v;},0)/pcts.length):0;
               var expectancy=n>0?pnl/n:0;
-              return {n:n,wr:wr,lr:lr,avgPct:avgPct,expectancy:expectancy};
+              return {n:n,l:l,wr:wr,lr:lr,avgPct:avgPct,expectancy:expectancy};
             }
             var cats=[
               {label:"No setup tagged",stat:summarize(function(t){return !t.setup;})},
@@ -7211,7 +7253,7 @@ function PerformanceTab(props){
                     <div key={c.label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:i<cats.length-1?"1px solid #1e293b":"none",gap:8}}>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{fontSize:13,color:"#e2e8f0",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.label}</div>
-                        <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>{g.n} trade{g.n===1?"":"s"} · {g.wr}% WR</div>
+                        <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>{g.n} trade{g.n===1?"":"s"} · {g.l} loss{g.l===1?"":"es"} ({g.lr}%)</div>
                       </div>
                       {/* CHANGED: LR is the primary big number; expectancy + avg drop to small secondary text. */}
                       <div style={{textAlign:"right",flexShrink:0}}>
