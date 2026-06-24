@@ -6260,8 +6260,8 @@ function RMultipleHistogram(props){
             var avgWinD=winsDollar.length>0?winsDollar.reduce(function(s,v){return s+v;},0)/winsDollar.length:0;
             var avgLossD=lossesDollar.length>0?lossesDollar.reduce(function(s,v){return s+v;},0)/lossesDollar.length:0;
             return (<>
-              <div>Avg win: <span style={{color:"#86efac",fontWeight:700}}>+{avgWinR.toFixed(2)}R</span>{winsDollar.length>0&&!HIDE_DOLLAR_PNL&&<span style={{color:"#86efac",fontWeight:600,marginLeft:4}}>(+${avgWinD.toFixed(0)})</span>}</div>
-              <div>Avg loss: <span style={{color:"#fca5a5",fontWeight:700}}>{avgLossR.toFixed(2)}R</span>{lossesDollar.length>0&&!HIDE_DOLLAR_PNL&&<span style={{color:"#fca5a5",fontWeight:600,marginLeft:4}}>(-${Math.abs(avgLossD).toFixed(0)})</span>}</div>
+              <div>Avg win ({winsDollar.length}): <span style={{color:"#86efac",fontWeight:700}}>+{avgWinR.toFixed(2)}R</span>{winsDollar.length>0&&!HIDE_DOLLAR_PNL&&<span style={{color:"#86efac",fontWeight:600,marginLeft:4}}>(+${avgWinD.toFixed(0)})</span>}</div>
+              <div>Avg loss ({lossesDollar.length}): <span style={{color:"#fca5a5",fontWeight:700}}>{avgLossR.toFixed(2)}R</span>{lossesDollar.length>0&&!HIDE_DOLLAR_PNL&&<span style={{color:"#fca5a5",fontWeight:600,marginLeft:4}}>(-${Math.abs(avgLossD).toFixed(0)})</span>}</div>
               <div>n = {Rs.length}</div>
             </>);
           })()}
