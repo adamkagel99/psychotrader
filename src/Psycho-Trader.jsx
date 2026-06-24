@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 
 const STORAGE_KEY = "tf-state";
 const SETTINGS_KEY = "tf-settings";
@@ -1696,6 +1696,27 @@ function DailyPnLBar(props){
 function MonthYearPicker(props){
   var year=props.year,month=props.month,onChange=props.onChange;
   var [draftYear,setDraftYear]=useState(year);
+  // CHANGED: Tint each month button by its net P&L — green/red opacity scaled by magnitude relative
+  // to the year's best/worst month. Selected month overrides with the accent fill.
+  var monthPnLs=useMemo(function(){
+    var arr=[0,0,0,0,0,0,0,0,0,0,0,0];
+    try{
+      loadJournalRows().forEach(function(r){
+        if(!r||!r.date)return;
+        var d=new Date(r.date);
+        if(isNaN(d.getTime())||d.getFullYear()!==draftYear)return;
+        arr[d.getMonth()]+=parseFloat(r.pnl)||0;
+      });
+    }catch(e){}
+    return arr;
+  },[draftYear]);
+  var absMax=Math.max.apply(null,monthPnLs.map(function(v){return Math.abs(v);}));
+  function tintFor(v){
+    if(!v||absMax<=0)return "#1e293b";
+    var intensity=Math.min(1,Math.abs(v)/absMax);
+    var alpha=(0.18+intensity*0.55).toFixed(2);
+    return v>0?"rgba(34,197,94,"+alpha+")":"rgba(239,68,68,"+alpha+")";
+  }
   return (
     <div style={{background:"#0a0a0f",border:"1px solid #4338ca",borderRadius:8,padding:"12px",marginBottom:10}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -1704,7 +1725,11 @@ function MonthYearPicker(props){
         <button onClick={function(){setDraftYear(function(y){return y+1;});}} style={{background:"none",border:"1px solid #334155",borderRadius:5,color:"#94a3b8",fontSize:13,cursor:"pointer",fontFamily:"inherit",padding:"4px 10px"}}>›</button>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
-        {MONTH_NAMES.map(function(m,i){var sel=draftYear===year&&i===month;return <button key={m} onClick={function(){onChange(draftYear,i);}} style={{padding:"8px 0",background:sel?"#4f46e5":"#1e293b",border:"none",borderRadius:5,color:sel?"#fff":"#cbd5e1",fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:sel?700:500}}>{m.slice(0,3)}</button>;})}
+        {MONTH_NAMES.map(function(m,i){
+          var sel=draftYear===year&&i===month;
+          var bg=sel?"#4f46e5":tintFor(monthPnLs[i]);
+          return <button key={m} onClick={function(){onChange(draftYear,i);}} style={{padding:"8px 0",background:bg,border:"none",borderRadius:5,color:sel?"#fff":"#e2e8f0",fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:sel?700:500}}>{m.slice(0,3)}</button>;
+        })}
       </div>
     </div>
   );
@@ -7219,18 +7244,16 @@ function PerformanceTab(props){
              so the duplicate panel just took space without adding info. */}
           {(function(){
             function summarize(filterFn){
-              var n=0,w=0,l=0,pnl=0,pcts=[];
+              var n=0,w=0,l=0,lossPnl=0,lossPcts=[];
               allTrades.forEach(function(t){
                 if(!filterFn(t))return;
-                n++;var p=parseFloat(t.pnl)||0;pnl+=p;
-                if(p>0)w++;else if(p<0)l++;
-                var pp=parseFloat(t.pctPnl);if(!isNaN(pp))pcts.push(pp);
+                n++;var p=parseFloat(t.pnl)||0;
+                if(p>0)w++;else if(p<0){l++;lossPnl+=p;var pp=parseFloat(t.pctPnl);if(!isNaN(pp))lossPcts.push(pp);}
               });
-              var wr=n>0?Math.round((w/n)*100):0;
               var lr=n>0?Math.round((l/n)*100):0;
-              var avgPct=pcts.length>0?(pcts.reduce(function(s,v){return s+v;},0)/pcts.length):0;
-              var expectancy=n>0?pnl/n:0;
-              return {n:n,l:l,wr:wr,lr:lr,avgPct:avgPct,expectancy:expectancy};
+              var avgLoss=l>0?lossPnl/l:0;
+              var avgLossPct=lossPcts.length>0?(lossPcts.reduce(function(s,v){return s+v;},0)/lossPcts.length):0;
+              return {n:n,l:l,lr:lr,avgLoss:avgLoss,avgLossPct:avgLossPct};
             }
             var cats=[
               {label:"No setup tagged",stat:summarize(function(t){return !t.setup;})},
@@ -7244,19 +7267,17 @@ function PerformanceTab(props){
               <StatSec title="Untagged Trades" colSpan={props.mobile?1:6}>
                 {cats.map(function(c,i){
                   var g=c.stat;
-                  var pnlStr=HIDE_DOLLAR_PNL?((g.avgPct>=0?"+":"")+g.avgPct.toFixed(2)+"%"):((g.expectancy>=0?"+":"-")+"$"+Math.abs(g.expectancy).toFixed(2)+" exp");
-                  var avgPctStr=(g.avgPct>=0?"+":"")+g.avgPct.toFixed(2)+"% avg";
+                  var lossStr=g.l>0?(HIDE_DOLLAR_PNL?(g.avgLossPct.toFixed(2)+"%"):("-$"+Math.abs(g.avgLoss).toFixed(2))):"—";
                   return (
                     <div key={c.label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:i<cats.length-1?"1px solid #1e293b":"none",gap:8}}>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:13,color:"#e2e8f0",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.label}</div>
-                        <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>{g.n} trade{g.n===1?"":"s"} · {g.l} loss{g.l===1?"":"es"} ({g.lr}%)</div>
+                      <div style={{flex:1,minWidth:0,display:"flex",alignItems:"center",gap:7}}>
+                        <span style={{width:6,height:6,borderRadius:"50%",background:"#ef4444",flexShrink:0}}/>
+                        <div style={{minWidth:0}}>
+                          <div style={{fontSize:13,color:"#e2e8f0",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.label}</div>
+                          <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>{g.n} trade{g.n===1?"":"s"} · <span style={{color:"#fca5a5"}}>{g.l} loss{g.l===1?"":"es"} ({g.lr}%)</span></div>
+                        </div>
                       </div>
-                      {/* CHANGED: LR is the primary big number; expectancy + avg drop to small secondary text. */}
-                      <div style={{textAlign:"right",flexShrink:0}}>
-                        <div style={{fontSize:18,fontWeight:800,color:g.lr>=50?"#ef4444":g.lr>=33?"#fbbf24":"#94a3b8",fontVariantNumeric:"tabular-nums",letterSpacing:-0.3,lineHeight:1}}>{g.lr}<span style={{marginLeft:2}}>% LR</span></div>
-                        <div style={{fontSize:10,color:"#94a3b8",fontVariantNumeric:"tabular-nums",marginTop:3}}>{pnlStr}</div>
-                      </div>
+                      <div style={{textAlign:"right",flexShrink:0}}><div style={{fontSize:13,fontWeight:700,color:g.l>0?"#ef4444":"#64748b",fontVariantNumeric:"tabular-nums"}}>{lossStr}</div><div style={{fontSize:10,color:"#94a3b8",fontWeight:600,marginTop:1}}>{g.l>0?"avg loss":"no losses"}</div></div>
                     </div>
                   );
                 })}
