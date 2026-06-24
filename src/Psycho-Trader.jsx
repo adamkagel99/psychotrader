@@ -1926,11 +1926,7 @@ function DashboardCalendar(props){
     if(summaryMode==="trades"){
       readoutText=headerScope.trades+"t";
     }else if(HIDE_DOLLAR_PNL){
-      // CHANGED: When $ is hidden, show R as primary with $ alongside for dollar context.
-      if(headerScope.hasRisk){
-        readoutText=(headerScope.r>=0?"+":"")+headerScope.r.toFixed(1)+"R "+(headerScope.pnl>=0?"+$":"-$")+Math.abs(headerScope.pnl).toFixed(0);
-        readoutColor=headerScope.r>=0?"#86efac":"#fca5a5";
-      }
+      if(headerScope.hasRisk){readoutText=(headerScope.r>=0?"+":"")+headerScope.r.toFixed(1)+"R";readoutColor=headerScope.r>=0?"#86efac":"#fca5a5";}
     }else{
       readoutText=(headerScope.pnl>=0?"+$":"-$")+Math.abs(headerScope.pnl).toFixed(0);
       readoutColor=headerScope.pnl>=0?"#86efac":"#fca5a5";
@@ -6239,8 +6235,8 @@ function RMultipleHistogram(props){
             var avgWinD=winsDollar.length>0?winsDollar.reduce(function(s,v){return s+v;},0)/winsDollar.length:0;
             var avgLossD=lossesDollar.length>0?lossesDollar.reduce(function(s,v){return s+v;},0)/lossesDollar.length:0;
             return (<>
-              <div>Avg win: <span style={{color:"#86efac",fontWeight:700}}>+{avgWinR.toFixed(2)}R</span>{winsDollar.length>0&&<span style={{color:"#86efac",fontWeight:600,marginLeft:4}}>(+${avgWinD.toFixed(0)})</span>}</div>
-              <div>Avg loss: <span style={{color:"#fca5a5",fontWeight:700}}>{avgLossR.toFixed(2)}R</span>{lossesDollar.length>0&&<span style={{color:"#fca5a5",fontWeight:600,marginLeft:4}}>(-${Math.abs(avgLossD).toFixed(0)})</span>}</div>
+              <div>Avg win: <span style={{color:"#86efac",fontWeight:700}}>+{avgWinR.toFixed(2)}R</span>{winsDollar.length>0&&!HIDE_DOLLAR_PNL&&<span style={{color:"#86efac",fontWeight:600,marginLeft:4}}>(+${avgWinD.toFixed(0)})</span>}</div>
+              <div>Avg loss: <span style={{color:"#fca5a5",fontWeight:700}}>{avgLossR.toFixed(2)}R</span>{lossesDollar.length>0&&!HIDE_DOLLAR_PNL&&<span style={{color:"#fca5a5",fontWeight:600,marginLeft:4}}>(-${Math.abs(avgLossD).toFixed(0)})</span>}</div>
               <div>n = {Rs.length}</div>
             </>);
           })()}
@@ -6377,8 +6373,8 @@ function DisciplineScatter(props){
             var aAvgD=above.length>0?above.reduce(function(s,p){return s+(p.pnl||0);},0)/above.length:0;
             function fmtD(v){return (v>=0?"+$":"-$")+Math.abs(v).toFixed(0);}
             return (<>
-              <div>Below thr ({below.length}): <span style={{color:belowAvgR>=0?"#86efac":"#fca5a5",fontWeight:700}}>{fmtR(belowAvgR)}</span>{below.length>0&&<span style={{color:bAvgD>=0?"#86efac":"#fca5a5",fontWeight:600,marginLeft:4}}>({fmtD(bAvgD)})</span>}</div>
-              <div>At/above ({above.length}): <span style={{color:aboveAvgR>=0?"#86efac":"#fca5a5",fontWeight:700}}>{fmtR(aboveAvgR)}</span>{above.length>0&&<span style={{color:aAvgD>=0?"#86efac":"#fca5a5",fontWeight:600,marginLeft:4}}>({fmtD(aAvgD)})</span>}</div>
+              <div>Below thr ({below.length}): <span style={{color:belowAvgR>=0?"#86efac":"#fca5a5",fontWeight:700}}>{fmtR(belowAvgR)}</span>{below.length>0&&!HIDE_DOLLAR_PNL&&<span style={{color:bAvgD>=0?"#86efac":"#fca5a5",fontWeight:600,marginLeft:4}}>({fmtD(bAvgD)})</span>}</div>
+              <div>At/above ({above.length}): <span style={{color:aboveAvgR>=0?"#86efac":"#fca5a5",fontWeight:700}}>{fmtR(aboveAvgR)}</span>{above.length>0&&!HIDE_DOLLAR_PNL&&<span style={{color:aAvgD>=0?"#86efac":"#fca5a5",fontWeight:600,marginLeft:4}}>({fmtD(aAvgD)})</span>}</div>
             </>);
           })()}
         </div>
