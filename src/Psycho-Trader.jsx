@@ -2246,7 +2246,10 @@ function TradeTile(props){
       {hasPnl&&(
         <div style={{display:"flex",alignItems:"baseline",gap:10,marginTop:8,flexWrap:"wrap"}}>
           {HIDE_DOLLAR_PNL
-            ? (hasR&&<div style={{fontSize:18,fontWeight:800,color:pnlColor,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>{rMul>=0?"+":""}{rMul.toFixed(2)}R</div>)
+            ? (<>
+                {hasR&&<div style={{fontSize:18,fontWeight:800,color:pnlColor,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>{rMul>=0?"+":""}{rMul.toFixed(2)}R</div>}
+                {hasPct&&<div style={{fontSize:13,color:pctPnl>=0?"#86efac":"#fca5a5",fontWeight:600,fontVariantNumeric:"tabular-nums"}}>({pctPnl>=0?"+":""}{pctPnl.toFixed(2)}%)</div>}
+              </>)
             : (<>
                 <div style={{fontSize:18,fontWeight:800,color:pnlColor,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>{(pnl>=0?"+":"-")+"$"+Math.abs(pnl).toFixed(2)}</div>
                 {hasPct&&<div style={{fontSize:13,color:pctPnl>=0?"#86efac":"#fca5a5",fontWeight:600,fontVariantNumeric:"tabular-nums"}}>({pctPnl>=0?"+":""}{pctPnl.toFixed(2)}%)</div>}
@@ -2297,8 +2300,6 @@ function TradeTile(props){
       {timeText&&(
         <div style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"#64748b",marginTop:8,fontVariantNumeric:"tabular-nums"}}>
           <span>{timeText}</span>
-          {/* CHANGED: When $ hidden, R sits in the big slot so % moves down here next to the time. */}
-          {HIDE_DOLLAR_PNL&&hasPct&&<span><span style={{color:"#334155",margin:"0 6px"}}>·</span><span style={{color:pctPnl>=0?"#86efac":"#fca5a5",fontWeight:600}}>{pctPnl>=0?"+":""}{pctPnl.toFixed(2)}%</span></span>}
           {!hasPriceInfo&&contractsText&&<span><span style={{color:"#334155",margin:"0 6px"}}>·</span>{contractsText}</span>}
         </div>
       )}
