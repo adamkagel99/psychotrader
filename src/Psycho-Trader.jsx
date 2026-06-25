@@ -4352,10 +4352,9 @@ function TradesTab(props){
         </div>
         <div style={{display:"flex",gap:8,width:props.mobile?"100%":"auto"}}>
           {/* CHANGED: On mobile, the action button stretches to the full row width below the header pills. */}
-          {isToday&&(tradeStatus.ok
-            ?<button onClick={function(){var t=mkTrade();t.sessionId=phase!=="closed"?phase:null;setTrade(t);setShowForm(true);}} style={{padding:props.mobile?"10px 12px":"8px 16px",background:"#4f46e5",color:"#fff",border:"none",borderRadius:6,fontSize:props.mobile?13:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flex:props.mobile?1:"none"}}>+ New Trade</button>
-            :<button disabled title={tradeStatus.reason||"Not available"} style={{padding:props.mobile?"10px 12px":"8px 16px",background:"#1e293b",color:"#475569",border:"1px solid #334155",borderRadius:6,fontSize:props.mobile?12:14,fontWeight:600,cursor:"not-allowed",fontFamily:"inherit",whiteSpace:"normal",flex:props.mobile?1:"none",lineHeight:1.2}}>{tradeStatus.reason||"Unavailable"}</button>
-          )}
+          {/* CHANGED: New Trade button is always enabled — disciplined sizing/locks are advisory,
+             not blockers. Removes the previous disabled branch driven by tradeStatus. */}
+          {isToday&&<button onClick={function(){var t=mkTrade();t.sessionId=phase!=="closed"?phase:null;setTrade(t);setShowForm(true);}} style={{padding:props.mobile?"10px 12px":"8px 16px",background:"#4f46e5",color:"#fff",border:"none",borderRadius:6,fontSize:props.mobile?13:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flex:props.mobile?1:"none"}}>+ New Trade</button>}
           {!isToday&&<button onClick={function(){var t=mkTrade();setPastNewTrade(Object.assign({},t,{time:new Date().toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"})}));}} style={{padding:props.mobile?"10px 12px":"8px 16px",background:"#4f46e5",color:"#fff",border:"none",borderRadius:6,fontSize:props.mobile?13:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flex:props.mobile?1:"none"}}>+ Add Trade</button>}
         </div>
         {pickerOpen&&<CalendarPicker selectedDate={selectedDate} onSelect={function(d){setSelectedDate(d);setPickerOpen(false);}} onClose={function(){setPickerOpen(false);}} todayPnL={totalPnL} riskMax={parseFloat(settings.riskMax)||0} settings={settings} todayTrades={state.trades}/>}
