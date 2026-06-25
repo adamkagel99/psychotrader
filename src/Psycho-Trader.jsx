@@ -1711,14 +1711,11 @@ function MonthYearPicker(props){
     return arr;
   },[draftYear]);
   var absMax=Math.max.apply(null,monthPnLs.map(function(v){return Math.abs(v);}));
-  // CHANGED: Match the calendar day-cell palette (#14532d green / #7f1d1d red) so positive months
-  // and positive days read with the same color language. Opacity scales by magnitude vs the year's
-  // biggest month.
+  // CHANGED: Match the calendar day-cell palette exactly — solid #14532d for positive months,
+  // solid #7f1d1d for negative. Day cells don't fade by magnitude, so neither does this.
   function tintFor(v){
-    if(!v||absMax<=0)return "#1e293b";
-    var intensity=Math.min(1,Math.abs(v)/absMax);
-    var alpha=(0.35+intensity*0.65).toFixed(2);
-    return v>0?"rgba(20,83,45,"+alpha+")":"rgba(127,29,29,"+alpha+")";
+    if(!v)return "#1e293b";
+    return v>0?"#14532d":"#7f1d1d";
   }
   return (
     <div style={{background:"#0a0a0f",border:"1px solid #4338ca",borderRadius:8,padding:"12px",marginBottom:10}}>
