@@ -5933,8 +5933,9 @@ function MetricChart(props){
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8,gap:8}}>
         <div style={{display:"flex",alignItems:"baseline",gap:8,flexWrap:"wrap"}}>
           <div style={{fontSize:20,fontWeight:700,color:color,fontVariantNumeric:"tabular-nums"}}>{fmt(display.v)}</div>
-          {/* CHANGED: Optional meta label to the right of the value (e.g. total trading time on the Trades chart). */}
-          {props.meta&&<div style={{fontSize:11,color:"#94a3b8",fontWeight:600,fontVariantNumeric:"tabular-nums"}}>{props.meta}</div>}
+          {/* CHANGED: meta may be a string OR a function (display, hovering) => string for hover-
+             aware readouts (e.g. Trades chart's trading time scoped to the hovered day). */}
+          {props.meta&&<div style={{fontSize:11,color:"#94a3b8",fontWeight:600,fontVariantNumeric:"tabular-nums"}}>{typeof props.meta==="function"?props.meta(display,effectiveHoverIdx!=null):props.meta}</div>}
         </div>
         <div style={{textAlign:"right"}}>
           <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Change</div>
@@ -5996,8 +5997,10 @@ function EquityCurve(props){
   // CHANGED: starting balance before the first entry, for % change / % drawdown when $ is hidden.
   var startBal=0;
   try{startBal=getAccountBalanceAtDate(entries[0].date);}catch(e){}
-  // CHANGED: When the range is this-week or last-week, plot one point per closed trade (chronologically) instead of per day.
-  var granular=props.range==="thisweek"||props.range==="week";
+  // CHANGED: Always plot per-trade (chronologically) so intraday drawdowns are captured. A day
+  // with a -$1000 drawdown followed by a +$1200 winner used to show as net +$200 with no
+  // drawdown; granular per-trade reveals the actual peak-to-trough.
+  var granular=true;
   var pts=[];var cum=0,peak=0,maxDD=0,maxDDPct=0;
   if(granular){
     var allT=[];
@@ -6009,6 +6012,12 @@ function EquityCurve(props){
       var mb=parseTimeToMinsOfDay(b.t.time)||0;
       return ma-mb;
     });
+    // CHANGED: Prepend $0 baseline so the curve starts at 0 and rises with the first trade,
+    // matching the day-level visualization users expected.
+    if(allT.length>0){
+      var d0g=new Date(allT[0].date);d0g.setDate(d0g.getDate()-1);
+      pts.push({date:d0g.toISOString().slice(0,10),cum:0,peak:0});
+    }
     allT.forEach(function(x){
       cum+=parseFloat(x.t.pnl)||0;
       if(cum>peak)peak=cum;
@@ -6943,9 +6952,17 @@ function PerformanceTab(props){
             function renderChart(){
               if(selectedMetric==="totalPnl")return <EquityCurve entries={filtered} range={range}/>;
               if(selectedMetric==="trades"){
-                // CHANGED: Total trading time displayed to the right of the Trades value in the chart readout.
-                var ttMs=0;filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(t&&t.status!=="open"){var d=tradeDurationMs(t);if(d>0)ttMs+=d;}});});
-                var ttMeta=ttMs>0?(fmtDurationMs(ttMs)+" trading"):"";
+                // CHANGED: Trading time scoped to hovered day when hovering, else period total.
+                function ttForRows(rows){var ms=0;rows.forEach(function(r){(r.trades||[]).forEach(function(t){if(t&&t.status!=="open"){var d=tradeDurationMs(t);if(d>0)ms+=d;}});});return ms;}
+                var totalTtMs=ttForRows(filtered);
+                var ttMeta=function(display,hovering){
+                  if(hovering&&display&&display.date){
+                    var dayRows=filtered.filter(function(r){return r.date===display.date;});
+                    var dayMs=ttForRows(dayRows);
+                    return dayMs>0?(fmtDurationMs(dayMs)+" trading"):"";
+                  }
+                  return totalTtMs>0?(fmtDurationMs(totalTtMs)+" trading"):"";
+                };
                 return <MetricChart entries={filtered} label="Trades per Day" color="#a5b4fc" compute={computeTradeCount} format={fmtCount} meta={ttMeta}/>;
               }
               if(selectedMetric==="profitFactor")return <MetricChart entries={filtered} minTrades={20} label="Profit Factor" color={pfColor} compute={computePF} format={fmtNum}/>;
