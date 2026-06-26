@@ -1066,7 +1066,23 @@ function getChallengeCompletions(){var d=loadGamificationData();return d.challen
 // withdrawal). getRanksEarned/getWithdrawalsRemaining were removed as they served only the old gate.
 // CHANGED: Withdrawal allowance = flat % of profit earned SINCE the last withdrawal.
 // Ranks gate ACCESS (must be >= Bronze); the allowance amount is a flat % of recent profit.
-var WITHDRAWAL_ALLOWANCE_PCT=30; // flat % of profit-since-last-withdrawal
+var WITHDRAWAL_ALLOWANCE_PCT=30; // legacy default — overridden by user's saved pct (see getter below).
+// CHANGED: User-editable allowance percentage. Stored in localStorage; defaults to 30%.
+function getWithdrawalAllowancePct(){try{var v=parseFloat(localStorage.getItem("tf-allowance-pct"));return isNaN(v)||v<=0?WITHDRAWAL_ALLOWANCE_PCT:v;}catch(e){return WITHDRAWAL_ALLOWANCE_PCT;}}
+function setWithdrawalAllowancePct(v){try{localStorage.setItem("tf-allowance-pct",String(v));}catch(e){}}
+// CHANGED: Month-to-date withdrawals (abs sum of negative transfers dated this month).
+function getMonthWithdrawn(){
+  try{
+    var d=new Date();var y=d.getFullYear(),m=d.getMonth();
+    return (loadTransfers()||[]).reduce(function(s,t){
+      var dt=new Date(t.date);if(isNaN(dt.getTime()))return s;
+      if(dt.getFullYear()!==y||dt.getMonth()!==m)return s;
+      var a=parseFloat(t.amount)||0;return a<0?s+Math.abs(a):s;
+    },0);
+  }catch(e){return 0;}
+}
+// CHANGED: Monthly withdrawal target the user set in Goals.
+function getMonthlyWithdrawalTarget(){try{var g=JSON.parse(localStorage.getItem(GOALS_KEY)||"{}");return parseFloat(g.monthlyWithdrawals)||0;}catch(e){return 0;}}
 function getLastWithdrawalDate(){
   var ws=loadTransfers().filter(function(t){return String(t.type||"").toLowerCase()==="withdrawal";});
   if(!ws.length)return null;
@@ -1127,7 +1143,15 @@ function getProfitSinceLastWithdrawal(todayPnL){
 function getWithdrawalAllowance(todayPnL){
   var profit=getProfitSinceLastWithdrawal(todayPnL);
   if(profit<=0)return 0;
-  return profit*(WITHDRAWAL_ALLOWANCE_PCT/100);
+  var raw=profit*(getWithdrawalAllowancePct()/100);
+  // CHANGED: If the user set a Monthly Withdrawal target, cap the suggested allowance at the
+  // remaining gap to that target. This keeps the nudge in line with the user's monthly plan.
+  var monthlyTarget=getMonthlyWithdrawalTarget();
+  if(monthlyTarget>0){
+    var remaining=Math.max(0,monthlyTarget-getMonthWithdrawn());
+    return Math.min(raw,remaining);
+  }
+  return raw;
 }
 // CHANGED: Optional allowance-target notification. The user sets a $ target; when the live allowance
 // reaches it, a banner appears on Home. We persist the target and a "dismissed-at-target" marker so
@@ -3653,7 +3677,7 @@ function GoalsSnapshot(props){
   var account=[],perf=[],pnl=[];
   if(!hidden.account&&accountTarget>0)account.push({key:"account",label:"Account Balance",value:props.currentAccount||0,target:accountTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:money,formatTarget:money,compact:true});
   if(!hidden.withdrawals&&withdrawalTarget>0)account.push({key:"withdrawals",label:"Total Withdrawn",value:totalWithdrawn,target:withdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:money,formatTarget:money,compact:true});
-  if(!hidden.monthlyWithdrawals&&monthlyWithdrawalTarget>0)account.push({key:"monthlyWithdrawals",label:"Month Withdrawn",value:monthlyWithdrawn,target:monthlyWithdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:money,formatTarget:money,compact:true});
+  if(!hidden.monthlyWithdrawals&&monthlyWithdrawalTarget>0)account.push({key:"monthlyWithdrawals",label:"Monthly Withdrawal",value:monthlyWithdrawn,target:monthlyWithdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:money,formatTarget:money,compact:true});
   if(!hidden.winRate&&winRateTarget>0)perf.push({key:"winRate",label:"Win Rate",value:oWR,target:winRateTarget,suffix:"%",decimals:0,targetDecimals:0,wrColor:true,compact:true});
   if(!hidden.discipline&&disciplineTarget>0)perf.push({key:"discipline",label:"Discipline",value:aDisc,target:disciplineTarget,suffix:"%",decimals:0,targetDecimals:0,discColor:true,compact:true});
   if(!hidden.daily&&dailyTarget>0)pnl.push({key:"daily",label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
@@ -5420,7 +5444,13 @@ function GoalsTab(props){
         {[{key:"weeklyMultiplier",label:"Weekly P&L Multiplier (× Daily Target)",ph:"e.g. 4"},{key:"monthlyPnL",label:"Monthly P&L Target ($)",ph:"e.g. 3000"},{key:"winRate",label:"Win Rate Target (%)",ph:"e.g. 60"},{key:"accountTarget",label:"Account Milestone ($)",ph:"e.g. 5000"},{key:"monthlyWithdrawals",label:"Monthly Withdrawal Target ($)",ph:"e.g. 1000"},{key:"withdrawals",label:"Total Withdrawn Target ($)",ph:"e.g. 10000"}].map(function(f){
           return <div key={f.key} style={{marginBottom:12}}><label style={lbl}>{f.label}</label><input type="number" value={draft[f.key]||""} onChange={function(e){var v=e.target.value;setDraft(function(g){return Object.assign({},g,{[f.key]:v});});}} placeholder={f.ph} style={fld}/></div>;
         })}
-        <button onClick={saveStandardGoals} style={{width:"100%",padding:"13px",background:"linear-gradient(135deg,#4f46e5,#6366f1)",color:"#fff",border:"none",borderRadius:10,fontSize:16,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginTop:4}}>Save Goals</button>
+        {/* CHANGED: Allowance % is the share of profit suggested for withdrawal in the streak
+           payout nudge. Stored separately from goals (own localStorage key, syncs across devices). */}
+        <div style={{marginBottom:12}}>
+          <label style={lbl}>Allowance % of profit (used in payout nudge)</label>
+          <input type="number" value={draft._allowancePct!=null?draft._allowancePct:getWithdrawalAllowancePct()} onChange={function(e){var v=e.target.value;setDraft(function(g){return Object.assign({},g,{_allowancePct:v});});}} placeholder="e.g. 30" style={fld}/>
+        </div>
+        <button onClick={function(){if(draft._allowancePct!=null&&draft._allowancePct!==""){var n=parseFloat(draft._allowancePct);if(!isNaN(n)&&n>0)setWithdrawalAllowancePct(n);}saveStandardGoals();}} style={{width:"100%",padding:"13px",background:"linear-gradient(135deg,#4f46e5,#6366f1)",color:"#fff",border:"none",borderRadius:10,fontSize:16,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginTop:4}}>Save Goals</button>
         {/* CHANGED: Custom goals editing lives here (was a per-card Edit button before). Click any to open its inline edit form. */}
         {(goals.custom||[]).length>0&&(
           <div style={{marginTop:24,paddingTop:16,borderTop:"1px solid #1e293b"}}>
@@ -5444,7 +5474,7 @@ function GoalsTab(props){
 
   var hidden=goals.hidden||{};
   var hiddenKeys=Object.keys(hidden).filter(function(k){return hidden[k];});
-  var hiddenLabels={daily:"Today's P&L",weekly:"Week P&L",monthly:"Month P&L",winRate:"Win Rate",discipline:"Discipline Score",account:"Account Balance",monthlyWithdrawals:"Month Withdrawn",withdrawals:"Total Withdrawn"};
+  var hiddenLabels={daily:"Today's P&L",weekly:"Week P&L",monthly:"Month P&L",winRate:"Win Rate",discipline:"Discipline Score",account:"Account Balance",monthlyWithdrawals:"Monthly Withdrawal",withdrawals:"Total Withdrawn"};
 
   function renderStandardCard(key,opts){
     if(hidden[key])return null;
@@ -5638,7 +5668,7 @@ function GoalsTab(props){
                 <SectionHead icon="🏦" title="Account Activity"/>
                 <div style={gridStyle}>
                   {!hidden.account&&accountTarget>0&&renderStandardCard("account",{label:"Account Balance",value:currentAccount,target:accountTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true})}
-                  {monthlyWithdrawalTarget>0&&renderStandardCard("monthlyWithdrawals",{label:"Month Withdrawn",value:monthlyWithdrawn,target:monthlyWithdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true})}
+                  {monthlyWithdrawalTarget>0&&renderStandardCard("monthlyWithdrawals",{label:"Monthly Withdrawal",value:monthlyWithdrawn,target:monthlyWithdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true})}
                   {withdrawalTarget>0&&renderStandardCard("withdrawals",{label:"Total Withdrawn",value:totalWithdrawn,target:withdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true})}
                   {customByBucket.account.map(renderInlineCustom)}
                 </div>
@@ -7778,10 +7808,10 @@ function SettingsTab(props){
                 <span style={{fontSize:16,fontWeight:800,color:unlocked?"#22c55e":"#f59e0b"}}>{fmt(allowance)}</span>
               </div>
               <div style={{fontSize:11,color:"#64748b",marginTop:5,lineHeight:1.5}}>
-                {WITHDRAWAL_ALLOWANCE_PCT}% of {fmt(Math.max(0,profit))} profit{lastDate?" since last withdrawal":" (all-time)"}
+                {getWithdrawalAllowancePct()}% of {fmt(Math.max(0,profit))} profit{lastDate?" since last withdrawal":" (all-time)"}
               </div>
               {allowance<=0&&<div style={{fontSize:11,color:"#fdba74",marginTop:5}}>No profit{lastDate?" since your last withdrawal":""} yet, so the suggested allowance is $0. You can still log this — it's just a guide.</div>}
-              {overAllowance&&<div style={{fontSize:11,color:"#fca5a5",marginTop:5}}>Over allowance by {fmt(entered-allowance)} — you can still log it, but it exceeds the {WITHDRAWAL_ALLOWANCE_PCT}% guide.</div>}
+              {overAllowance&&<div style={{fontSize:11,color:"#fca5a5",marginTop:5}}>Over allowance by {fmt(entered-allowance)} — you can still log it, but it exceeds the {getWithdrawalAllowancePct()}% guide.</div>}
               {/* CHANGED: Notify-me-at target. When the live allowance reaches this amount, a banner shows on Home. */}
               <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid #1e293b44"}}>
                 <label style={{fontSize:11,color:"#94a3b8",fontWeight:600,display:"block",marginBottom:5}}>Notify me when allowance reaches</label>
