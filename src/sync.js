@@ -153,6 +153,16 @@ export async function pullFromCloud(userId) {
     const out = typeof row.value === "object" ? JSON.stringify(row.value) : String(row.value);
     rawSetItem(row.key, out);
   });
+  // CHANGED: Reconcile deletions. If a syncable key exists in localStorage but NOT in the cloud
+  // KV result, it was deleted on another device — remove it locally so cross-device disables
+  // (e.g. turning off half-size on mobile) actually propagate to laptop and vice-versa.
+  const cloudKeys = new Set((kv || []).map((r) => r.key));
+  for (let i = window.localStorage.length - 1; i >= 0; i--) {
+    const k = window.localStorage.key(i);
+    if (isSyncableKv(k) && !cloudKeys.has(k)) {
+      rawRemove.call(window.localStorage, k);
+    }
+  }
 
   // 2. Transfers
   const { data: transfers } = await supabase

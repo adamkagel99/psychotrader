@@ -1209,7 +1209,15 @@ function MonthlyTargetBanner(props){
         <div style={{fontSize:13,fontWeight:800,color:"#fff",display:"flex",alignItems:"center",gap:7}}>🏁 Monthly target hit — {fmt(monthPnLLive)} of {fmt(monthlyTarget)}</div>
       </div>
       <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap"}}>
-        <button onClick={function(){setMonthHalfsizeActive(!halfOn);if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:halfOn?"#facc15":"#0a0a0f44",border:"1px solid #facc15",borderRadius:6,color:halfOn?"#422006":"#fde68a",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>{halfOn?"✓ Half-size on — tap to turn off":"Half-size rest of month"}</button>
+        <button onClick={function(){
+          var was=halfOn;
+          setMonthHalfsizeActive(!was);
+          // CHANGED: When user disables half-size, also clear the banner dismissal so the banner
+          // stays visible (otherwise: previously dismissed + just turned off → banner vanishes
+          // and there's no way back without re-hitting the monthly goal).
+          if(was){try{localStorage.removeItem("tf-month-goal-banner-dismissed");}catch(e){}}
+          if(props.bumpReloadKey)props.bumpReloadKey();
+        }} style={{padding:"6px 12px",background:halfOn?"#facc15":"#0a0a0f44",border:"1px solid #facc15",borderRadius:6,color:halfOn?"#422006":"#fde68a",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>{halfOn?"✓ Half-size on — tap to turn off":"Half-size rest of month"}</button>
         {/* CHANGED: Withdraw button removed — other surfaces (allowance banner, profit-take
            streak nudge, Settings transfer form) already cover that action. */}
         {!halfOn&&<button onClick={function(){dismissMonthGoalBanner();if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"transparent",border:"1px solid #78350f",borderRadius:6,color:"#fde68a",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Dismiss</button>}
@@ -2984,12 +2992,16 @@ function EconomicEvents(props){
           var imp=impactStyle(e.impact);
           var cur=eventCurrency(e);
           return (
-            <div key={ei} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 8px",background:"#0a0a0f",borderRadius:6,marginBottom:3,border:"1px solid #1e293b"}}>
-              <div style={{width:6,height:6,borderRadius:"50%",background:imp.color,flexShrink:0}}/>
-              <span style={{fontSize:12,color:"#64748b",minWidth:54}}>{formatEventTime(e._d)}</span>
-              {cur&&<span style={{fontSize:10,padding:"1px 5px",borderRadius:3,background:"#1e293b",color:"#cbd5e1",fontWeight:700}}>{cur}</span>}
-              <span style={{fontSize:13,color:"#e2e8f0",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.event||e.title||"Event"}</span>
-              {(e.forecast||e.previous)&&<span style={{fontSize:10,color:"#64748b",flexShrink:0}}>{e.forecast?"F: "+e.forecast:""}{e.forecast&&e.previous?" · ":""}{e.previous?"P: "+e.previous:""}</span>}
+            // CHANGED: 2-row event layout so the title never truncates. Row 1 = full title.
+            // Row 2 = dot, time, currency, forecast/previous as small meta.
+            <div key={ei} style={{padding:"7px 9px",background:"#0a0a0f",borderRadius:6,marginBottom:3,border:"1px solid #1e293b"}}>
+              <div style={{fontSize:13,color:"#e2e8f0",lineHeight:1.3}}>{e.event||e.title||"Event"}</div>
+              <div style={{display:"flex",alignItems:"center",gap:7,marginTop:3,flexWrap:"wrap"}}>
+                <div style={{width:6,height:6,borderRadius:"50%",background:imp.color,flexShrink:0}}/>
+                <span style={{fontSize:11,color:"#64748b"}}>{formatEventTime(e._d)}</span>
+                {cur&&<span style={{fontSize:9,padding:"1px 5px",borderRadius:3,background:"#1e293b",color:"#cbd5e1",fontWeight:700}}>{cur}</span>}
+                {(e.forecast||e.previous)&&<span style={{fontSize:10,color:"#64748b"}}>{e.forecast?"F: "+e.forecast:""}{e.forecast&&e.previous?" · ":""}{e.previous?"P: "+e.previous:""}</span>}
+              </div>
             </div>
           );
         };
@@ -3017,12 +3029,14 @@ function EconomicEvents(props){
                   var imp=impactStyle(e.impact);
                   var cur=eventCurrency(e);
                   return (
-                    <div key={ei} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 8px",background:"#0a0a0f",borderRadius:6,marginBottom:3,border:"1px solid #1e293b"}}>
-                      <div style={{width:6,height:6,borderRadius:"50%",background:imp.color,flexShrink:0}}/>
-                      <span style={{fontSize:12,color:"#64748b",minWidth:54}}>{formatEventTime(e._d)}</span>
-                      {cur&&<span style={{fontSize:10,padding:"1px 5px",borderRadius:3,background:"#1e293b",color:"#cbd5e1",fontWeight:700}}>{cur}</span>}
-                      <span style={{fontSize:13,color:"#e2e8f0",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.event||e.title||"Event"}</span>
-                      {(e.forecast||e.previous)&&<span style={{fontSize:10,color:"#64748b",flexShrink:0}}>{e.forecast?"F: "+e.forecast:""}{e.forecast&&e.previous?" · ":""}{e.previous?"P: "+e.previous:""}</span>}
+                    <div key={ei} style={{padding:"7px 9px",background:"#0a0a0f",borderRadius:6,marginBottom:3,border:"1px solid #1e293b"}}>
+                      <div style={{fontSize:13,color:"#e2e8f0",lineHeight:1.3}}>{e.event||e.title||"Event"}</div>
+                      <div style={{display:"flex",alignItems:"center",gap:7,marginTop:3,flexWrap:"wrap"}}>
+                        <div style={{width:6,height:6,borderRadius:"50%",background:imp.color,flexShrink:0}}/>
+                        <span style={{fontSize:11,color:"#64748b"}}>{formatEventTime(e._d)}</span>
+                        {cur&&<span style={{fontSize:9,padding:"1px 5px",borderRadius:3,background:"#1e293b",color:"#cbd5e1",fontWeight:700}}>{cur}</span>}
+                        {(e.forecast||e.previous)&&<span style={{fontSize:10,color:"#64748b"}}>{e.forecast?"F: "+e.forecast:""}{e.forecast&&e.previous?" · ":""}{e.previous?"P: "+e.previous:""}</span>}
+                      </div>
                     </div>
                   );
                 })}
@@ -3561,13 +3575,18 @@ function TodayStrip(props){
         {/* CHANGED: Date removed — duplicated the header date that's already pinned at the top. */}
         <span style={{fontSize:12,color:"#86efac",fontWeight:600}}>Journal →</span>
       </button>
-      <div style={{display:"grid",gridTemplateColumns:props.mobile?"repeat(3,1fr)":"repeat(auto-fit,minmax(120px,1fr))",gap:1,background:"#1e293b"}}>
-        {tiles.map(function(t){return (
-          <div key={t.label} style={{padding:props.mobile?"10px 10px":"13px 14px",background:"#111118",display:"flex",flexDirection:"column",gap:props.mobile?4:5,minWidth:0}}>
-            <span style={{fontSize:props.mobile?9:10,color:"#64748b",letterSpacing:0.4,textTransform:"uppercase",fontWeight:700,lineHeight:1.1,whiteSpace:"nowrap"}}>{t.label}</span>
-            <span style={{fontSize:props.mobile?(t.small?13:17):(t.small?15:22),fontWeight:800,color:t.color,fontVariantNumeric:"tabular-nums",lineHeight:1.1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{t.value}</span>
-          </div>
-        );})}
+      <div style={{display:"grid",gridTemplateColumns:props.mobile?"repeat(2,1fr)":"repeat(auto-fit,minmax(120px,1fr))",gap:1,background:"#1e293b"}}>
+        {tiles.map(function(t,idx){
+          // CHANGED: On mobile, last tile spans both columns so there are no empty grid cells
+          // with 5 stats in a 2-column layout.
+          var span=props.mobile&&idx===tiles.length-1&&tiles.length%2===1?{gridColumn:"1/-1"}:{};
+          return (
+            <div key={t.label} style={Object.assign({padding:props.mobile?"10px 12px":"13px 14px",background:"#111118",display:"flex",flexDirection:"column",gap:props.mobile?4:5,minWidth:0},span)}>
+              <span style={{fontSize:props.mobile?9:10,color:"#64748b",letterSpacing:0.4,textTransform:"uppercase",fontWeight:700,lineHeight:1.1,whiteSpace:"nowrap"}}>{t.label}</span>
+              <span style={{fontSize:props.mobile?(t.small?13:17):(t.small?15:22),fontWeight:800,color:t.color,fontVariantNumeric:"tabular-nums",lineHeight:1.1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{t.value}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -3746,15 +3765,20 @@ function PerfProgressCard(props){
       {/* CHANGED: On mobile, KPI tiles wrap to a 2-column grid so labels aren't truncated and
          each value has room to breathe. Desktop unchanged. */}
       <div style={{display:"grid",gridTemplateColumns:props.mobile?"repeat(2,1fr)":"repeat(auto-fit,minmax(132px,1fr))",gap:1,background:"#1e293b"}}>
-        {kpis.map(function(k){return (
-          <div key={k.label} style={{padding:props.mobile?"11px 12px":"14px 14px 13px",background:"#111118",display:"flex",flexDirection:"column",gap:props.mobile?5:6,minWidth:0}}>
-            <div style={{display:"flex",alignItems:"center",gap:props.mobile?6:6,minWidth:0}}>
-              <span style={{fontSize:props.mobile?12:13,flexShrink:0}}>{k.icon}</span>
-              <span style={{fontSize:props.mobile?10:10,color:"#64748b",letterSpacing:0.6,textTransform:"uppercase",fontWeight:700,lineHeight:1.1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{k.label}</span>
+        {kpis.map(function(k,idx){
+          // CHANGED: On mobile, the last KPI spans both columns when total count is odd, so we
+          // never leave a dead empty cell.
+          var span=props.mobile&&idx===kpis.length-1&&kpis.length%2===1?{gridColumn:"1/-1"}:{};
+          return (
+            <div key={k.label} style={Object.assign({padding:props.mobile?"11px 12px":"14px 14px 13px",background:"#111118",display:"flex",flexDirection:"column",gap:props.mobile?5:6,minWidth:0},span)}>
+              <div style={{display:"flex",alignItems:"center",gap:props.mobile?6:6,minWidth:0}}>
+                <span style={{fontSize:props.mobile?12:13,flexShrink:0}}>{k.icon}</span>
+                <span style={{fontSize:props.mobile?10:10,color:"#64748b",letterSpacing:0.6,textTransform:"uppercase",fontWeight:700,lineHeight:1.1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{k.label}</span>
+              </div>
+              <div style={{fontSize:props.mobile?20:24,fontWeight:800,color:k.color,fontVariantNumeric:"tabular-nums",lineHeight:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.value}{k.suffix&&<span style={{fontSize:props.mobile?10:12,color:"#64748b",fontWeight:500}}>{k.suffix}</span>}</div>
             </div>
-            <div style={{fontSize:props.mobile?20:24,fontWeight:800,color:k.color,fontVariantNumeric:"tabular-nums",lineHeight:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.value}{k.suffix&&<span style={{fontSize:props.mobile?10:12,color:"#64748b",fontWeight:500}}>{k.suffix}</span>}</div>
-          </div>
-        );})}
+          );
+        })}
       </div>
       {open&&<>
       <div style={{padding:"12px 14px 4px"}}>
