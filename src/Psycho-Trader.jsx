@@ -3561,11 +3561,11 @@ function TodayStrip(props){
         {/* CHANGED: Date removed — duplicated the header date that's already pinned at the top. */}
         <span style={{fontSize:12,color:"#86efac",fontWeight:600}}>Journal →</span>
       </button>
-      <div style={{display:"grid",gridTemplateColumns:props.mobile?"repeat(5,1fr)":"repeat(auto-fit,minmax(120px,1fr))",gap:1,background:"#1e293b"}}>
+      <div style={{display:"grid",gridTemplateColumns:props.mobile?"repeat(3,1fr)":"repeat(auto-fit,minmax(120px,1fr))",gap:1,background:"#1e293b"}}>
         {tiles.map(function(t){return (
-          <div key={t.label} style={{padding:props.mobile?"9px 5px":"13px 14px",background:"#111118",display:"flex",flexDirection:"column",gap:props.mobile?3:5,minWidth:0}}>
-            <span style={{fontSize:props.mobile?8:10,color:"#64748b",letterSpacing:props.mobile?0.2:0.6,textTransform:"uppercase",fontWeight:700,lineHeight:1.1,whiteSpace:props.mobile?"normal":"nowrap"}}>{t.label}</span>
-            <span style={{fontSize:props.mobile?(t.small?11:15):(t.small?15:22),fontWeight:800,color:t.color,fontVariantNumeric:"tabular-nums",lineHeight:1.1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{t.value}</span>
+          <div key={t.label} style={{padding:props.mobile?"10px 10px":"13px 14px",background:"#111118",display:"flex",flexDirection:"column",gap:props.mobile?4:5,minWidth:0}}>
+            <span style={{fontSize:props.mobile?9:10,color:"#64748b",letterSpacing:0.4,textTransform:"uppercase",fontWeight:700,lineHeight:1.1,whiteSpace:"nowrap"}}>{t.label}</span>
+            <span style={{fontSize:props.mobile?(t.small?13:17):(t.small?15:22),fontWeight:800,color:t.color,fontVariantNumeric:"tabular-nums",lineHeight:1.1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{t.value}</span>
           </div>
         );})}
       </div>

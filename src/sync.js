@@ -81,7 +81,8 @@ async function signScreenshot(value) {
 
 // tf-* keys that are pure UI/cache and NOT worth syncing
 const SKIP_KEYS = new Set([
-  "tf-events",          // economic-events cache, refetched anyway
+  // NOTE: "tf-events" used to be here. Removed so user-imported economic events sync across
+  // devices (imported on laptop appears on mobile, and vice-versa).
   "tf-aicoach-answer",
   "tf-aicoach-result",
   "tf-aicoach-question",
@@ -91,7 +92,9 @@ const SKIP_KEYS = new Set([
   // Syncing them creates race conditions where a cloud reconcile wipes the local toggle before
   // the push lands. Keeping them local also matches their semantic intent (these are about
   // "where am I right now on this device").
-  "tf-month-halfsize-active",
+  // NOTE: "tf-month-halfsize-active" is INTENTIONALLY NOT in this list — it represents a real
+  // user decision (opt-in half-size for the rest of the month after hitting monthly goal), so it
+  // must sync across devices like other persistent settings.
   "tf-month-goal-banner-dismissed",
   "tf-halfsize-dismissed",
   "tf-streak-nudge-dismissed-at",
