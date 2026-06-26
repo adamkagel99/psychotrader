@@ -92,12 +92,11 @@ const SKIP_KEYS = new Set([
   // Syncing them creates race conditions where a cloud reconcile wipes the local toggle before
   // the push lands. Keeping them local also matches their semantic intent (these are about
   // "where am I right now on this device").
-  // NOTE: "tf-month-halfsize-active" is INTENTIONALLY NOT in this list — it represents a real
-  // user decision (opt-in half-size for the rest of the month after hitting monthly goal), so it
-  // must sync across devices like other persistent settings.
-  "tf-month-goal-banner-dismissed",
+  // NOTE: "tf-month-halfsize-active", "tf-month-goal-banner-dismissed", and
+  // "tf-streak-nudge-dismissed-at" are INTENTIONALLY NOT in this list — they represent real
+  // user decisions (half-size opt-in, banner dismiss, payout nudge dismiss) that should
+  // persist across devices.
   "tf-halfsize-dismissed",
-  "tf-streak-nudge-dismissed-at",
   "tf-allowance-target-dismissed",
   "tf-dash-cal-open",
   "tf-notebook-open",
@@ -147,7 +146,12 @@ export async function pullFromCloud(userId) {
   (kv || []).forEach((row) => {
     if (row.value == null) return;
     if (typeof row.key === "string" && SKIP_KEYS.has(row.key)) return;
-    rawSetItem(row.key, JSON.stringify(row.value));
+    // CHANGED: Don't re-JSON.stringify primitive values (strings/numbers/booleans). Push stores
+    // raw strings like "2026-06" (the halfsize/banner month keys) as bare strings in cloud;
+    // re-stringifying them on pull produces '"2026-06"' (with quote chars) in localStorage,
+    // which breaks the app's strict equality check against the month key.
+    const out = typeof row.value === "object" ? JSON.stringify(row.value) : String(row.value);
+    rawSetItem(row.key, out);
   });
 
   // 2. Transfers
