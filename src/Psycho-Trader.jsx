@@ -5876,7 +5876,10 @@ function MetricChart(props){
   var minTrades=props.minTrades!=null?props.minTrades:0;
   var pts=[];
   for(var i=0;i<sorted.length;i++){
-    var slice=sorted.slice(0,i+1);
+    // CHANGED: perPoint mode = compute on just this single entry (not cumulative slice). Used by
+    // per-trade views like Avg Pos Size where each point is the trade's actual size, not the
+    // running average.
+    var slice=props.perPoint?[sorted[i]]:sorted.slice(0,i+1);
     if(minTrades>0){
       var nT=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){if(t&&t.status!=="open")nT++;});});
       if(nT<minTrades)continue;
@@ -6982,16 +6985,25 @@ function PerformanceTab(props){
               // CHANGED: Avg Pos Size chart — running average position size across the slice.
               // In $ mode plots dollars; in Hide-$ mode plots % of account balance at slice end.
               if(selectedMetric==="avgPosSize"){
-                function computeAvgPos(slice){var s=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status==="open")return;var p=parseFloat(t.positionSize);if(!isNaN(p)&&p>0){s+=p;n++;}});});return n>0?(s/n):null;}
-                function computeAvgPosPct(slice){
-                  var avg=computeAvgPos(slice);if(avg==null)return null;
-                  var lastDate=slice.length>0?slice[slice.length-1].date:null;
-                  if(!lastDate)return null;
-                  var bal=0;try{bal=getAccountBalanceAtDate(lastDate);}catch(e){}
-                  return bal>0?(avg/bal*100):null;
+                // CHANGED: Per-trade points — build synthetic rows where each row holds ONE trade,
+                // in chronological order. Combined with perPoint=true, this makes each chart
+                // point represent that single trade's actual position size (not a running avg).
+                var perTradeRows=[];
+                filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(t&&t.status!=="open")perTradeRows.push({date:r.date,trades:[t]});});});
+                perTradeRows.sort(function(a,b){
+                  var da=new Date(a.date).getTime(),db=new Date(b.date).getTime();
+                  if(da!==db)return da-db;
+                  var ma=parseTimeToMinsOfDay(a.trades[0].time)||0,mb=parseTimeToMinsOfDay(b.trades[0].time)||0;
+                  return ma-mb;
+                });
+                function computeTradePos(slice){var t=slice[0]&&slice[0].trades&&slice[0].trades[0];if(!t)return null;var p=parseFloat(t.positionSize);return (!isNaN(p)&&p>0)?p:null;}
+                function computeTradePosPct(slice){
+                  var p=computeTradePos(slice);if(p==null)return null;
+                  var bal=0;try{bal=getAccountBalanceAtDate(slice[0].date);}catch(e){}
+                  return bal>0?(p/bal*100):null;
                 }
-                if(HIDE_DOLLAR_PNL)return <MetricChart entries={filtered} minTrades={5} label="Avg Pos Size" color="#a5b4fc" compute={computeAvgPosPct} format={fmtPct}/>;
-                return <MetricChart entries={filtered} minTrades={5} label="Avg Pos Size" color="#a5b4fc" compute={computeAvgPos} format={function(v){return "$"+Math.round(v).toLocaleString();}}/>;
+                if(HIDE_DOLLAR_PNL)return <MetricChart entries={perTradeRows} perPoint={true} label="Position Size" color="#a5b4fc" compute={computeTradePosPct} format={fmtPct}/>;
+                return <MetricChart entries={perTradeRows} perPoint={true} label="Position Size" color="#a5b4fc" compute={computeTradePos} format={function(v){return "$"+Math.round(v).toLocaleString();}}/>;
               }
               return <EquityCurve entries={filtered} range={range}/>;
             }
