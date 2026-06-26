@@ -1070,6 +1070,10 @@ var WITHDRAWAL_ALLOWANCE_PCT=30; // legacy default — overridden by user's save
 // CHANGED: User-editable allowance percentage. Stored in localStorage; defaults to 30%.
 function getWithdrawalAllowancePct(){try{var v=parseFloat(localStorage.getItem("tf-allowance-pct"));return isNaN(v)||v<=0?WITHDRAWAL_ALLOWANCE_PCT:v;}catch(e){return WITHDRAWAL_ALLOWANCE_PCT;}}
 function setWithdrawalAllowancePct(v){try{localStorage.setItem("tf-allowance-pct",String(v));}catch(e){}}
+// CHANGED: User-toggleable enable/disable for the allowance feature. When disabled, no allowance
+// is suggested anywhere and the payout nudge banner won't fire. Defaults to enabled.
+function getAllowanceEnabled(){try{var v=localStorage.getItem("tf-allowance-enabled");return v===null||v==="1";}catch(e){return true;}}
+function setAllowanceEnabled(on){try{localStorage.setItem("tf-allowance-enabled",on?"1":"0");}catch(e){}}
 // CHANGED: Month-to-date withdrawals (abs sum of negative transfers dated this month).
 function getMonthWithdrawn(){
   try{
@@ -1141,6 +1145,8 @@ function getProfitSinceLastWithdrawal(todayPnL){
 // the points/rank system no longer controls access. If there's positive profit since the last
 // withdrawal, you can withdraw a flat % of it. Achievements/Challenges are motivational only.
 function getWithdrawalAllowance(todayPnL){
+  // CHANGED: Honor the enable/disable toggle. When disabled, no suggested allowance anywhere.
+  if(!getAllowanceEnabled())return 0;
   var profit=getProfitSinceLastWithdrawal(todayPnL);
   if(profit<=0)return 0;
   var raw=profit*(getWithdrawalAllowancePct()/100);
@@ -5439,13 +5445,7 @@ function GoalsTab(props){
         {[{key:"weeklyMultiplier",label:"Weekly P&L Multiplier (× Daily Target)",ph:"e.g. 4"},{key:"monthlyPnL",label:"Monthly P&L Target ($)",ph:"e.g. 3000"},{key:"winRate",label:"Win Rate Target (%)",ph:"e.g. 60"},{key:"accountTarget",label:"Account Milestone ($)",ph:"e.g. 5000"},{key:"monthlyWithdrawals",label:"Monthly Withdrawal Target ($)",ph:"e.g. 1000"},{key:"withdrawals",label:"Total Withdrawn Target ($)",ph:"e.g. 10000"}].map(function(f){
           return <div key={f.key} style={{marginBottom:12}}><label style={lbl}>{f.label}</label><input type="number" value={draft[f.key]||""} onChange={function(e){var v=e.target.value;setDraft(function(g){return Object.assign({},g,{[f.key]:v});});}} placeholder={f.ph} style={fld}/></div>;
         })}
-        {/* CHANGED: Allowance % is the share of profit suggested for withdrawal in the streak
-           payout nudge. Stored separately from goals (own localStorage key, syncs across devices). */}
-        <div style={{marginBottom:12}}>
-          <label style={lbl}>Allowance % of profit (used in payout nudge)</label>
-          <input type="number" value={draft._allowancePct!=null?draft._allowancePct:getWithdrawalAllowancePct()} onChange={function(e){var v=e.target.value;setDraft(function(g){return Object.assign({},g,{_allowancePct:v});});var n=parseFloat(v);if(!isNaN(n)&&n>0)setWithdrawalAllowancePct(n);}} placeholder="e.g. 30" style={fld}/>
-        </div>
-        <button onClick={function(){if(draft._allowancePct!=null&&draft._allowancePct!==""){var n=parseFloat(draft._allowancePct);if(!isNaN(n)&&n>0)setWithdrawalAllowancePct(n);}saveStandardGoals();}} style={{width:"100%",padding:"13px",background:"linear-gradient(135deg,#4f46e5,#6366f1)",color:"#fff",border:"none",borderRadius:10,fontSize:16,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginTop:4}}>Save Goals</button>
+        <button onClick={saveStandardGoals} style={{width:"100%",padding:"13px",background:"linear-gradient(135deg,#4f46e5,#6366f1)",color:"#fff",border:"none",borderRadius:10,fontSize:16,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginTop:4}}>Save Goals</button>
         {/* CHANGED: Custom goals editing lives here (was a per-card Edit button before). Click any to open its inline edit form. */}
         {(goals.custom||[]).length>0&&(
           <div style={{marginTop:24,paddingTop:16,borderTop:"1px solid #1e293b"}}>
@@ -7814,13 +7814,21 @@ function SettingsTab(props){
                  via local state mirror, persists on Set. The home banner is now driven by the
                  Monthly Withdrawal goal, not a separate $ target. */}
               <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid #1e293b44"}}>
-                <label style={{fontSize:11,color:"#94a3b8",fontWeight:600,display:"block",marginBottom:5}}>Allowance % of profit</label>
-                <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                  <input type="number" value={allowancePctInput} onChange={function(e){var v=e.target.value;setAllowancePctInput(v);var n=parseFloat(v);if(!isNaN(n)&&n>0)setWithdrawalAllowancePct(n);}} placeholder="30" style={Object.assign({},fld,{width:80,flex:"none"})}/>
-                  <span style={{fontSize:13,color:"#64748b"}}>%</span>
-                  <button onClick={function(){var n=parseFloat(allowancePctInput);if(!isNaN(n)&&n>0){setWithdrawalAllowancePct(n);}if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"7px 14px",background:"#4f46e5",border:"none",borderRadius:5,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>Set</button>
+                {/* CHANGED: Enable/disable allowance entirely. When off, the suggested allowance
+                   reads 0 everywhere and the payout nudge stops firing. */}
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                  <label style={{fontSize:11,color:"#94a3b8",fontWeight:600}}>Allowance suggestions</label>
+                  <button onClick={function(){setAllowanceEnabled(!getAllowanceEnabled());if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"3px 10px",background:getAllowanceEnabled()?"#14532d":"#1e293b",border:"1px solid "+(getAllowanceEnabled()?"#22c55e":"#334155"),borderRadius:4,color:getAllowanceEnabled()?"#86efac":"#94a3b8",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{getAllowanceEnabled()?"On":"Off"}</button>
                 </div>
-                <div style={{fontSize:11,color:"#64748b",marginTop:6}}>Banner on Home fires when your monthly withdrawal goal is hit.</div>
+                {getAllowanceEnabled()&&<>
+                  <label style={{fontSize:11,color:"#94a3b8",fontWeight:600,display:"block",marginBottom:5}}>Allowance % of profit</label>
+                  <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                    <input type="number" value={allowancePctInput} onChange={function(e){var v=e.target.value;setAllowancePctInput(v);var n=parseFloat(v);if(!isNaN(n)&&n>0)setWithdrawalAllowancePct(n);}} placeholder="30" style={Object.assign({},fld,{width:80,flex:"none"})}/>
+                    <span style={{fontSize:13,color:"#64748b"}}>%</span>
+                    <button onClick={function(){var n=parseFloat(allowancePctInput);if(!isNaN(n)&&n>0){setWithdrawalAllowancePct(n);}if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"7px 14px",background:"#4f46e5",border:"none",borderRadius:5,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>Set</button>
+                  </div>
+                  <div style={{fontSize:11,color:"#64748b",marginTop:6}}>Banner on Home fires when your monthly withdrawal goal is hit.</div>
+                </>}
               </div>
             </div>
           );
