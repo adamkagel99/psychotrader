@@ -5244,7 +5244,17 @@ function GoalsTab(props){
     try{var s=localStorage.getItem(GOALS_KEY);if(s)setGoals(normalizeStored(JSON.parse(s)));}catch(e){}
   },[]);
 
-  function persist(g){try{localStorage.setItem(GOALS_KEY,JSON.stringify(g));}catch(e){}setGoals(g);if(props.bumpReloadKey)props.bumpReloadKey();}
+  function persist(g){
+    try{localStorage.setItem(GOALS_KEY,JSON.stringify(g));}catch(e){}
+    // CHANGED: Re-read from localStorage after writing so any sync layer that intercepts /
+    // transforms the value (e.g. JSON.parse-then-stringify round-trip) is reflected in state.
+    // Without this, the editor could show one value while localStorage held a slightly different
+    // one, causing the snapshot card to show the "wrong" target.
+    var fresh=g;
+    try{var s=localStorage.getItem(GOALS_KEY);if(s)fresh=normalizeStored(JSON.parse(s));}catch(e){}
+    setGoals(fresh);
+    if(props.bumpReloadKey)props.bumpReloadKey();
+  }
   function saveStandardGoals(){
     // CHANGED: Strip the editor-only `_allowancePct` field; it has its own localStorage key and
     // shouldn't leak into the goals blob.
@@ -7806,7 +7816,7 @@ function SettingsTab(props){
               <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid #1e293b44"}}>
                 <label style={{fontSize:11,color:"#94a3b8",fontWeight:600,display:"block",marginBottom:5}}>Allowance % of profit</label>
                 <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                  <input type="number" value={allowancePctInput} onChange={function(e){var v=e.target.value;setAllowancePctInput(v);var n=parseFloat(v);if(!isNaN(n)&&n>0)setWithdrawalAllowancePct(n);}} placeholder="30" style={Object.assign({},fld,{flex:1})}/>
+                  <input type="number" value={allowancePctInput} onChange={function(e){var v=e.target.value;setAllowancePctInput(v);var n=parseFloat(v);if(!isNaN(n)&&n>0)setWithdrawalAllowancePct(n);}} placeholder="30" style={Object.assign({},fld,{width:80,flex:"none"})}/>
                   <span style={{fontSize:13,color:"#64748b"}}>%</span>
                   <button onClick={function(){var n=parseFloat(allowancePctInput);if(!isNaN(n)&&n>0){setWithdrawalAllowancePct(n);}if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"7px 14px",background:"#4f46e5",border:"none",borderRadius:5,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>Set</button>
                 </div>
