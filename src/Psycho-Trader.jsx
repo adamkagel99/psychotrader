@@ -3905,29 +3905,9 @@ function DashboardTab(props){
           </div>
         );
       })()}
-      {/* CHANGED: Monthly P&L target banner moved to App scope so it shows on every tab. */}
-      {/* CHANGED: Allowance-target reached notification. Shows when the user set a target, the live
-          allowance has reached it, and it hasn't been dismissed. Dismiss marks it acknowledged. */}
-      {(function(){
-        var target=getAllowanceTarget();
-        if(target<=0)return null;
-        var allowance=getWithdrawalAllowance(totalPnL);
-        if(allowance<target)return null;
-        if(getAllowanceNotifDismissed())return null;
-        var fmt=function(n){return "$"+Math.round(n).toLocaleString();};
-        return (
-          <div style={{marginBottom:16,padding:"14px 16px",background:"linear-gradient(135deg,#14532d,#166534)",border:"1px solid #22c55e",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
-            <div style={{minWidth:0}}>
-              <div style={{fontSize:14,fontWeight:800,color:"#fff",display:"flex",alignItems:"center",gap:7}}>🔔 Withdrawal allowance reached {fmt(target)}</div>
-              <div style={{fontSize:12,color:"#bbf7d0",marginTop:3,lineHeight:1.5}}>Your allowance is now {fmt(allowance)}{HIDE_DOLLAR_PNL?"":""}. {props.onWithdraw?"Tap to log a withdrawal, or":"You can"} dismiss this.</div>
-            </div>
-            <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0}}>
-              {props.onWithdraw&&<button onClick={function(){props.onWithdraw(Math.round(target));}} style={{padding:"6px 12px",background:"#052e16",border:"1px solid #22c55e",borderRadius:6,color:"#86efac",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Withdraw →</button>}
-              <button onClick={function(){setAllowanceNotifDismissed(true);if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"#0a0a0f44",border:"1px solid #166534",borderRadius:6,color:"#bbf7d0",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Dismiss</button>
-            </div>
-          </div>
-        );
-      })()}
+      {/* CHANGED: Monthly P&L target banner moved to App scope so it shows on every tab.
+         (Removed the custom $-allowance-target banner — the payout nudge is now driven by the
+         green-streak banner above and the Monthly Withdrawal goal cap on suggested allowance.) */}
       {/* CHANGED: Today-first dashboard — Today strip, then all-time Performance & Progress,
           then a responsive row of week calendar + goals snapshot + economic events. */}
       <TodayStrip mobile={props.mobile} settings={settings} phase={props.phase} state={props.state} totalPnL={totalPnL} todayTrades={props.todayTrades} currentAccount={currentAccount} onNavigateToJournal={props.onNavigateToJournal}/>
@@ -5264,8 +5244,13 @@ function GoalsTab(props){
     try{var s=localStorage.getItem(GOALS_KEY);if(s)setGoals(normalizeStored(JSON.parse(s)));}catch(e){}
   },[]);
 
-  function persist(g){try{localStorage.setItem(GOALS_KEY,JSON.stringify(g));}catch(e){}setGoals(g);}
-  function saveStandardGoals(){persist(normalizeStored(draft));setEditing(false);}
+  function persist(g){try{localStorage.setItem(GOALS_KEY,JSON.stringify(g));}catch(e){}setGoals(g);if(props.bumpReloadKey)props.bumpReloadKey();}
+  function saveStandardGoals(){
+    // CHANGED: Strip the editor-only `_allowancePct` field; it has its own localStorage key and
+    // shouldn't leak into the goals blob.
+    var clean=Object.assign({},draft);delete clean._allowancePct;
+    persist(normalizeStored(clean));setEditing(false);
+  }
 
   // CHANGED: validation for save button
   var canSaveCustom=newGoal.title.trim().length>0
@@ -7587,6 +7572,9 @@ function SettingsTab(props){
   useEffect(function(){if(props.initialTransferAmount){setTransferDraft(function(d){return Object.assign({},d,{type:"withdrawal",amount:String(props.initialTransferAmount)});});}},[props.initialTransferAmount]);
   // CHANGED: Allowance-target notification input.
   var [allowanceTargetInput,setAllowanceTargetInput]=useState(function(){var v=getAllowanceTarget();return v>0?String(v):"";});
+  // CHANGED: Inline editable allowance % — typing updates localStorage immediately so the
+  // displayed allowance recomputes on the next render.
+  var [allowancePctInput,setAllowancePctInput]=useState(function(){return String(getWithdrawalAllowancePct());});
   var [instruments,setInstruments]=useState(loadInstruments());
   var [newInst,setNewInst]=useState({symbol:"",name:"",classId:"options"});
   var [eventsReloadKey,setEventsReloadKey]=useState(0);
@@ -7812,15 +7800,17 @@ function SettingsTab(props){
               </div>
               {allowance<=0&&<div style={{fontSize:11,color:"#fdba74",marginTop:5}}>No profit{lastDate?" since your last withdrawal":""} yet, so the suggested allowance is $0. You can still log this — it's just a guide.</div>}
               {overAllowance&&<div style={{fontSize:11,color:"#fca5a5",marginTop:5}}>Over allowance by {fmt(entered-allowance)} — you can still log it, but it exceeds the {getWithdrawalAllowancePct()}% guide.</div>}
-              {/* CHANGED: Notify-me-at target. When the live allowance reaches this amount, a banner shows on Home. */}
+              {/* CHANGED: Inline editable % of profit. Updates the allowance readout immediately
+                 via local state mirror, persists on Set. The home banner is now driven by the
+                 Monthly Withdrawal goal, not a separate $ target. */}
               <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid #1e293b44"}}>
-                <label style={{fontSize:11,color:"#94a3b8",fontWeight:600,display:"block",marginBottom:5}}>Notify me when allowance reaches</label>
+                <label style={{fontSize:11,color:"#94a3b8",fontWeight:600,display:"block",marginBottom:5}}>Allowance % of profit</label>
                 <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                  <span style={{fontSize:13,color:"#64748b"}}>$</span>
-                  <input type="number" value={allowanceTargetInput} onChange={function(e){setAllowanceTargetInput(e.target.value);}} placeholder="e.g. 500" style={Object.assign({},fld,{flex:1})}/>
-                  <button onClick={function(){var v=parseFloat(allowanceTargetInput)||0;saveAllowanceTarget(v);setAllowanceTargetInput(v>0?String(v):"");if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"7px 14px",background:"#4f46e5",border:"none",borderRadius:5,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>Set</button>
+                  <input type="number" value={allowancePctInput} onChange={function(e){var v=e.target.value;setAllowancePctInput(v);var n=parseFloat(v);if(!isNaN(n)&&n>0)setWithdrawalAllowancePct(n);}} placeholder="30" style={Object.assign({},fld,{flex:1})}/>
+                  <span style={{fontSize:13,color:"#64748b"}}>%</span>
+                  <button onClick={function(){var n=parseFloat(allowancePctInput);if(!isNaN(n)&&n>0){setWithdrawalAllowancePct(n);}if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"7px 14px",background:"#4f46e5",border:"none",borderRadius:5,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>Set</button>
                 </div>
-                {getAllowanceTarget()>0?<div style={{fontSize:11,color:"#86efac",marginTop:6}}>✓ You'll see a banner on Home when your allowance hits {fmt(getAllowanceTarget())}.{" "}<button onClick={function(){saveAllowanceTarget(0);setAllowanceTargetInput("");if(props.bumpReloadKey)props.bumpReloadKey();}} style={{background:"none",border:"none",color:"#64748b",fontSize:11,cursor:"pointer",fontFamily:"inherit",textDecoration:"underline",padding:0}}>Clear</button></div>:<div style={{fontSize:11,color:"#64748b",marginTop:6}}>Leave blank for no notification.</div>}
+                <div style={{fontSize:11,color:"#64748b",marginTop:6}}>Banner on Home fires when your monthly withdrawal goal is hit.</div>
               </div>
             </div>
           );
@@ -9081,7 +9071,7 @@ function App(props){
             {tab==="trades"&&<TradesTab mobile={mobile} state={state} setState={setState} showForm={showForm} setShowForm={setShowForm} trade={trade} setTrade={setTrade} saveTrade={saveTrade} deleteTrade={deleteTrade} tradeStatus={tradeStatus} phase={phase} settings={settings} preCheckComplete={preCheckComplete} totalPnL={totalPnL} initialDate={tradesInitialDate} reloadKey={reloadKey} bumpReloadKey={bumpReloadKey} timezone={settings.timezone} liveTrades={liveTrades} openLiveTrade={function(lt){setLiveTradeManaging(lt);}} displayPosMin={dPosMin} displayPosMax={dPosMax} displayRiskMin={dRiskMin} displayRiskMax={dRiskMax} tradeOptions={tradeOptions} autoAddViolations={autoAddViolations} refreshHistory={bumpReloadKey} checklistVersion={checklistVersion}/>}
           </>);
         })()}
-        {tab==="goals"&&<GoalsTab mobile={mobile} settings={settings} reloadKey={reloadKey} liveTotalPnL={totalPnL} tradeOptions={tradeOptions} state={state}/>}
+        {tab==="goals"&&<GoalsTab mobile={mobile} settings={settings} reloadKey={reloadKey} bumpReloadKey={bumpReloadKey} liveTotalPnL={totalPnL} tradeOptions={tradeOptions} state={state}/>}
         {tab==="performance"&&<PerformanceTab mobile={mobile} settings={settings} reloadKey={reloadKey} totalPnL={totalPnL} state={state} onNavigateToTrade={navigateToTrade}/>}
         {tab==="settings"&&<SettingsTab onSignOut={props.onSignOut} settings={settings} setSettings={setSettings} tradeOptions={tradeOptions} setTradeOptions={setTradeOptions} liveTotalPnL={totalPnL} initialTransferAmount={pendingWithdrawAmount} focusSection={settingsFocus} bumpReloadKey={bumpReloadKey} onChecklistChange={function(){setChecklistVersion(function(v){return v+1;});setState(function(s){var c=Object.assign({},s.preChecklist||{});var items=loadChecklistItems();items.forEach(function(it){if(c[it.key]==null)c[it.key]=false;});return Object.assign({},s,{preChecklist:c});});}}/>}
         {liveTradeManaging&&<ManageTradeView trade={liveTradeManaging} onClose={function(){setLiveTradeManaging(null);}} onSave={function(updated){saveTrade(updated);}} onDelete={function(){deleteTrade(liveTradeManaging.id);setLiveTradeManaging(null);}} settings={settings} tradeOptions={tradeOptions}/>}
