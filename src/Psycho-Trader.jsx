@@ -6321,7 +6321,11 @@ function DisciplineScatter(props){
         // Use process-only score so each trade's "discipline so far today" is reflected.
         var score=calcDiscipline(slice,parseFloat(r.riskMax)||0,{processOnly:true,commitment:r.commitment||null});
         var pnl=parseFloat(t.pnl)||0;
-        var rm=parseFloat(r.riskMax)||0;
+        // CHANGED: R must use the trade's effective risk cap (riskMax × sizeFraction), matching
+        // the canonical tradeR() used everywhere else. Without this, half-size trades plotted at
+        // half the R the Today strip reports.
+        var sfT=(t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))?parseFloat(t.sizeFraction):1;
+        var rm=(parseFloat(r.riskMax)||0)*sfT;
         pts.push({date:r.date,score:score,pnl:pnl,pct:sb>0?(pnl/sb*100):0,r:rm>0?(pnl/rm):0,n:1});
       });
     });
@@ -6333,8 +6337,11 @@ function DisciplineScatter(props){
       if(isNaN(score))score=calcDiscipline(trades,parseFloat(r.riskMax)||0);
       var dayPnl=parseFloat(r.pnl)||0;
       var sb=0;try{sb=getAccountBalanceAtDate(r.date);}catch(e){}
-      var rm=parseFloat(r.riskMax)||0;
-      pts.push({date:r.date,score:score,pnl:dayPnl,pct:sb>0?(dayPnl/sb*100):0,r:rm>0?(dayPnl/rm):0,n:trades.length});
+      // CHANGED: Day R = sum of each trade's R against its own (sf-scaled) risk cap. Matches the
+      // canonical dayR() the Today strip and rest of the app use. Previously divided dayPnl by the
+      // raw riskMax, halving R on half-size days.
+      var dayRVal=dayR(trades,parseFloat(r.riskMax)||0);
+      pts.push({date:r.date,score:score,pnl:dayPnl,pct:sb>0?(dayPnl/sb*100):0,r:dayRVal,n:trades.length});
     });
   }
   if(pts.length<3)return null;
