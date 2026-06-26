@@ -5100,7 +5100,7 @@ function GoalCard2(props){
     <div style={CS({marginBottom:12,position:"relative",border:completed?"1px solid #22c55e":undefined,background:completed?"#0f1f15":undefined})}>
       {completed&&<div style={{position:"absolute",top:8,right:gp.onHide||gp.onDelete?32:8,fontSize:10,fontWeight:800,color:"#052e16",background:"#22c55e",borderRadius:4,padding:"2px 7px",letterSpacing:0.5}}>✓ COMPLETED</div>}
       {gp.onHide&&(
-        <button onClick={function(e){e.stopPropagation();gp.onHide();}} aria-label={"Hide "+gp.label} title={"Hide "+gp.label} style={{position:"absolute",top:8,right:8,width:20,height:20,padding:0,background:"none",border:"none",color:"#475569",fontSize:14,cursor:"pointer",fontFamily:"inherit",lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:3}}>×</button>
+        <button onClick={function(e){e.stopPropagation();if(window.confirm("Disable this goal? You can re-enable it from the Hidden section at the top of the Goals tab."))gp.onHide();}} aria-label={"Disable "+gp.label} title={"Disable "+gp.label+" (re-enable from Hidden section)"} style={{position:"absolute",top:8,right:8,width:22,height:22,padding:0,background:"#1e293b",border:"1px solid #334155",color:"#94a3b8",fontSize:14,cursor:"pointer",fontFamily:"inherit",lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:4}}>×</button>
       )}
       {gp.onDelete&&(
         <button onClick={function(e){e.stopPropagation();gp.onDelete();}} aria-label={"Delete "+gp.label} title={"Delete "+gp.label} style={{position:"absolute",top:8,right:8,padding:"3px 8px",background:"#7f1d1d33",border:"1px solid #7f1d1d",borderRadius:4,color:"#fca5a5",fontSize:13,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>
@@ -5443,7 +5443,7 @@ function GoalsTab(props){
            payout nudge. Stored separately from goals (own localStorage key, syncs across devices). */}
         <div style={{marginBottom:12}}>
           <label style={lbl}>Allowance % of profit (used in payout nudge)</label>
-          <input type="number" value={draft._allowancePct!=null?draft._allowancePct:getWithdrawalAllowancePct()} onChange={function(e){var v=e.target.value;setDraft(function(g){return Object.assign({},g,{_allowancePct:v});});}} placeholder="e.g. 30" style={fld}/>
+          <input type="number" value={draft._allowancePct!=null?draft._allowancePct:getWithdrawalAllowancePct()} onChange={function(e){var v=e.target.value;setDraft(function(g){return Object.assign({},g,{_allowancePct:v});});var n=parseFloat(v);if(!isNaN(n)&&n>0)setWithdrawalAllowancePct(n);}} placeholder="e.g. 30" style={fld}/>
         </div>
         <button onClick={function(){if(draft._allowancePct!=null&&draft._allowancePct!==""){var n=parseFloat(draft._allowancePct);if(!isNaN(n)&&n>0)setWithdrawalAllowancePct(n);}saveStandardGoals();}} style={{width:"100%",padding:"13px",background:"linear-gradient(135deg,#4f46e5,#6366f1)",color:"#fff",border:"none",borderRadius:10,fontSize:16,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginTop:4}}>Save Goals</button>
         {/* CHANGED: Custom goals editing lives here (was a per-card Edit button before). Click any to open its inline edit form. */}
@@ -5550,7 +5550,7 @@ function GoalsTab(props){
 
       {hiddenKeys.length>0&&(
         <div style={{padding:"8px 12px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8,marginBottom:12}}>
-          <div style={{fontSize:11,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600,marginBottom:6}}>Hidden ({hiddenKeys.length})</div>
+          <div style={{fontSize:11,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600,marginBottom:6}}>Disabled ({hiddenKeys.length}) — tap to re-enable</div>
           <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
             {hiddenKeys.map(function(k){return <button key={k} onClick={function(){unhide(k);}} style={{padding:"3px 9px",background:"#1e293b",border:"1px solid #334155",borderRadius:4,color:"#cbd5e1",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>+ {hiddenLabels[k]||k}</button>;})}
           </div>
@@ -8739,11 +8739,15 @@ function App(props){
         // yesterday and merge: if it already has trades, keep them; if both have trades, union by id.
         // This prevents catastrophic loss when state.trades is stale/partial relative to the saved
         // journal (e.g., after cloud-pull, migration, or app reopened past midnight).
-        if(state.trades&&state.trades.length>0){
+        // CHANGED: Split open vs closed. Closed trades roll into yesterday's journal entry. Open
+        // trades (no exits yet) CARRY OVER into today's state so the live position isn't lost.
+        var openCarry=(state.trades||[]).filter(function(t){return t&&t.status==="open";});
+        var closedT=(state.trades||[]).filter(function(t){return t&&t.status!=="open";});
+        if(closedT.length>0){
           var key="journal:"+state.date.replace(/\//g,"-");
           var existing=null;
           try{var raw=localStorage.getItem(key);if(raw)existing=JSON.parse(raw);}catch(e){}
-          var mergedTrades=state.trades.slice();
+          var mergedTrades=closedT.slice();
           if(existing&&Array.isArray(existing.trades)&&existing.trades.length>0){
             var seen={};
             mergedTrades.forEach(function(t){if(t&&t.id!=null)seen[t.id]=true;});
@@ -8766,7 +8770,10 @@ function App(props){
           });
           safeWriteJournalEntry(key,entry);
         }
-        setState(defaultState());
+        // Fresh state for today, but preserve any still-open positions.
+        var fresh=defaultState();
+        if(openCarry.length>0)fresh.trades=openCarry;
+        setState(fresh);
       }
     }
     checkRollover();
