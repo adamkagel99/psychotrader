@@ -6317,9 +6317,11 @@ function RMultipleHistogram(props){
   var bounds=[-Infinity,-3,-2,-1,0,1,2,3,Infinity];
   var labels=["<-3R","-3 to -2","-2 to -1","-1 to 0","0 to 1","1 to 2","2 to 3","≥3R"];
   var counts=labels.map(function(){return 0;});
+  // CHANGED: Track sum of R per bucket so hover can show the bucket's average R, not just count.
+  var sums=labels.map(function(){return 0;});
   Rs.forEach(function(r){
     for(var i=0;i<labels.length;i++){
-      if(r>=bounds[i]&&r<bounds[i+1]){counts[i]++;break;}
+      if(r>=bounds[i]&&r<bounds[i+1]){counts[i]++;sums[i]+=r;break;}
     }
   });
   var maxCount=Math.max.apply(null,counts);
@@ -6343,14 +6345,16 @@ function RMultipleHistogram(props){
   }
   function leaveBars(){setHoverI(null);}
   var hoverCount=hoverI!=null?counts[hoverI]:null;
-  var hoverPct=hoverI!=null&&Rs.length>0?Math.round((counts[hoverI]/Rs.length)*100):null;
+  // CHANGED: Hover readout shows the bucket's AVERAGE R (per-trade) rather than this bucket's
+  // share of total trades — more actionable signal than a frequency percentage.
+  var hoverAvgR=hoverI!=null&&counts[hoverI]>0?(sums[hoverI]/counts[hoverI]):null;
   return (
     <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid #1e293b",borderRadius:10,display:"flex",flexDirection:"column",boxSizing:"border-box"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10,gap:8}}>
         <div>
           <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{hoverI!=null?labels[hoverI]:"R-Multiple Distribution"}</div>
           {hoverI!=null?(
-            <div style={{fontSize:20,fontWeight:700,color:bounds[hoverI+1]<=0?"#ef4444":"#22c55e",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{hoverCount}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:4}}>trade{hoverCount===1?"":"s"} · {hoverPct}%</span></div>
+            <div style={{fontSize:20,fontWeight:700,color:bounds[hoverI+1]<=0?"#ef4444":"#22c55e",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{hoverAvgR!=null?((hoverAvgR>=0?"+":"")+hoverAvgR.toFixed(2)+"R"):"—"}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:4}}>avg</span></div>
           ):(
             <div style={{fontSize:20,fontWeight:700,color:expR>=0?"#22c55e":"#ef4444",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{(expR>=0?"+":"")+expR.toFixed(2)}R<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:4}}>/trade</span></div>
           )}
