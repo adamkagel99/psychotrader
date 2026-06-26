@@ -3632,6 +3632,18 @@ function GoalsSnapshot(props){
   var accountTarget=parseFloat(goals.accountTarget)||0;
   var withdrawalTarget=parseFloat(goals.withdrawals)||0;
   var totalWithdrawn=getTotalWithdrawn();
+  // CHANGED: Month-to-date withdrawals (abs sum of negative transfers dated this month).
+  var monthlyWithdrawalTarget=parseFloat(goals.monthlyWithdrawals)||0;
+  var monthlyWithdrawn=(function(){
+    try{
+      var d=new Date();var y=d.getFullYear(),m=d.getMonth();
+      return (loadTransfers()||[]).reduce(function(s,t){
+        var dt=new Date(t.date);if(isNaN(dt.getTime()))return s;
+        if(dt.getFullYear()!==y||dt.getMonth()!==m)return s;
+        var a=parseFloat(t.amount)||0;return a<0?s+Math.abs(a):s;
+      },0);
+    }catch(e){return 0;}
+  })();
   function money(v){if(HIDE_DOLLAR_PNL)return (v<0?"-":"")+"$•••";return (v<0?"-$":"$")+Math.abs(Math.round(v)).toLocaleString();}
   // CHANGED: when $ is hidden, P&L goals are shown in R (value ÷ risk-per-trade).
   function rFmt(v){var r=riskMax>0?v/riskMax:0;return (r>=0?"+":"")+r.toFixed(1)+"R";}
@@ -3641,6 +3653,7 @@ function GoalsSnapshot(props){
   var account=[],perf=[],pnl=[];
   if(!hidden.account&&accountTarget>0)account.push({key:"account",label:"Account Balance",value:props.currentAccount||0,target:accountTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:money,formatTarget:money,compact:true});
   if(!hidden.withdrawals&&withdrawalTarget>0)account.push({key:"withdrawals",label:"Total Withdrawn",value:totalWithdrawn,target:withdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:money,formatTarget:money,compact:true});
+  if(!hidden.monthlyWithdrawals&&monthlyWithdrawalTarget>0)account.push({key:"monthlyWithdrawals",label:"Month Withdrawn",value:monthlyWithdrawn,target:monthlyWithdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:money,formatTarget:money,compact:true});
   if(!hidden.winRate&&winRateTarget>0)perf.push({key:"winRate",label:"Win Rate",value:oWR,target:winRateTarget,suffix:"%",decimals:0,targetDecimals:0,wrColor:true,compact:true});
   if(!hidden.discipline&&disciplineTarget>0)perf.push({key:"discipline",label:"Discipline",value:aDisc,target:disciplineTarget,suffix:"%",decimals:0,targetDecimals:0,discColor:true,compact:true});
   if(!hidden.daily&&dailyTarget>0)pnl.push({key:"daily",label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
@@ -5196,7 +5209,7 @@ function GoalRing(props){
 
 function GoalsTab(props){
   var settings=props.settings,liveTotalPnL=props.liveTotalPnL||0;
-  var EMPTY_GOALS={weeklyMultiplier:"4",monthlyPnL:"",winRate:"",disciplineScore:"",accountTarget:"",withdrawals:"",custom:[],hidden:{}};
+  var EMPTY_GOALS={weeklyMultiplier:"4",monthlyPnL:"",winRate:"",disciplineScore:"",accountTarget:"",withdrawals:"",monthlyWithdrawals:"",custom:[],hidden:{}};
   // Defensive load that handles legacy or new formats and arrays
   function normalizeStored(p){
     if(!p)return Object.assign({},EMPTY_GOALS);
@@ -5329,6 +5342,18 @@ function GoalsTab(props){
   var accountTarget=parseFloat(goals.accountTarget)||0;
   var withdrawalTarget=parseFloat(goals.withdrawals)||0;
   var totalWithdrawn=getTotalWithdrawn();
+  // CHANGED: Month-to-date withdrawals goal.
+  var monthlyWithdrawalTarget=parseFloat(goals.monthlyWithdrawals)||0;
+  var monthlyWithdrawn=(function(){
+    try{
+      var d=new Date();var y=d.getFullYear(),m=d.getMonth();
+      return (loadTransfers()||[]).reduce(function(s,t){
+        var dt=new Date(t.date);if(isNaN(dt.getTime()))return s;
+        if(dt.getFullYear()!==y||dt.getMonth()!==m)return s;
+        var a=parseFloat(t.amount)||0;return a<0?s+Math.abs(a):s;
+      },0);
+    }catch(e){return 0;}
+  })();
 
   var transferTotalVal=transferTotal(loadTransfers());
   var totalAllPnL=rows.reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0)+liveTotalPnL;
@@ -5392,7 +5417,7 @@ function GoalsTab(props){
           <button onClick={function(){setEditing(false);}} style={{background:"none",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:14,cursor:"pointer",fontFamily:"inherit",padding:"6px 14px"}}>Cancel</button>
         </div>
         <div style={{padding:"10px 12px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:8,marginBottom:12,fontSize:13,color:"#94a3b8",lineHeight:1.5}}>Daily P&L target is auto-calculated from the first enabled session's position size and gain hard stop: <span style={{color:"#22c55e",fontWeight:700}}>${Math.round(autoDaily)}</span> (hitting the first session's gain stop is a hard stop for the day, sized by risk max ${(parseFloat(settings.riskMax)||0)}). Adjust sessions and gain stops in Settings.</div>
-        {[{key:"weeklyMultiplier",label:"Weekly P&L Multiplier (× Daily Target)",ph:"e.g. 4"},{key:"monthlyPnL",label:"Monthly P&L Target ($)",ph:"e.g. 3000"},{key:"winRate",label:"Win Rate Target (%)",ph:"e.g. 60"},{key:"accountTarget",label:"Account Milestone ($)",ph:"e.g. 5000"},{key:"withdrawals",label:"Total Withdrawn Target ($)",ph:"e.g. 10000"}].map(function(f){
+        {[{key:"weeklyMultiplier",label:"Weekly P&L Multiplier (× Daily Target)",ph:"e.g. 4"},{key:"monthlyPnL",label:"Monthly P&L Target ($)",ph:"e.g. 3000"},{key:"winRate",label:"Win Rate Target (%)",ph:"e.g. 60"},{key:"accountTarget",label:"Account Milestone ($)",ph:"e.g. 5000"},{key:"monthlyWithdrawals",label:"Monthly Withdrawal Target ($)",ph:"e.g. 1000"},{key:"withdrawals",label:"Total Withdrawn Target ($)",ph:"e.g. 10000"}].map(function(f){
           return <div key={f.key} style={{marginBottom:12}}><label style={lbl}>{f.label}</label><input type="number" value={draft[f.key]||""} onChange={function(e){var v=e.target.value;setDraft(function(g){return Object.assign({},g,{[f.key]:v});});}} placeholder={f.ph} style={fld}/></div>;
         })}
         <button onClick={saveStandardGoals} style={{width:"100%",padding:"13px",background:"linear-gradient(135deg,#4f46e5,#6366f1)",color:"#fff",border:"none",borderRadius:10,fontSize:16,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginTop:4}}>Save Goals</button>
@@ -5419,7 +5444,7 @@ function GoalsTab(props){
 
   var hidden=goals.hidden||{};
   var hiddenKeys=Object.keys(hidden).filter(function(k){return hidden[k];});
-  var hiddenLabels={daily:"Today's P&L",weekly:"Week P&L",monthly:"Month P&L",winRate:"Win Rate",discipline:"Discipline Score",account:"Account Balance",withdrawals:"Total Withdrawn"};
+  var hiddenLabels={daily:"Today's P&L",weekly:"Week P&L",monthly:"Month P&L",winRate:"Win Rate",discipline:"Discipline Score",account:"Account Balance",monthlyWithdrawals:"Month Withdrawn",withdrawals:"Total Withdrawn"};
 
   function renderStandardCard(key,opts){
     if(hidden[key])return null;
@@ -5613,6 +5638,7 @@ function GoalsTab(props){
                 <SectionHead icon="🏦" title="Account Activity"/>
                 <div style={gridStyle}>
                   {!hidden.account&&accountTarget>0&&renderStandardCard("account",{label:"Account Balance",value:currentAccount,target:accountTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true})}
+                  {monthlyWithdrawalTarget>0&&renderStandardCard("monthlyWithdrawals",{label:"Month Withdrawn",value:monthlyWithdrawn,target:monthlyWithdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true})}
                   {withdrawalTarget>0&&renderStandardCard("withdrawals",{label:"Total Withdrawn",value:totalWithdrawn,target:withdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true})}
                   {customByBucket.account.map(renderInlineCustom)}
                 </div>
