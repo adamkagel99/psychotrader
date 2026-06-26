@@ -1192,7 +1192,30 @@ function getStreakNudgeThreshold(){try{var v=parseFloat(localStorage.getItem("tf
 // (key: YYYY-MM) so it auto-clears at month rollover. Banner dismissal stored separately so the
 // banner can stop nagging once the user takes any action (or explicitly dismisses for the month).
 function getCurrentMonthKey(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");}
-function isMonthHalfsizeActive(){try{return localStorage.getItem("tf-month-halfsize-active")===getCurrentMonthKey();}catch(e){return false;}}
+// CHANGED: Half-size is MANDATORY for the rest of the month once the user's Monthly P&L target
+// is hit. This helper checks whether the goal has been hit by summing this month's journal P&L
+// + today's live P&L vs the saved target. If yes, half-size is locked on regardless of the
+// stored toggle. The stored "tf-month-halfsize-active" flag still works for cases where the
+// user wants to opt-in early (before hitting the goal).
+function isMonthlyGoalHit(todayLivePnL){
+  try{
+    var goals=JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};
+    var target=parseFloat(goals.monthlyPnL)||0;
+    if(target<=0)return false;
+    var moStart=new Date();moStart=new Date(moStart.getFullYear(),moStart.getMonth(),1);
+    var todayKey=todayStr();
+    var rows=loadJournalRows().filter(function(e){return new Date(e.date)>=moStart;});
+    var includesToday=rows.some(function(e){return e.date===todayKey;});
+    var sum=rows.reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0)+(includesToday?0:(parseFloat(todayLivePnL)||0));
+    return sum>=target;
+  }catch(e){return false;}
+}
+function isMonthHalfsizeActive(){
+  try{
+    if(isMonthlyGoalHit(0))return true;
+    return localStorage.getItem("tf-month-halfsize-active")===getCurrentMonthKey();
+  }catch(e){return false;}
+}
 // CHANGED: Canonical R helpers used everywhere. tradeR returns one trade's R against the
 // risk-unit at the time the trade was placed (stamped sizeFraction). dayR sums per-trade R's
 // — self-corrects across mixed-size days and matches what the journal shows. Use these
@@ -1239,18 +1262,10 @@ function MonthlyTargetBanner(props){
         <div style={{fontSize:13,fontWeight:800,color:"#fff",display:"flex",alignItems:"center",gap:7}}>🏁 Monthly target hit — {fmt(monthPnLLive)} of {fmt(monthlyTarget)}</div>
       </div>
       <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap"}}>
-        <button onClick={function(){
-          var was=halfOn;
-          setMonthHalfsizeActive(!was);
-          // CHANGED: When user disables half-size, also clear the banner dismissal so the banner
-          // stays visible (otherwise: previously dismissed + just turned off → banner vanishes
-          // and there's no way back without re-hitting the monthly goal).
-          if(was){try{localStorage.removeItem("tf-month-goal-banner-dismissed");}catch(e){}}
-          if(props.bumpReloadKey)props.bumpReloadKey();
-        }} style={{padding:"6px 12px",background:halfOn?"#facc15":"#0a0a0f44",border:"1px solid #facc15",borderRadius:6,color:halfOn?"#422006":"#fde68a",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>{halfOn?"✓ Half-size on — tap to turn off":"Half-size rest of month"}</button>
-        {/* CHANGED: Withdraw button removed — other surfaces (allowance banner, profit-take
-           streak nudge, Settings transfer form) already cover that action. */}
-        {!halfOn&&<button onClick={function(){dismissMonthGoalBanner();if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"transparent",border:"1px solid #78350f",borderRadius:6,color:"#fde68a",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Dismiss</button>}
+        {/* CHANGED: Half-size is mandatory once the monthly goal is hit — replaced the toggle
+           button with a locked "On" indicator. The user can no longer flip it off for the rest
+           of the month. */}
+        <div title="Half-size is locked on after hitting your monthly goal" style={{padding:"6px 12px",background:"#facc15",border:"1px solid #facc15",borderRadius:6,color:"#422006",fontSize:12,fontWeight:700,whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:5}}>🔒 Half-size locked on</div>
       </div>
     </div>
   );
