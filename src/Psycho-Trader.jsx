@@ -6894,9 +6894,14 @@ function PerformanceTab(props){
   // trades array was emptied by an older rollover bug but whose saved pnl is still correct).
   var tradingDays=filtered.filter(function(r){return (r.trades||[]).some(function(t){return t.status!=="open";})||((parseFloat(r.pnl)||0)!==0);}).length;
   var avgTradesPerDay=tradingDays>0?(allTrades.length/tradingDays):0;
-  // CHANGED: Total P&L = sum of each row's stored pnl (snapshot) so it's accurate even when an
-  // entry's trades array is empty/corrupted but its pnl was saved correctly.
-  var totalPnl=filtered.reduce(function(s,r){return s+(parseFloat(r.pnl)||0);},0);
+  // CHANGED: Total P&L now sums per-trade pnl (matching EquityCurve exactly) so the headline %
+  // and the curve's final % agree. Falls back to the row's stored pnl snapshot only when a row
+  // has no closed trades (legacy / corrupt-entry safety net — same fallback the curve uses).
+  var totalPnl=filtered.reduce(function(s,r){
+    var ct=(r.trades||[]).filter(function(t){return t&&t.status!=="open";});
+    if(ct.length>0)return s+ct.reduce(function(a,t){return a+(parseFloat(t.pnl)||0);},0);
+    return s+(parseFloat(r.pnl)||0);
+  },0);
   var wins=allTrades.filter(function(t){return parseFloat(t.pnl)>0;});
   var losses=allTrades.filter(function(t){return parseFloat(t.pnl)<0;});
   var breakevens=allTrades.filter(function(t){return Math.abs(parseFloat(t.pnl)||0)<0.01;});
