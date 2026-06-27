@@ -1069,6 +1069,8 @@ function getChallengeCompletions(){var d=loadGamificationData();return d.challen
 var WITHDRAWAL_ALLOWANCE_PCT=30; // legacy default — overridden by user's saved pct (see getter below).
 // CHANGED: User-editable allowance percentage. Stored in localStorage; defaults to 30%.
 function getWithdrawalAllowancePct(){try{var v=parseFloat(localStorage.getItem("tf-allowance-pct"));return isNaN(v)||v<=0?WITHDRAWAL_ALLOWANCE_PCT:v;}catch(e){return WITHDRAWAL_ALLOWANCE_PCT;}}
+// CHANGED: Raw getter — returns the user's stored pct as-is (including 0 to disable). Defaults to WITHDRAWAL_ALLOWANCE_PCT only when unset/NaN.
+function getWithdrawalAllowancePctRaw(){try{var s=localStorage.getItem("tf-allowance-pct");if(s===null||s==="")return WITHDRAWAL_ALLOWANCE_PCT;var v=parseFloat(s);return isNaN(v)?WITHDRAWAL_ALLOWANCE_PCT:Math.max(0,v);}catch(e){return WITHDRAWAL_ALLOWANCE_PCT;}}
 function setWithdrawalAllowancePct(v){try{localStorage.setItem("tf-allowance-pct",String(v));}catch(e){}}
 // CHANGED: User-toggleable enable/disable for the allowance feature. When disabled, no allowance
 // is suggested anywhere and the payout nudge banner won't fire. Defaults to enabled.
@@ -3700,7 +3702,9 @@ function GoalsSnapshot(props){
   var winRateTarget=parseFloat(goals.winRate)||0;
   var disciplineTarget=loadDisciplineLockThreshold();
   var accountTarget=parseFloat(goals.accountTarget)||0;
-  var withdrawalTarget=parseFloat(goals.withdrawals)||0;
+  // CHANGED: Total Withdrawn target is auto-derived from Withdrawal Allowance % × Monthly P&L goal. Hidden when allowance % is 0.
+  var _wpct=getAllowanceEnabled()?getWithdrawalAllowancePctRaw():0;
+  var withdrawalTarget=(_wpct>0&&monthlyTarget>0)?(_wpct/100)*monthlyTarget:0;
   var totalWithdrawn=getTotalWithdrawn();
   // CHANGED: Month-to-date withdrawals (abs sum of negative transfers dated this month).
   var monthlyWithdrawalTarget=parseFloat(goals.monthlyWithdrawals)||0;
@@ -5405,7 +5409,9 @@ function GoalsTab(props){
   // is no longer user-editable in Goals. The goal is simply: keep your score above the lock bar.
   var disciplineTarget=loadDisciplineLockThreshold();
   var accountTarget=parseFloat(goals.accountTarget)||0;
-  var withdrawalTarget=parseFloat(goals.withdrawals)||0;
+  // CHANGED: Total Withdrawn target is auto-derived from Withdrawal Allowance % × Monthly P&L goal. Hidden when allowance % is 0.
+  var _wpct=getAllowanceEnabled()?getWithdrawalAllowancePctRaw():0;
+  var withdrawalTarget=(_wpct>0&&monthlyTarget>0)?(_wpct/100)*monthlyTarget:0;
   var totalWithdrawn=getTotalWithdrawn();
   // CHANGED: Month-to-date withdrawals goal.
   var monthlyWithdrawalTarget=parseFloat(goals.monthlyWithdrawals)||0;
@@ -5482,7 +5488,7 @@ function GoalsTab(props){
           <button onClick={function(){setEditing(false);}} style={{background:"none",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:14,cursor:"pointer",fontFamily:"inherit",padding:"6px 14px"}}>Cancel</button>
         </div>
         <div style={{padding:"10px 12px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:8,marginBottom:12,fontSize:13,color:"#94a3b8",lineHeight:1.5}}>Daily P&L target is auto-calculated from the first enabled session's position size and gain hard stop: <span style={{color:"#22c55e",fontWeight:700}}>${Math.round(autoDaily)}</span> (hitting the first session's gain stop is a hard stop for the day, sized by risk max ${(parseFloat(settings.riskMax)||0)}). Adjust sessions and gain stops in Settings.</div>
-        {[{key:"weeklyMultiplier",label:"Weekly P&L Multiplier (× Daily Target)",ph:"e.g. 4"},{key:"monthlyPnL",label:"Monthly P&L Target ($)",ph:"e.g. 3000"},{key:"winRate",label:"Win Rate Target (%)",ph:"e.g. 60"},{key:"accountTarget",label:"Account Milestone ($)",ph:"e.g. 5000"},{key:"monthlyWithdrawals",label:"Monthly Withdrawal Target ($)",ph:"e.g. 1000"},{key:"withdrawals",label:"Total Withdrawn Target ($)",ph:"e.g. 10000"}].map(function(f){
+        {[{key:"weeklyMultiplier",label:"Weekly P&L Multiplier (× Daily Target)",ph:"e.g. 4"},{key:"monthlyPnL",label:"Monthly P&L Target ($)",ph:"e.g. 3000"},{key:"winRate",label:"Win Rate Target (%)",ph:"e.g. 60"},{key:"accountTarget",label:"Account Milestone ($)",ph:"e.g. 5000"},{key:"monthlyWithdrawals",label:"Monthly Withdrawal Target ($)",ph:"e.g. 1000"}].map(function(f){
           return <div key={f.key} style={{marginBottom:12}}><label style={lbl}>{f.label}</label><input type="number" value={draft[f.key]||""} onChange={function(e){var v=e.target.value;setDraft(function(g){return Object.assign({},g,{[f.key]:v});});}} placeholder={f.ph} style={fld}/></div>;
         })}
         <button onClick={saveStandardGoals} style={{width:"100%",padding:"13px",background:"linear-gradient(135deg,#4f46e5,#6366f1)",color:"#fff",border:"none",borderRadius:10,fontSize:16,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginTop:4}}>Save Goals</button>
