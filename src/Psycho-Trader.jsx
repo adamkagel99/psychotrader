@@ -6857,6 +6857,12 @@ function PerformanceTab(props){
       var startM=new Date(now.getFullYear(),now.getMonth(),1);startM.setHours(0,0,0,0);
       return dd>=startM;
     }
+    if(range==="lastmonth"){
+      // CHANGED: Last Month = full previous calendar month.
+      var startPM=new Date(now.getFullYear(),now.getMonth()-1,1);startPM.setHours(0,0,0,0);
+      var endPM=new Date(now.getFullYear(),now.getMonth(),0);endPM.setHours(0,0,0,0); // last day of prev month
+      return dd>=startPM&&dd<=endPM;
+    }
     if(range==="ytd"){
       // CHANGED: Year-to-date = Jan 1 of current year → today.
       var startY=new Date(now.getFullYear(),0,1);startY.setHours(0,0,0,0);
@@ -6937,10 +6943,8 @@ function PerformanceTab(props){
           <Dropdown variant="pill" value={customMode?null:range} placeholder="Range" options={[
             {v:"thisweek",l:"This Week"},
             {v:"week",l:"Last Week"},
-            {v:"month",l:"30 days"},
-            {v:"mtd",l:"Month to Date"},
-            {v:"3month",l:"3 Months"},
-            {v:"year",l:"1 Year"},
+            {v:"mtd",l:"This Month"},
+            {v:"lastmonth",l:"Last Month"},
             {v:"ytd",l:"Year to Date"},
             {v:"all",l:"All Time"}
           ]} onChange={function(v){var prevY=window.scrollY;setRange(v);setCustomMode(false);try{localStorage.setItem("tf-stats-range",v);}catch(e){}requestAnimationFrame(function(){window.scrollTo(0,prevY);});}}/>
@@ -7136,7 +7140,7 @@ function PerformanceTab(props){
                 <StatTile label="Total P&L" active={selectedMetric==="totalPnl"} onClick={function(){setSelectedMetric("totalPnl");}} value={HIDE_DOLLAR_PNL?(function(){
                   // CHANGED: For all-time / long ranges, % return is computed against total deposits
                   // (cumulative invested capital), not summed daily %s — much more meaningful.
-                  if(range==="all"||range==="year"||range==="3month"){
+                  if(range==="all"||range==="ytd"){
                     var dep=0;try{(loadTransfers()||[]).forEach(function(tf){var a=parseFloat(tf.amount)||0;if(a>0)dep+=a;});}catch(e){}
                     if(dep>0)return (totalPnl>=0?"+":"")+(totalPnl/dep*100).toFixed(2)+"%";
                   }
