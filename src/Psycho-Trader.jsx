@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 
 const STORAGE_KEY = "tf-state";
 const SETTINGS_KEY = "tf-settings";
@@ -520,12 +520,19 @@ function calcDiscipline(trades,riskMaxArg,opts){
     var overIdx=vs.indexOf("Oversized entry");
     if(effPosMax>0&&pos>effPosMax){if(overIdx<0)vs.push("Oversized entry");}
     else if(overIdx>=0){vs.splice(overIdx,1);}
-    // CHANGED: Recompute "Max risk exceeded" — loss % worse than session-scaled risk cap.
-    // Prefer the threshold stamped at entry; else derive from current riskMaxPct × the trade's sizeFraction.
+    // CHANGED: Recompute "Max risk exceeded" using dollar comparison (loss $ vs riskMax × sf).
+    // Prefer the dollar cap stamped at entry; else derive from current settings.riskMax × the
+    // trade's sizeFraction. Legacy %-fallback retained for trades pre-dating the dollar stamp.
     var slPnl=parseFloat(t.pnl),slPct=parseFloat(t.pctPnl);
-    var effStopThresh=(parseFloat(t.stopThreshPctAtEntry)>0)?parseFloat(t.stopThreshPctAtEntry):(riskMaxPctSetting>0?riskMaxPctSetting*((t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))?parseFloat(t.sizeFraction):1):0);
+    var sfT=(t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))?parseFloat(t.sizeFraction):1;
+    var rmSet=parseFloat(riskMax)||0;
+    var effRiskCap=(parseFloat(t.riskCapDollarsAtEntry)>0)?parseFloat(t.riskCapDollarsAtEntry):(rmSet>0?rmSet*sfT:0);
+    var effStopThresh=(parseFloat(t.stopThreshPctAtEntry)>0)?parseFloat(t.stopThreshPctAtEntry):(riskMaxPctSetting>0?riskMaxPctSetting*sfT:0);
     var maxRiskIdx=vs.indexOf("Max risk exceeded");
-    if(!isNaN(slPnl)&&slPnl<0&&!isNaN(slPct)&&effStopThresh>0&&slPct<-effStopThresh){if(maxRiskIdx<0)vs.push("Max risk exceeded");}
+    var exceeded=false;
+    if(effRiskCap>0){exceeded=!isNaN(slPnl)&&slPnl<-effRiskCap;}
+    else{exceeded=!isNaN(slPnl)&&slPnl<0&&!isNaN(slPct)&&effStopThresh>0&&slPct<-effStopThresh;}
+    if(exceeded){if(maxRiskIdx<0)vs.push("Max risk exceeded");}
     else if(maxRiskIdx>=0){vs.splice(maxRiskIdx,1);}
     if(vs.length>0)anyViolation=true;
     processScore-=vs.length*(ds.violationPenalty||15);
@@ -1028,21 +1035,20 @@ function scoreCommitment(state){
 function getTotalWithdrawn(){
   return loadTransfers().filter(function(t){return String(t.type||"").toLowerCase()==="withdrawal";}).reduce(function(s,t){return s+Math.abs(parseFloat(t.amount)||0);},0);
 }
-// CHANGED: Daily target now derives from each enabled session's position size (sizeFraction) and
-// gain hard stop (gainStopR): for one winning trade per enabled session that hits its gain stop,
-// $ = riskMax × sizeFraction × gainStopR. Summed across enabled sessions = the "good day" target.
+// CHANGED: Daily target = the FIRST enabled session's gain-stop $ only ($ = riskMax × sizeFraction
+// × gainStopR). Rationale: hitting the gain stop in the first session is a hard stop for the day,
+// so no later session contributes to "the goal." Sessions are evaluated in chronological order.
 function computeDailyTarget(sp){
   if(!sp)return 0;
   var rm=parseFloat(sp.riskMax)||0;
   if(rm<=0)return 0;
   var sessions=getSessions(sp).filter(function(s){return s.enabled!==false;});
   if(sessions.length===0)return rm*(parseFloat(sp.gainMultiplier)||0); // fallback to legacy if no sessions
-  return sessions.reduce(function(sum,s){
-    var f=s.sizeFraction!=null?parseFloat(s.sizeFraction):1;
-    var g=s.gainStopR!=null?parseFloat(s.gainStopR):2.5;
-    if(isNaN(f))f=1;if(isNaN(g))g=2.5;
-    return sum+rm*f*g;
-  },0);
+  var first=sessions[0];
+  var f=first.sizeFraction!=null?parseFloat(first.sizeFraction):1;
+  var g=first.gainStopR!=null?parseFloat(first.gainStopR):2.5;
+  if(isNaN(f))f=1;if(isNaN(g))g=2.5;
+  return rm*f*g;
 }
 // Daily target derived from session sizing + gain hard stops. Falls back to 0 if unset.
 function getDailyTarget(){
@@ -1060,7 +1066,27 @@ function getChallengeCompletions(){var d=loadGamificationData();return d.challen
 // withdrawal). getRanksEarned/getWithdrawalsRemaining were removed as they served only the old gate.
 // CHANGED: Withdrawal allowance = flat % of profit earned SINCE the last withdrawal.
 // Ranks gate ACCESS (must be >= Bronze); the allowance amount is a flat % of recent profit.
-var WITHDRAWAL_ALLOWANCE_PCT=30; // flat % of profit-since-last-withdrawal
+var WITHDRAWAL_ALLOWANCE_PCT=30; // legacy default — overridden by user's saved pct (see getter below).
+// CHANGED: User-editable allowance percentage. Stored in localStorage; defaults to 30%.
+function getWithdrawalAllowancePct(){try{var v=parseFloat(localStorage.getItem("tf-allowance-pct"));return isNaN(v)||v<=0?WITHDRAWAL_ALLOWANCE_PCT:v;}catch(e){return WITHDRAWAL_ALLOWANCE_PCT;}}
+function setWithdrawalAllowancePct(v){try{localStorage.setItem("tf-allowance-pct",String(v));}catch(e){}}
+// CHANGED: User-toggleable enable/disable for the allowance feature. When disabled, no allowance
+// is suggested anywhere and the payout nudge banner won't fire. Defaults to enabled.
+function getAllowanceEnabled(){try{var v=localStorage.getItem("tf-allowance-enabled");return v===null||v==="1";}catch(e){return true;}}
+function setAllowanceEnabled(on){try{localStorage.setItem("tf-allowance-enabled",on?"1":"0");}catch(e){}}
+// CHANGED: Month-to-date withdrawals (abs sum of negative transfers dated this month).
+function getMonthWithdrawn(){
+  try{
+    var d=new Date();var y=d.getFullYear(),m=d.getMonth();
+    return (loadTransfers()||[]).reduce(function(s,t){
+      var dt=new Date(t.date);if(isNaN(dt.getTime()))return s;
+      if(dt.getFullYear()!==y||dt.getMonth()!==m)return s;
+      var a=parseFloat(t.amount)||0;return a<0?s+Math.abs(a):s;
+    },0);
+  }catch(e){return 0;}
+}
+// CHANGED: Monthly withdrawal target the user set in Goals.
+function getMonthlyWithdrawalTarget(){try{var g=JSON.parse(localStorage.getItem(GOALS_KEY)||"{}");return parseFloat(g.monthlyWithdrawals)||0;}catch(e){return 0;}}
 function getLastWithdrawalDate(){
   var ws=loadTransfers().filter(function(t){return String(t.type||"").toLowerCase()==="withdrawal";});
   if(!ws.length)return null;
@@ -1119,9 +1145,19 @@ function getProfitSinceLastWithdrawal(todayPnL){
 // the points/rank system no longer controls access. If there's positive profit since the last
 // withdrawal, you can withdraw a flat % of it. Achievements/Challenges are motivational only.
 function getWithdrawalAllowance(todayPnL){
+  // CHANGED: Honor the enable/disable toggle. When disabled, no suggested allowance anywhere.
+  if(!getAllowanceEnabled())return 0;
   var profit=getProfitSinceLastWithdrawal(todayPnL);
   if(profit<=0)return 0;
-  return profit*(WITHDRAWAL_ALLOWANCE_PCT/100);
+  var raw=profit*(getWithdrawalAllowancePct()/100);
+  // CHANGED: If the user set a Monthly Withdrawal target, cap the suggested allowance at the
+  // remaining gap to that target. This keeps the nudge in line with the user's monthly plan.
+  var monthlyTarget=getMonthlyWithdrawalTarget();
+  if(monthlyTarget>0){
+    var remaining=Math.max(0,monthlyTarget-getMonthWithdrawn());
+    return Math.min(raw,remaining);
+  }
+  return raw;
 }
 // CHANGED: Optional allowance-target notification. The user sets a $ target; when the live allowance
 // reaches it, a banner appears on Home. We persist the target and a "dismissed-at-target" marker so
@@ -1156,7 +1192,55 @@ function getStreakNudgeThreshold(){try{var v=parseFloat(localStorage.getItem("tf
 // (key: YYYY-MM) so it auto-clears at month rollover. Banner dismissal stored separately so the
 // banner can stop nagging once the user takes any action (or explicitly dismisses for the month).
 function getCurrentMonthKey(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");}
-function isMonthHalfsizeActive(){try{return localStorage.getItem("tf-month-halfsize-active")===getCurrentMonthKey();}catch(e){return false;}}
+// CHANGED: Half-size is MANDATORY for the rest of the month once the user's Monthly P&L target
+// is hit. This helper checks whether the goal has been hit by summing this month's journal P&L
+// + today's live P&L vs the saved target. If yes, half-size is locked on regardless of the
+// stored toggle. The stored "tf-month-halfsize-active" flag still works for cases where the
+// user wants to opt-in early (before hitting the goal).
+function isMonthlyGoalHit(todayLivePnL){
+  try{
+    var goals=JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};
+    var target=parseFloat(goals.monthlyPnL)||0;
+    if(target<=0)return false;
+    var moStart=new Date();moStart=new Date(moStart.getFullYear(),moStart.getMonth(),1);
+    var todayKey=todayStr();
+    var rows=loadJournalRows().filter(function(e){return new Date(e.date)>=moStart;});
+    var includesToday=rows.some(function(e){return e.date===todayKey;});
+    var sum=rows.reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0)+(includesToday?0:(parseFloat(todayLivePnL)||0));
+    return sum>=target;
+  }catch(e){return false;}
+}
+// CHANGED: Weekly goal-hit check. Used by isMonthHalfsizeActive() so half-size auto-engages for
+// the rest of the week when the weekly P&L target is reached (mirrors monthly behavior).
+function isWeeklyGoalHit(todayLivePnL){
+  try{
+    var goals=JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};
+    var settings=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};
+    var multiplier=parseFloat(goals.weeklyMultiplier)||4;
+    var dailyExplicit=parseFloat(goals.dailyPnL)||0;
+    var dailyAuto=computeDailyTarget(settings)||0;
+    var weeklyExplicit=parseFloat(goals.weeklyPnL)||0;
+    var target=weeklyExplicit>0?weeklyExplicit:((dailyExplicit>0?dailyExplicit:dailyAuto)*multiplier);
+    if(target<=0)return false;
+    // Week start = Sunday-anchored week containing today.
+    var d=new Date();var dow=d.getDay();var weekStart=new Date(d.getFullYear(),d.getMonth(),d.getDate()-dow);
+    var todayKey=todayStr();
+    var rows=loadJournalRows().filter(function(e){return new Date(e.date)>=weekStart;});
+    var includesToday=rows.some(function(e){return e.date===todayKey;});
+    var sum=rows.reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0)+(includesToday?0:(parseFloat(todayLivePnL)||0));
+    return sum>=target;
+  }catch(e){return false;}
+}
+function isMonthHalfsizeActive(){
+  try{
+    // CHANGED: Half-size auto-engages when EITHER the monthly OR the weekly P&L goal is hit.
+    // Weekly lasts until end of week; monthly lasts until end of month. Manual opt-in toggle
+    // still works for early activation.
+    if(isMonthlyGoalHit(0))return true;
+    if(isWeeklyGoalHit(0))return true;
+    return localStorage.getItem("tf-month-halfsize-active")===getCurrentMonthKey();
+  }catch(e){return false;}
+}
 // CHANGED: Canonical R helpers used everywhere. tradeR returns one trade's R against the
 // risk-unit at the time the trade was placed (stamped sizeFraction). dayR sums per-trade R's
 // — self-corrects across mixed-size days and matches what the journal shows. Use these
@@ -1203,10 +1287,10 @@ function MonthlyTargetBanner(props){
         <div style={{fontSize:13,fontWeight:800,color:"#fff",display:"flex",alignItems:"center",gap:7}}>🏁 Monthly target hit — {fmt(monthPnLLive)} of {fmt(monthlyTarget)}</div>
       </div>
       <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap"}}>
-        <button onClick={function(){setMonthHalfsizeActive(!halfOn);if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:halfOn?"#facc15":"#0a0a0f44",border:"1px solid #facc15",borderRadius:6,color:halfOn?"#422006":"#fde68a",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>{halfOn?"✓ Half-size on — tap to turn off":"Half-size rest of month"}</button>
-        {/* CHANGED: Withdraw button removed — other surfaces (allowance banner, profit-take
-           streak nudge, Settings transfer form) already cover that action. */}
-        {!halfOn&&<button onClick={function(){dismissMonthGoalBanner();if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"transparent",border:"1px solid #78350f",borderRadius:6,color:"#fde68a",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Dismiss</button>}
+        {/* CHANGED: Half-size is mandatory once the monthly goal is hit — replaced the toggle
+           button with a locked "On" indicator. The user can no longer flip it off for the rest
+           of the month. */}
+        <div title="Half-size is locked on after hitting your monthly goal" style={{padding:"6px 12px",background:"#facc15",border:"1px solid #facc15",borderRadius:6,color:"#422006",fontSize:12,fontWeight:700,whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:5}}>🔒 Half-size locked on</div>
       </div>
     </div>
   );
@@ -1690,6 +1774,27 @@ function DailyPnLBar(props){
 function MonthYearPicker(props){
   var year=props.year,month=props.month,onChange=props.onChange;
   var [draftYear,setDraftYear]=useState(year);
+  // CHANGED: Tint each month button by its net P&L — green/red opacity scaled by magnitude relative
+  // to the year's best/worst month. Selected month overrides with the accent fill.
+  var monthPnLs=useMemo(function(){
+    var arr=[0,0,0,0,0,0,0,0,0,0,0,0];
+    try{
+      loadJournalRows().forEach(function(r){
+        if(!r||!r.date)return;
+        var d=new Date(r.date);
+        if(isNaN(d.getTime())||d.getFullYear()!==draftYear)return;
+        arr[d.getMonth()]+=parseFloat(r.pnl)||0;
+      });
+    }catch(e){}
+    return arr;
+  },[draftYear]);
+  var absMax=Math.max.apply(null,monthPnLs.map(function(v){return Math.abs(v);}));
+  // CHANGED: Match the calendar day-cell palette exactly — solid #14532d for positive months,
+  // solid #7f1d1d for negative. Day cells don't fade by magnitude, so neither does this.
+  function tintFor(v){
+    if(!v)return "#1e293b";
+    return v>0?"#14532d":"#7f1d1d";
+  }
   return (
     <div style={{background:"#0a0a0f",border:"1px solid #4338ca",borderRadius:8,padding:"12px",marginBottom:10}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -1698,7 +1803,11 @@ function MonthYearPicker(props){
         <button onClick={function(){setDraftYear(function(y){return y+1;});}} style={{background:"none",border:"1px solid #334155",borderRadius:5,color:"#94a3b8",fontSize:13,cursor:"pointer",fontFamily:"inherit",padding:"4px 10px"}}>›</button>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
-        {MONTH_NAMES.map(function(m,i){var sel=draftYear===year&&i===month;return <button key={m} onClick={function(){onChange(draftYear,i);}} style={{padding:"8px 0",background:sel?"#4f46e5":"#1e293b",border:"none",borderRadius:5,color:sel?"#fff":"#cbd5e1",fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:sel?700:500}}>{m.slice(0,3)}</button>;})}
+        {MONTH_NAMES.map(function(m,i){
+          var sel=draftYear===year&&i===month;
+          var bg=sel?"#4f46e5":tintFor(monthPnLs[i]);
+          return <button key={m} onClick={function(){onChange(draftYear,i);}} style={{padding:"8px 0",background:bg,border:"none",borderRadius:5,color:sel?"#fff":"#e2e8f0",fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:sel?700:500}}>{m.slice(0,3)}</button>;
+        })}
       </div>
     </div>
   );
@@ -1742,6 +1851,11 @@ function CalendarGrid(props){
   var goals=(function(){try{return JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};}catch(e){return {};}})();
   var settingsForTarget=(function(){try{return JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};}catch(e){return {};}})();
   var dailyTarget=applyHalfsizeToTarget(parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(computeDailyTarget(settingsForTarget)||0));
+  // CHANGED: Per-day daily target scales by that day's stamped riskMax relative to the current
+  // full risk setting. Prevents past full-size days from being marked "target met" against a
+  // halved threshold (or vice-versa) when half-size mode is toggled later.
+  var fullDailyTarget=parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(computeDailyTarget(settingsForTarget)||0);
+  var fullRiskMax=parseFloat(settingsForTarget.riskMax)||0;
   var weeklyMultiplier=parseFloat(goals.weeklyMultiplier)||4;
   var weeklyTarget=applyHalfsizeToTarget(parseFloat(goals.weeklyPnL)>0?parseFloat(goals.weeklyPnL):((parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(computeDailyTarget(settingsForTarget)||0))*weeklyMultiplier));
   var monthlyTarget=parseFloat(goals.monthlyPnL)||0;
@@ -1812,7 +1926,13 @@ function CalendarGrid(props){
           // CHANGED: Daily goal-hit marker. Distinguished from the early-close orange dot by
           // using a checkmark glyph instead of a dot. Weekly border override removed — users
           // found it looked too similar to other states and added little signal.
-          var dayGoalHit=dailyTarget>0&&pnl!=null&&pnl>=dailyTarget;
+          // CHANGED: Daily goal-hit is R-based. A day's rTotal already sums per-trade R against
+          // each trade's stamped sizeFraction, so a half-size day hitting +3R counts the same as
+          // a full-size day hitting +3R. Threshold = fullDailyTarget / fullRiskMax (the R-equiv
+          // of the dollar target at full size).
+          var dailyTargetR=(fullDailyTarget>0&&fullRiskMax>0)?(fullDailyTarget/fullRiskMax):0;
+          var dayRTotal=dayData?(dayData.rTotal||0):0;
+          var dayGoalHit=dailyTargetR>0&&dayData&&dayData.tradeCount>0&&dayRTotal>=dailyTargetR;
           return (
             <button key={i} onClick={function(){onSelect(ds);}} style={{height:46,background:bg,border:(isNoTrade?"1.5px ":"1px ")+noTradeBorderStyle+" "+bd,borderRadius:5,color:col,fontSize:13,fontWeight:isToday||isSelected||isNoTrade?700:500,cursor:"pointer",fontFamily:"inherit",position:"relative",padding:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2}} title={holiday||(isNoTrade?"No-trade day (deliberately sat out)":(pnl!=null?(pnl>=0?"+":"")+"$"+pnl.toFixed(0):""))}>
               <span style={{lineHeight:1}}>{d}</span>
@@ -1834,7 +1954,7 @@ function CalendarGrid(props){
               {earlyClose&&<div style={{position:"absolute",top:1,right:2,width:4,height:4,borderRadius:"50%",background:"#f59e0b"}}/>}
               {/* CHANGED: Daily goal-hit checkmark in the bottom-right — clearly a glyph, not a dot,
                  so it can't be confused with the early-close indicator. */}
-              {dayGoalHit&&<div style={{position:"absolute",bottom:0,right:3,fontSize:11,color:"#facc15",fontWeight:900,lineHeight:1,textShadow:"0 0 3px rgba(250,204,21,0.6)"}} title={"Daily goal hit (+$"+pnl.toFixed(0)+" / $"+dailyTarget.toFixed(0)+")"}>✓</div>}
+              {dayGoalHit&&<div style={{position:"absolute",bottom:0,right:3,fontSize:11,color:"#facc15",fontWeight:900,lineHeight:1,textShadow:"0 0 3px rgba(250,204,21,0.6)"}} title={"Daily goal hit (+"+dayRTotal.toFixed(1)+"R / "+dailyTargetR.toFixed(1)+"R)"}>✓</div>}
               {/* CHANGED: Discipline-lock marker — small "D" badge in top-left corner when day's discipline score fell below threshold. */}
               {dayData&&dayData.wasLocked&&<div style={{position:"absolute",top:1,left:2,fontSize:8,fontWeight:800,color:"#fff",background:"#ef4444",borderRadius:3,padding:"0 3px",lineHeight:"11px",letterSpacing:0.3}} title="Discipline lock triggered">D</div>}
             </button>
@@ -1873,7 +1993,7 @@ function DashboardCalendar(props){
     var wd=new Date(weekStartDate);wd.setDate(weekStartDate.getDate()+wi);
     var wds=(wd.getMonth()+1)+"/"+wd.getDate()+"/"+wd.getFullYear();
     var dayData=sessionMap[wds];
-    weekDays.push({date:wd,ds:wds,isToday:wds===todayDateStr,pnl:dayData?dayData.pnl:null,riskMax:dayData?dayData.riskMax:0,tradeCount:dayData?dayData.tradeCount:0,noTradeDay:!!(dayData&&dayData.noTradeDay&&dayData.tradeCount===0),wasLocked:!!(dayData&&dayData.wasLocked),holiday:MARKET_HOLIDAYS[wds]});
+    weekDays.push({date:wd,ds:wds,isToday:wds===todayDateStr,pnl:dayData?dayData.pnl:null,riskMax:dayData?dayData.riskMax:0,rTotal:dayData?dayData.rTotal:0,tradeCount:dayData?dayData.tradeCount:0,noTradeDay:!!(dayData&&dayData.noTradeDay&&dayData.tradeCount===0),wasLocked:!!(dayData&&dayData.wasLocked),holiday:MARKET_HOLIDAYS[wds]});
   }
   var dayLabels=["S","M","T","W","T","F","S"];
   // Calculate week's total PnL and R-value.
@@ -2034,10 +2154,19 @@ function ChecklistPanel(props){
             var boxBg=showWarn?"#ef4444":(showOK&&!inv?"#22c55e":"transparent");
             var boxBorder=showWarn?"#ef4444":(showOK&&!inv?"#22c55e":"#475569");
             var labelColor=showWarn?"#fca5a5":(showOK&&!inv?"#86efac":"#cbd5e1");
-            // Substitute position max in label if applicable
+            // Substitute position max in label if applicable. Scale by the day's effective sizing:
+            // first enabled session's sizeFraction × half-size mode (if active for the month).
             var label=item.label;
             if(item.key==="positionSized"&&settings&&settings.positionMin&&settings.positionMax){
-              label=label+" ($"+settings.positionMin+"-$"+settings.positionMax+")";
+              var sf=1;
+              try{
+                var sess=getSessions(settings).filter(function(s){return s.enabled!==false;});
+                if(sess.length>0&&sess[0].sizeFraction!=null){var v=parseFloat(sess[0].sizeFraction);if(!isNaN(v)&&v>0)sf=v;}
+              }catch(e){}
+              if(isMonthHalfsizeActive())sf=sf*0.5;
+              var pMin=Math.round(parseFloat(settings.positionMin)*sf);
+              var pMax=Math.round(parseFloat(settings.positionMax)*sf);
+              label=label+" ($"+pMin+"-$"+pMax+")";
             }
             return (
               <div key={item.key+":"+i}>
@@ -2130,16 +2259,29 @@ function TradeTile(props){
   var pctPnl=parseFloat(t.pctPnl||0);
   var hasPnl=t.pnl!==""&&t.pnl!=null&&!isNaN(pnl);
   var hasPct=t.pctPnl!==""&&t.pctPnl!=null&&!isNaN(pctPnl);
+  // CHANGED: Compute R for this trade — prefer stamped dollar risk cap, else derive from
+  // props.riskMax × sizeFraction. Used as the primary big readout when $ is hidden.
+  var _sf=(t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))?parseFloat(t.sizeFraction):1;
+  var _rmFallback=(parseFloat(props.riskMax)||0)*_sf;
+  var _riskCap=(parseFloat(t.riskCapDollarsAtEntry)>0)?parseFloat(t.riskCapDollarsAtEntry):_rmFallback;
+  var rMul=(hasPnl&&_riskCap>0)?(pnl/_riskCap):NaN;
+  var hasR=!isNaN(rMul);
   var emos=filterEmotions(t.emotions||[]);
   var effViolations=(t.violations||[]).slice();
   var pos=parseFloat(t.positionSize)||0;
   // CHANGED: Prefer the position max stamped on the trade at save time; fall back to the current setting.
   var posMax=(parseFloat(t.posMaxAtEntry)>0)?parseFloat(t.posMaxAtEntry):(props.posMax||0);
   if(posMax>0&&pos>posMax&&effViolations.indexOf("Oversized entry")<0){effViolations.push("Oversized entry");}
-  // CHANGED: Show "Max risk exceeded" when a losing trade's price-move loss beat the stamped
-  // session-scaled risk cap. Uses the threshold stamped at save time (settings-independent here).
-  var slThresh=parseFloat(t.stopThreshPctAtEntry)||0;
-  if(slThresh>0&&!isNaN(pnl)&&pnl<0&&!isNaN(pctPnl)&&pctPnl<-slThresh&&effViolations.indexOf("Max risk exceeded")<0){effViolations.push("Max risk exceeded");}
+  // CHANGED: "Max risk exceeded" is now dollar-based: flag iff loss $ exceeds the stamped
+  // dollar risk cap (riskMax × sizeFraction at entry). Falls back to the legacy %-based check
+  // only for older trades that pre-date the dollar cap stamp.
+  var riskCapDollars=parseFloat(t.riskCapDollarsAtEntry)||0;
+  if(riskCapDollars>0){
+    if(!isNaN(pnl)&&pnl<-riskCapDollars&&effViolations.indexOf("Max risk exceeded")<0){effViolations.push("Max risk exceeded");}
+  }else{
+    var slThresh=parseFloat(t.stopThreshPctAtEntry)||0;
+    if(slThresh>0&&!isNaN(pnl)&&pnl<0&&!isNaN(pctPnl)&&pctPnl<-slThresh&&effViolations.indexOf("Max risk exceeded")<0){effViolations.push("Max risk exceeded");}
+  }
   var setupChain=[t.setup,t.timeframe,t.candlePattern].filter(function(x){return !!x;});
   var hasSetupInfo=setupChain.length>0;
   var hasTags=emos.length>0||effViolations.length>0;
@@ -2203,7 +2345,10 @@ function TradeTile(props){
       {hasPnl&&(
         <div style={{display:"flex",alignItems:"baseline",gap:10,marginTop:8,flexWrap:"wrap"}}>
           {HIDE_DOLLAR_PNL
-            ? (hasPct&&<div style={{fontSize:18,fontWeight:800,color:pnlColor,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>{pctPnl>=0?"+":""}{pctPnl.toFixed(2)}%</div>)
+            ? (<>
+                {hasR&&<div style={{fontSize:18,fontWeight:800,color:pnlColor,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>{rMul>=0?"+":""}{rMul.toFixed(2)}R</div>}
+                {hasPct&&<div style={{fontSize:13,color:pctPnl>=0?"#86efac":"#fca5a5",fontWeight:600,fontVariantNumeric:"tabular-nums"}}>({pctPnl>=0?"+":""}{pctPnl.toFixed(2)}%)</div>}
+              </>)
             : (<>
                 <div style={{fontSize:18,fontWeight:800,color:pnlColor,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>{(pnl>=0?"+":"-")+"$"+Math.abs(pnl).toFixed(2)}</div>
                 {hasPct&&<div style={{fontSize:13,color:pctPnl>=0?"#86efac":"#fca5a5",fontWeight:600,fontVariantNumeric:"tabular-nums"}}>({pctPnl>=0?"+":""}{pctPnl.toFixed(2)}%)</div>}
@@ -2917,12 +3062,16 @@ function EconomicEvents(props){
           var imp=impactStyle(e.impact);
           var cur=eventCurrency(e);
           return (
-            <div key={ei} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 8px",background:"#0a0a0f",borderRadius:6,marginBottom:3,border:"1px solid #1e293b"}}>
-              <div style={{width:6,height:6,borderRadius:"50%",background:imp.color,flexShrink:0}}/>
-              <span style={{fontSize:12,color:"#64748b",minWidth:54}}>{formatEventTime(e._d)}</span>
-              {cur&&<span style={{fontSize:10,padding:"1px 5px",borderRadius:3,background:"#1e293b",color:"#cbd5e1",fontWeight:700}}>{cur}</span>}
-              <span style={{fontSize:13,color:"#e2e8f0",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.event||e.title||"Event"}</span>
-              {(e.forecast||e.previous)&&<span style={{fontSize:10,color:"#64748b",flexShrink:0}}>{e.forecast?"F: "+e.forecast:""}{e.forecast&&e.previous?" · ":""}{e.previous?"P: "+e.previous:""}</span>}
+            // CHANGED: 2-row event layout so the title never truncates. Row 1 = full title.
+            // Row 2 = dot, time, currency, forecast/previous as small meta.
+            <div key={ei} style={{padding:"7px 9px",background:"#0a0a0f",borderRadius:6,marginBottom:3,border:"1px solid #1e293b"}}>
+              <div style={{fontSize:13,color:"#e2e8f0",lineHeight:1.3}}>{e.event||e.title||"Event"}</div>
+              <div style={{display:"flex",alignItems:"center",gap:7,marginTop:3,flexWrap:"wrap"}}>
+                <div style={{width:6,height:6,borderRadius:"50%",background:imp.color,flexShrink:0}}/>
+                <span style={{fontSize:11,color:"#64748b"}}>{formatEventTime(e._d)}</span>
+                {cur&&<span style={{fontSize:9,padding:"1px 5px",borderRadius:3,background:"#1e293b",color:"#cbd5e1",fontWeight:700}}>{cur}</span>}
+                {(e.forecast||e.previous)&&<span style={{fontSize:10,color:"#64748b"}}>{e.forecast?"F: "+e.forecast:""}{e.forecast&&e.previous?" · ":""}{e.previous?"P: "+e.previous:""}</span>}
+              </div>
             </div>
           );
         };
@@ -2950,12 +3099,14 @@ function EconomicEvents(props){
                   var imp=impactStyle(e.impact);
                   var cur=eventCurrency(e);
                   return (
-                    <div key={ei} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 8px",background:"#0a0a0f",borderRadius:6,marginBottom:3,border:"1px solid #1e293b"}}>
-                      <div style={{width:6,height:6,borderRadius:"50%",background:imp.color,flexShrink:0}}/>
-                      <span style={{fontSize:12,color:"#64748b",minWidth:54}}>{formatEventTime(e._d)}</span>
-                      {cur&&<span style={{fontSize:10,padding:"1px 5px",borderRadius:3,background:"#1e293b",color:"#cbd5e1",fontWeight:700}}>{cur}</span>}
-                      <span style={{fontSize:13,color:"#e2e8f0",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.event||e.title||"Event"}</span>
-                      {(e.forecast||e.previous)&&<span style={{fontSize:10,color:"#64748b",flexShrink:0}}>{e.forecast?"F: "+e.forecast:""}{e.forecast&&e.previous?" · ":""}{e.previous?"P: "+e.previous:""}</span>}
+                    <div key={ei} style={{padding:"7px 9px",background:"#0a0a0f",borderRadius:6,marginBottom:3,border:"1px solid #1e293b"}}>
+                      <div style={{fontSize:13,color:"#e2e8f0",lineHeight:1.3}}>{e.event||e.title||"Event"}</div>
+                      <div style={{display:"flex",alignItems:"center",gap:7,marginTop:3,flexWrap:"wrap"}}>
+                        <div style={{width:6,height:6,borderRadius:"50%",background:imp.color,flexShrink:0}}/>
+                        <span style={{fontSize:11,color:"#64748b"}}>{formatEventTime(e._d)}</span>
+                        {cur&&<span style={{fontSize:9,padding:"1px 5px",borderRadius:3,background:"#1e293b",color:"#cbd5e1",fontWeight:700}}>{cur}</span>}
+                        {(e.forecast||e.previous)&&<span style={{fontSize:10,color:"#64748b"}}>{e.forecast?"F: "+e.forecast:""}{e.forecast&&e.previous?" · ":""}{e.previous?"P: "+e.previous:""}</span>}
+                      </div>
                     </div>
                   );
                 })}
@@ -3494,13 +3645,18 @@ function TodayStrip(props){
         {/* CHANGED: Date removed — duplicated the header date that's already pinned at the top. */}
         <span style={{fontSize:12,color:"#86efac",fontWeight:600}}>Journal →</span>
       </button>
-      <div style={{display:"grid",gridTemplateColumns:props.mobile?"repeat(5,1fr)":"repeat(auto-fit,minmax(120px,1fr))",gap:1,background:"#1e293b"}}>
-        {tiles.map(function(t){return (
-          <div key={t.label} style={{padding:props.mobile?"9px 5px":"13px 14px",background:"#111118",display:"flex",flexDirection:"column",gap:props.mobile?3:5,minWidth:0}}>
-            <span style={{fontSize:props.mobile?8:10,color:"#64748b",letterSpacing:props.mobile?0.2:0.6,textTransform:"uppercase",fontWeight:700,lineHeight:1.1,whiteSpace:props.mobile?"normal":"nowrap"}}>{t.label}</span>
-            <span style={{fontSize:props.mobile?(t.small?11:15):(t.small?15:22),fontWeight:800,color:t.color,fontVariantNumeric:"tabular-nums",lineHeight:1.1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{t.value}</span>
-          </div>
-        );})}
+      <div style={{display:"grid",gridTemplateColumns:props.mobile?"repeat(2,1fr)":"repeat(auto-fit,minmax(120px,1fr))",gap:1,background:"#1e293b"}}>
+        {tiles.map(function(t,idx){
+          // CHANGED: On mobile, last tile spans both columns so there are no empty grid cells
+          // with 5 stats in a 2-column layout.
+          var span=props.mobile&&idx===tiles.length-1&&tiles.length%2===1?{gridColumn:"1/-1"}:{};
+          return (
+            <div key={t.label} style={Object.assign({padding:props.mobile?"10px 12px":"13px 14px",background:"#111118",display:"flex",flexDirection:"column",gap:props.mobile?4:5,minWidth:0},span)}>
+              <span style={{fontSize:props.mobile?9:10,color:"#64748b",letterSpacing:0.4,textTransform:"uppercase",fontWeight:700,lineHeight:1.1,whiteSpace:"nowrap"}}>{t.label}</span>
+              <span style={{fontSize:props.mobile?(t.small?13:17):(t.small?15:22),fontWeight:800,color:t.color,fontVariantNumeric:"tabular-nums",lineHeight:1.1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{t.value}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -3544,10 +3700,20 @@ function GoalsSnapshot(props){
   var winRateTarget=parseFloat(goals.winRate)||0;
   var disciplineTarget=loadDisciplineLockThreshold();
   var accountTarget=parseFloat(goals.accountTarget)||0;
-  // CHANGED: Total Withdrawn target is auto-derived from allowance % × Monthly P&L goal. Hidden when allowance % is 0.
-  var _wpctRaw=goals.withdrawalPct;var _wpct=(_wpctRaw===""||_wpctRaw==null)?30:parseFloat(_wpctRaw);if(isNaN(_wpct))_wpct=0;
-  var withdrawalTarget=(_wpct>0&&monthlyTarget>0)?(_wpct/100)*monthlyTarget:0;
+  var withdrawalTarget=parseFloat(goals.withdrawals)||0;
   var totalWithdrawn=getTotalWithdrawn();
+  // CHANGED: Month-to-date withdrawals (abs sum of negative transfers dated this month).
+  var monthlyWithdrawalTarget=parseFloat(goals.monthlyWithdrawals)||0;
+  var monthlyWithdrawn=(function(){
+    try{
+      var d=new Date();var y=d.getFullYear(),m=d.getMonth();
+      return (loadTransfers()||[]).reduce(function(s,t){
+        var dt=new Date(t.date);if(isNaN(dt.getTime()))return s;
+        if(dt.getFullYear()!==y||dt.getMonth()!==m)return s;
+        var a=parseFloat(t.amount)||0;return a<0?s+Math.abs(a):s;
+      },0);
+    }catch(e){return 0;}
+  })();
   function money(v){if(HIDE_DOLLAR_PNL)return (v<0?"-":"")+"$•••";return (v<0?"-$":"$")+Math.abs(Math.round(v)).toLocaleString();}
   // CHANGED: when $ is hidden, P&L goals are shown in R (value ÷ risk-per-trade).
   function rFmt(v){var r=riskMax>0?v/riskMax:0;return (r>=0?"+":"")+r.toFixed(1)+"R";}
@@ -3557,9 +3723,10 @@ function GoalsSnapshot(props){
   var account=[],perf=[],pnl=[];
   if(!hidden.account&&accountTarget>0)account.push({key:"account",label:"Account Balance",value:props.currentAccount||0,target:accountTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:money,formatTarget:money,compact:true});
   if(!hidden.withdrawals&&withdrawalTarget>0)account.push({key:"withdrawals",label:"Total Withdrawn",value:totalWithdrawn,target:withdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:money,formatTarget:money,compact:true});
+  if(!hidden.monthlyWithdrawals&&monthlyWithdrawalTarget>0)account.push({key:"monthlyWithdrawals",label:"Monthly Withdrawal",value:monthlyWithdrawn,target:monthlyWithdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:money,formatTarget:money,compact:true});
   if(!hidden.winRate&&winRateTarget>0)perf.push({key:"winRate",label:"Win Rate",value:oWR,target:winRateTarget,suffix:"%",decimals:0,targetDecimals:0,wrColor:true,compact:true});
   if(!hidden.discipline&&disciplineTarget>0)perf.push({key:"discipline",label:"Discipline",value:aDisc,target:disciplineTarget,suffix:"%",decimals:0,targetDecimals:0,discColor:true,compact:true});
-  if(!hidden.daily&&dailyTarget>0)pnl.push({key:"daily",label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
+  if(!hidden.daily&&dailyTarget>0)pnl.push({key:"daily",label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
   if(!hidden.weekly&&weeklyTarget>0)pnl.push({key:"weekly",label:"Week P&L",value:weekPnL,target:weeklyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
   if(!hidden.monthly&&monthlyTarget>0)pnl.push({key:"monthly",label:"Month P&L",value:monthPnL,target:monthlyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
   // CHANGED: Inject custom goals into the appropriate default section so they show on Home alongside built-ins.
@@ -3681,15 +3848,20 @@ function PerfProgressCard(props){
       {/* CHANGED: On mobile, KPI tiles wrap to a 2-column grid so labels aren't truncated and
          each value has room to breathe. Desktop unchanged. */}
       <div style={{display:"grid",gridTemplateColumns:props.mobile?"repeat(2,1fr)":"repeat(auto-fit,minmax(132px,1fr))",gap:1,background:"#1e293b"}}>
-        {kpis.map(function(k){return (
-          <div key={k.label} style={{padding:props.mobile?"11px 12px":"14px 14px 13px",background:"#111118",display:"flex",flexDirection:"column",gap:props.mobile?5:6,minWidth:0}}>
-            <div style={{display:"flex",alignItems:"center",gap:props.mobile?6:6,minWidth:0}}>
-              <span style={{fontSize:props.mobile?12:13,flexShrink:0}}>{k.icon}</span>
-              <span style={{fontSize:props.mobile?10:10,color:"#64748b",letterSpacing:0.6,textTransform:"uppercase",fontWeight:700,lineHeight:1.1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{k.label}</span>
+        {kpis.map(function(k,idx){
+          // CHANGED: On mobile, the last KPI spans both columns when total count is odd, so we
+          // never leave a dead empty cell.
+          var span=props.mobile&&idx===kpis.length-1&&kpis.length%2===1?{gridColumn:"1/-1"}:{};
+          return (
+            <div key={k.label} style={Object.assign({padding:props.mobile?"11px 12px":"14px 14px 13px",background:"#111118",display:"flex",flexDirection:"column",gap:props.mobile?5:6,minWidth:0},span)}>
+              <div style={{display:"flex",alignItems:"center",gap:props.mobile?6:6,minWidth:0}}>
+                <span style={{fontSize:props.mobile?12:13,flexShrink:0}}>{k.icon}</span>
+                <span style={{fontSize:props.mobile?10:10,color:"#64748b",letterSpacing:0.6,textTransform:"uppercase",fontWeight:700,lineHeight:1.1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{k.label}</span>
+              </div>
+              <div style={{fontSize:props.mobile?20:24,fontWeight:800,color:k.color,fontVariantNumeric:"tabular-nums",lineHeight:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.value}{k.suffix&&<span style={{fontSize:props.mobile?10:12,color:"#64748b",fontWeight:500}}>{k.suffix}</span>}</div>
             </div>
-            <div style={{fontSize:props.mobile?20:24,fontWeight:800,color:k.color,fontVariantNumeric:"tabular-nums",lineHeight:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.value}{k.suffix&&<span style={{fontSize:props.mobile?10:12,color:"#64748b",fontWeight:500}}>{k.suffix}</span>}</div>
-          </div>
-        );})}
+          );
+        })}
       </div>
       {open&&<>
       <div style={{padding:"12px 14px 4px"}}>
@@ -3779,29 +3951,9 @@ function DashboardTab(props){
           </div>
         );
       })()}
-      {/* CHANGED: Monthly P&L target banner moved to App scope so it shows on every tab. */}
-      {/* CHANGED: Allowance-target reached notification. Shows when the user set a target, the live
-          allowance has reached it, and it hasn't been dismissed. Dismiss marks it acknowledged. */}
-      {(function(){
-        var target=getAllowanceTarget();
-        if(target<=0)return null;
-        var allowance=getWithdrawalAllowance(totalPnL);
-        if(allowance<target)return null;
-        if(getAllowanceNotifDismissed())return null;
-        var fmt=function(n){return "$"+Math.round(n).toLocaleString();};
-        return (
-          <div style={{marginBottom:16,padding:"14px 16px",background:"linear-gradient(135deg,#14532d,#166534)",border:"1px solid #22c55e",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
-            <div style={{minWidth:0}}>
-              <div style={{fontSize:14,fontWeight:800,color:"#fff",display:"flex",alignItems:"center",gap:7}}>🔔 Withdrawal allowance reached {fmt(target)}</div>
-              <div style={{fontSize:12,color:"#bbf7d0",marginTop:3,lineHeight:1.5}}>Your allowance is now {fmt(allowance)}{HIDE_DOLLAR_PNL?"":""}. {props.onWithdraw?"Tap to log a withdrawal, or":"You can"} dismiss this.</div>
-            </div>
-            <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0}}>
-              {props.onWithdraw&&<button onClick={function(){props.onWithdraw(Math.round(target));}} style={{padding:"6px 12px",background:"#052e16",border:"1px solid #22c55e",borderRadius:6,color:"#86efac",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Withdraw →</button>}
-              <button onClick={function(){setAllowanceNotifDismissed(true);if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"#0a0a0f44",border:"1px solid #166534",borderRadius:6,color:"#bbf7d0",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Dismiss</button>
-            </div>
-          </div>
-        );
-      })()}
+      {/* CHANGED: Monthly P&L target banner moved to App scope so it shows on every tab.
+         (Removed the custom $-allowance-target banner — the payout nudge is now driven by the
+         green-streak banner above and the Monthly Withdrawal goal cap on suggested allowance.) */}
       {/* CHANGED: Today-first dashboard — Today strip, then all-time Performance & Progress,
           then a responsive row of week calendar + goals snapshot + economic events. */}
       <TodayStrip mobile={props.mobile} settings={settings} phase={props.phase} state={props.state} totalPnL={totalPnL} todayTrades={props.todayTrades} currentAccount={currentAccount} onNavigateToJournal={props.onNavigateToJournal}/>
@@ -4262,9 +4414,11 @@ function TradesTab(props){
                   </div>
                   <span style={{fontSize:11,color:"#fb923c",fontWeight:600,flexShrink:0}}>Manage →</span>
                 </div>
-                <div style={{display:"flex",alignItems:"center",gap:10,marginTop:6,fontSize:11,color:"#94a3b8"}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginTop:6,fontSize:11,color:"#94a3b8",flexWrap:"wrap"}}>
                   {!isNaN(avgEntry)&&<span>Avg entry <span style={{color:"#e2e8f0",fontWeight:600}}>${avgEntry.toFixed(2)}</span></span>}
                   <span>{remaining} {remaining===1?cls.unitSingular:cls.unit} open</span>
+                  {/* CHANGED: Open position size = remaining contracts × avg entry, for at-a-glance exposure. */}
+                  {!isNaN(avgEntry)&&remaining>0&&<span>· <span style={{color:"#e2e8f0",fontWeight:600}}>${(remaining*avgEntry).toFixed(0)}</span> open</span>}
                   {lt.openedAt&&<span style={{color:"#64748b"}}>· opened {fmtTime(new Date(lt.openedAt))}</span>}
                 </div>
               </button>
@@ -4285,10 +4439,9 @@ function TradesTab(props){
         </div>
         <div style={{display:"flex",gap:8,width:props.mobile?"100%":"auto"}}>
           {/* CHANGED: On mobile, the action button stretches to the full row width below the header pills. */}
-          {isToday&&(tradeStatus.ok
-            ?<button onClick={function(){var t=mkTrade();t.sessionId=phase!=="closed"?phase:null;setTrade(t);setShowForm(true);}} style={{padding:props.mobile?"10px 12px":"8px 16px",background:"#4f46e5",color:"#fff",border:"none",borderRadius:6,fontSize:props.mobile?13:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flex:props.mobile?1:"none"}}>+ New Trade</button>
-            :<button disabled title={tradeStatus.reason||"Not available"} style={{padding:props.mobile?"10px 12px":"8px 16px",background:"#1e293b",color:"#475569",border:"1px solid #334155",borderRadius:6,fontSize:props.mobile?12:14,fontWeight:600,cursor:"not-allowed",fontFamily:"inherit",whiteSpace:"normal",flex:props.mobile?1:"none",lineHeight:1.2}}>{tradeStatus.reason||"Unavailable"}</button>
-          )}
+          {/* CHANGED: New Trade button is always enabled — disciplined sizing/locks are advisory,
+             not blockers. Removes the previous disabled branch driven by tradeStatus. */}
+          {isToday&&<button onClick={function(){var t=mkTrade();t.sessionId=phase!=="closed"?phase:null;setTrade(t);setShowForm(true);}} style={{padding:props.mobile?"10px 12px":"8px 16px",background:"#4f46e5",color:"#fff",border:"none",borderRadius:6,fontSize:props.mobile?13:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flex:props.mobile?1:"none"}}>+ New Trade</button>}
           {!isToday&&<button onClick={function(){var t=mkTrade();setPastNewTrade(Object.assign({},t,{time:new Date().toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"})}));}} style={{padding:props.mobile?"10px 12px":"8px 16px",background:"#4f46e5",color:"#fff",border:"none",borderRadius:6,fontSize:props.mobile?13:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flex:props.mobile?1:"none"}}>+ Add Trade</button>}
         </div>
         {pickerOpen&&<CalendarPicker selectedDate={selectedDate} onSelect={function(d){setSelectedDate(d);setPickerOpen(false);}} onClose={function(){setPickerOpen(false);}} todayPnL={totalPnL} riskMax={parseFloat(settings.riskMax)||0} settings={settings} todayTrades={state.trades}/>}
@@ -4399,7 +4552,7 @@ function TradesTab(props){
                   ):(
                     <div style={{display:"grid",gridTemplateColumns:props.mobile?"1fr":"repeat(3, minmax(0,1fr))",gap:8}}>
                       {g.trades.map(function(t,i){return (
-                        <TradeTile key={(t.id||"")+"_"+i} t={t} i={i} posMax={settings.positionMax} hideControls={true}/>
+                        <TradeTile key={(t.id||"")+"_"+i} t={t} i={i} posMax={settings.positionMax} riskMax={settings.riskMax} hideControls={true}/>
                       );})}
                     </div>
                   )}
@@ -4496,7 +4649,7 @@ function TradesTab(props){
             <div key={t.id||i} style={isEditing?{gridColumn:"1 / -1"}:null}>
               {isEditing
                 ?<TradeForm trade={editDraft||t} setTrade={function(updater){setEditDraft(function(prev){var base=prev||t;return typeof updater==="function"?updater(base):updater;});}} onSave={function(updated){savePastTrade(updated);setEditDraft(null);}} onCancel={cancelEdit} settings={settings} tradeOptions={props.tradeOptions}/>
-                :<TradeTile t={t} i={i} posMax={settings.positionMax} onDelete={function(){deletePastTrade(t.id);}} onEdit={function(){startEdit(t);}}/>
+                :<TradeTile t={t} i={i} posMax={settings.positionMax} riskMax={settings.riskMax} onDelete={function(){deletePastTrade(t.id);}} onEdit={function(){startEdit(t);}}/>
               }
             </div>
           );
@@ -4505,7 +4658,7 @@ function TradesTab(props){
           <div key={t.id} style={isEditing?{gridColumn:"1 / -1"}:null}>
             {isEditing
               ?<TradeForm trade={editDraft||t} setTrade={function(updater){setEditDraft(function(prev){var base=prev||t;return typeof updater==="function"?updater(base):updater;});}} onSave={function(updated){savePastTrade(updated);setEditDraft(null);}} onCancel={cancelEdit} settings={settings} tradeOptions={props.tradeOptions}/>
-              :<TradeTile t={t} i={i} posMax={settings.positionMax} onDelete={function(){deleteTrade(t.id);}} onEdit={function(){startEdit(t);}}/>
+              :<TradeTile t={t} i={i} posMax={settings.positionMax} riskMax={settings.riskMax} onDelete={function(){deleteTrade(t.id);}} onEdit={function(){startEdit(t);}}/>
             }
           </div>
         );
@@ -4617,7 +4770,7 @@ function TradesTab(props){
               );
             })()}
             <div style={{fontSize:11,color:"#64748b",letterSpacing:1,textTransform:"uppercase",marginBottom:6,fontWeight:600}}>Daily Note</div>
-            <textarea value={entry.note||""} onChange={function(e){var v=e.target.value;var updated=Object.assign({},entry,{note:v});var dateKey=isToday?todayStr():selectedDate;try{localStorage.setItem("journal:"+dateKey.replace(/\//g,"-"),JSON.stringify(updated));}catch(err){}if(isToday){setTodayJournalEntry(updated);}else{setPastSessions(function(arr){return arr.map(function(x){return x.date===selectedDate?updated:x;});});}if(props.bumpReloadKey)props.bumpReloadKey();}} placeholder="What worked? What didn't? Any rules to remember tomorrow?" style={Object.assign({},fld,{minHeight:80,resize:"vertical",fontFamily:"inherit",lineHeight:1.5})}/>
+            <textarea value={entry.note||""} onChange={function(e){var v=e.target.value;var updated=Object.assign({},entry,{note:v});var dateKey=isToday?todayStr():selectedDate;try{localStorage.setItem("journal:"+dateKey.replace(/\//g,"-"),JSON.stringify(updated));}catch(err){}if(isToday){setTodayJournalEntry(updated);/* CHANGED: also keep App state.dailyNote in sync so the autosave effect doesn't overwrite the note with "" when other state (e.g. commitment Yes/No) changes. */if(props.setState)props.setState(function(s){return Object.assign({},s,{dailyNote:v});});}else{setPastSessions(function(arr){return arr.map(function(x){return x.date===selectedDate?updated:x;});});}if(props.bumpReloadKey)props.bumpReloadKey();}} placeholder="What worked? What didn't? Any rules to remember tomorrow?" style={Object.assign({},fld,{minHeight:80,resize:"vertical",fontFamily:"inherit",lineHeight:1.5})}/>
             {/* CHANGED: Render the snapshot of economic events that matched the user's filters
                on this day. Helps re-read past sessions with the macro context they were traded in. */}
             {(function(){
@@ -4830,7 +4983,7 @@ function JournalTab(props){
                     <button onClick={function(){deleteDraftTrade(i);}} aria-label="Remove" style={{padding:"4px 9px",background:"#7f1d1d33",border:"1px solid #7f1d1d",borderRadius:4,color:"#fca5a5",fontSize:13,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>
                   </div>
                 )}
-                <TradeTile t={t} i={i} posMax={settings.positionMax} hideControls={true}/>
+                <TradeTile t={t} i={i} posMax={settings.positionMax} riskMax={settings.riskMax} hideControls={true}/>
               </div>
             );
           })}
@@ -4993,7 +5146,7 @@ function GoalCard2(props){
     <div style={CS({marginBottom:12,position:"relative",border:completed?"1px solid #22c55e":undefined,background:completed?"#0f1f15":undefined})}>
       {completed&&<div style={{position:"absolute",top:8,right:gp.onHide||gp.onDelete?32:8,fontSize:10,fontWeight:800,color:"#052e16",background:"#22c55e",borderRadius:4,padding:"2px 7px",letterSpacing:0.5}}>✓ COMPLETED</div>}
       {gp.onHide&&(
-        <button onClick={function(e){e.stopPropagation();gp.onHide();}} aria-label={"Hide "+gp.label} title={"Hide "+gp.label} style={{position:"absolute",top:8,right:8,width:20,height:20,padding:0,background:"none",border:"none",color:"#475569",fontSize:14,cursor:"pointer",fontFamily:"inherit",lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:3}}>×</button>
+        <button onClick={function(e){e.stopPropagation();if(window.confirm("Disable this goal? You can re-enable it from the Hidden section at the top of the Goals tab."))gp.onHide();}} aria-label={"Disable "+gp.label} title={"Disable "+gp.label+" (re-enable from Hidden section)"} style={{position:"absolute",top:8,right:8,width:22,height:22,padding:0,background:"#1e293b",border:"1px solid #334155",color:"#94a3b8",fontSize:14,cursor:"pointer",fontFamily:"inherit",lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:4}}>×</button>
       )}
       {gp.onDelete&&(
         <button onClick={function(e){e.stopPropagation();gp.onDelete();}} aria-label={"Delete "+gp.label} title={"Delete "+gp.label} style={{position:"absolute",top:8,right:8,padding:"3px 8px",background:"#7f1d1d33",border:"1px solid #7f1d1d",borderRadius:4,color:"#fca5a5",fontSize:13,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>
@@ -5038,7 +5191,9 @@ function GoalRing(props){
   var gp=props;
   var tgt=gp.target||0;
   var isPercent=gp.wrColor||gp.discColor;
-  var pct=isPercent?Math.min(Math.max(gp.value,0),100):(tgt>0?Math.min(Math.max(gp.value/tgt*100,0),100):0);
+  // CHANGED: pctRaw is the true progress (can exceed 100); pct is capped for the ring fill.
+  var pctRaw=isPercent?Math.max(gp.value,0):(tgt>0?Math.max(gp.value/tgt*100,0):0);
+  var pct=Math.min(pctRaw,100);
   var over=tgt>0&&gp.value>=tgt;
   var dec=gp.decimals!=null?gp.decimals:2;
   var tdec=gp.targetDecimals!=null?gp.targetDecimals:dec;
@@ -5079,7 +5234,7 @@ function GoalRing(props){
           {/* CHANGED: Show the actual percentage (e.g. 117%) even when over target — keeps every
              card visually consistent. The check-mark is removed; ring color already signals
              goal-met (greener accent). */}
-          <span style={{fontSize:cmp?12:17,fontWeight:800,color:ringColor,fontVariantNumeric:"tabular-nums"}}>{Math.round(pct)}<span style={{fontSize:cmp?7:9}}>%</span></span>
+          <span style={{fontSize:cmp?12:17,fontWeight:800,color:ringColor,fontVariantNumeric:"tabular-nums"}}>{Math.round(pctRaw)}<span style={{fontSize:cmp?7:9}}>%</span></span>
         </div>
       </div>
       {/* CHANGED: Keep the original "target X%" / "of $Y" footer text when over target — don't
@@ -5104,7 +5259,7 @@ function GoalRing(props){
 
 function GoalsTab(props){
   var settings=props.settings,liveTotalPnL=props.liveTotalPnL||0;
-  var EMPTY_GOALS={weeklyMultiplier:"4",monthlyPnL:"",winRate:"",disciplineScore:"",accountTarget:"",withdrawals:"",withdrawalPct:"30",custom:[],hidden:{}};
+  var EMPTY_GOALS={weeklyMultiplier:"4",monthlyPnL:"",winRate:"",disciplineScore:"",accountTarget:"",withdrawals:"",monthlyWithdrawals:"",custom:[],hidden:{}};
   // Defensive load that handles legacy or new formats and arrays
   function normalizeStored(p){
     if(!p)return Object.assign({},EMPTY_GOALS);
@@ -5135,8 +5290,23 @@ function GoalsTab(props){
     try{var s=localStorage.getItem(GOALS_KEY);if(s)setGoals(normalizeStored(JSON.parse(s)));}catch(e){}
   },[]);
 
-  function persist(g){try{localStorage.setItem(GOALS_KEY,JSON.stringify(g));}catch(e){}setGoals(g);}
-  function saveStandardGoals(){persist(normalizeStored(draft));setEditing(false);}
+  function persist(g){
+    try{localStorage.setItem(GOALS_KEY,JSON.stringify(g));}catch(e){}
+    // CHANGED: Re-read from localStorage after writing so any sync layer that intercepts /
+    // transforms the value (e.g. JSON.parse-then-stringify round-trip) is reflected in state.
+    // Without this, the editor could show one value while localStorage held a slightly different
+    // one, causing the snapshot card to show the "wrong" target.
+    var fresh=g;
+    try{var s=localStorage.getItem(GOALS_KEY);if(s)fresh=normalizeStored(JSON.parse(s));}catch(e){}
+    setGoals(fresh);
+    if(props.bumpReloadKey)props.bumpReloadKey();
+  }
+  function saveStandardGoals(){
+    // CHANGED: Strip the editor-only `_allowancePct` field; it has its own localStorage key and
+    // shouldn't leak into the goals blob.
+    var clean=Object.assign({},draft);delete clean._allowancePct;
+    persist(normalizeStored(clean));setEditing(false);
+  }
 
   // CHANGED: validation for save button
   var canSaveCustom=newGoal.title.trim().length>0
@@ -5235,11 +5405,20 @@ function GoalsTab(props){
   // is no longer user-editable in Goals. The goal is simply: keep your score above the lock bar.
   var disciplineTarget=loadDisciplineLockThreshold();
   var accountTarget=parseFloat(goals.accountTarget)||0;
-  // CHANGED: Total Withdrawn target is auto-derived from allowance % × Monthly P&L goal. Hidden when allowance % is 0.
-  var withdrawalPctRaw=goals.withdrawalPct;
-  var withdrawalPct=(withdrawalPctRaw===""||withdrawalPctRaw==null)?30:parseFloat(withdrawalPctRaw);if(isNaN(withdrawalPct))withdrawalPct=0;
-  var withdrawalTarget=(withdrawalPct>0&&monthlyTarget>0)?(withdrawalPct/100)*monthlyTarget:0;
+  var withdrawalTarget=parseFloat(goals.withdrawals)||0;
   var totalWithdrawn=getTotalWithdrawn();
+  // CHANGED: Month-to-date withdrawals goal.
+  var monthlyWithdrawalTarget=parseFloat(goals.monthlyWithdrawals)||0;
+  var monthlyWithdrawn=(function(){
+    try{
+      var d=new Date();var y=d.getFullYear(),m=d.getMonth();
+      return (loadTransfers()||[]).reduce(function(s,t){
+        var dt=new Date(t.date);if(isNaN(dt.getTime()))return s;
+        if(dt.getFullYear()!==y||dt.getMonth()!==m)return s;
+        var a=parseFloat(t.amount)||0;return a<0?s+Math.abs(a):s;
+      },0);
+    }catch(e){return 0;}
+  })();
 
   var transferTotalVal=transferTotal(loadTransfers());
   var totalAllPnL=rows.reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0)+liveTotalPnL;
@@ -5302,8 +5481,8 @@ function GoalsTab(props){
           <div style={{fontSize:18,fontWeight:700,color:"#e2e8f0"}}>Edit Goals</div>
           <button onClick={function(){setEditing(false);}} style={{background:"none",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:14,cursor:"pointer",fontFamily:"inherit",padding:"6px 14px"}}>Cancel</button>
         </div>
-        <div style={{padding:"10px 12px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:8,marginBottom:12,fontSize:13,color:"#94a3b8",lineHeight:1.5}}>Daily P&L target is auto-calculated from each enabled session's position size and gain hard stop: <span style={{color:"#22c55e",fontWeight:700}}>${Math.round(autoDaily)}</span> (one winning trade per session at its gain stop, sized by risk max ${(parseFloat(settings.riskMax)||0)}). Adjust sessions and gain stops in Settings.</div>
-        {[{key:"weeklyMultiplier",label:"Weekly P&L Multiplier (× Daily Target)",ph:"e.g. 4"},{key:"monthlyPnL",label:"Monthly P&L Target ($)",ph:"e.g. 3000"},{key:"winRate",label:"Win Rate Target (%)",ph:"e.g. 60"},{key:"accountTarget",label:"Account Milestone ($)",ph:"e.g. 5000"},{key:"withdrawalPct",label:"Withdrawal Allowance (% of Monthly Goal — 0 hides card)",ph:"e.g. 30"}].map(function(f){
+        <div style={{padding:"10px 12px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:8,marginBottom:12,fontSize:13,color:"#94a3b8",lineHeight:1.5}}>Daily P&L target is auto-calculated from the first enabled session's position size and gain hard stop: <span style={{color:"#22c55e",fontWeight:700}}>${Math.round(autoDaily)}</span> (hitting the first session's gain stop is a hard stop for the day, sized by risk max ${(parseFloat(settings.riskMax)||0)}). Adjust sessions and gain stops in Settings.</div>
+        {[{key:"weeklyMultiplier",label:"Weekly P&L Multiplier (× Daily Target)",ph:"e.g. 4"},{key:"monthlyPnL",label:"Monthly P&L Target ($)",ph:"e.g. 3000"},{key:"winRate",label:"Win Rate Target (%)",ph:"e.g. 60"},{key:"accountTarget",label:"Account Milestone ($)",ph:"e.g. 5000"},{key:"monthlyWithdrawals",label:"Monthly Withdrawal Target ($)",ph:"e.g. 1000"},{key:"withdrawals",label:"Total Withdrawn Target ($)",ph:"e.g. 10000"}].map(function(f){
           return <div key={f.key} style={{marginBottom:12}}><label style={lbl}>{f.label}</label><input type="number" value={draft[f.key]||""} onChange={function(e){var v=e.target.value;setDraft(function(g){return Object.assign({},g,{[f.key]:v});});}} placeholder={f.ph} style={fld}/></div>;
         })}
         <button onClick={saveStandardGoals} style={{width:"100%",padding:"13px",background:"linear-gradient(135deg,#4f46e5,#6366f1)",color:"#fff",border:"none",borderRadius:10,fontSize:16,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginTop:4}}>Save Goals</button>
@@ -5330,7 +5509,7 @@ function GoalsTab(props){
 
   var hidden=goals.hidden||{};
   var hiddenKeys=Object.keys(hidden).filter(function(k){return hidden[k];});
-  var hiddenLabels={daily:"Today's P&L",weekly:"Week P&L",monthly:"Month P&L",winRate:"Win Rate",discipline:"Discipline Score",account:"Account Balance",withdrawals:"Total Withdrawn"};
+  var hiddenLabels={daily:"Today's P&L",weekly:"Week P&L",monthly:"Month P&L",winRate:"Win Rate",discipline:"Discipline Score",account:"Account Balance",monthlyWithdrawals:"Monthly Withdrawal",withdrawals:"Total Withdrawn"};
 
   function renderStandardCard(key,opts){
     if(hidden[key])return null;
@@ -5411,7 +5590,7 @@ function GoalsTab(props){
 
       {hiddenKeys.length>0&&(
         <div style={{padding:"8px 12px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8,marginBottom:12}}>
-          <div style={{fontSize:11,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600,marginBottom:6}}>Hidden ({hiddenKeys.length})</div>
+          <div style={{fontSize:11,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600,marginBottom:6}}>Disabled ({hiddenKeys.length}) — tap to re-enable</div>
           <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
             {hiddenKeys.map(function(k){return <button key={k} onClick={function(){unhide(k);}} style={{padding:"3px 9px",background:"#1e293b",border:"1px solid #334155",borderRadius:4,color:"#cbd5e1",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>+ {hiddenLabels[k]||k}</button>;})}
           </div>
@@ -5524,6 +5703,7 @@ function GoalsTab(props){
                 <SectionHead icon="🏦" title="Account Activity"/>
                 <div style={gridStyle}>
                   {!hidden.account&&accountTarget>0&&renderStandardCard("account",{label:"Account Balance",value:currentAccount,target:accountTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true})}
+                  {monthlyWithdrawalTarget>0&&renderStandardCard("monthlyWithdrawals",{label:"Monthly Withdrawal",value:monthlyWithdrawn,target:monthlyWithdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true})}
                   {withdrawalTarget>0&&renderStandardCard("withdrawals",{label:"Total Withdrawn",value:totalWithdrawn,target:withdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true})}
                   {customByBucket.account.map(renderInlineCustom)}
                 </div>
@@ -5543,7 +5723,7 @@ function GoalsTab(props){
               <div style={{marginBottom:20}}>
                 <SectionHead icon="💰" title="P&L"/>
                 <div style={gridStyle}>
-                  {dailyTarget>0&&renderStandardCard("daily",Object.assign({label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0},pnlFmt))}
+                  {dailyTarget>0&&renderStandardCard("daily",Object.assign({label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true},pnlFmt))}
                   {weeklyTarget>0&&renderStandardCard("weekly",Object.assign({label:"Week P&L",value:weekPnL,target:weeklyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true},pnlFmt))}
                   {monthlyTarget>0&&renderStandardCard("monthly",Object.assign({label:"Month P&L",value:monthPnL,target:monthlyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true},pnlFmt))}
                   {customByBucket.pnl.map(renderInlineCustom)}
@@ -5811,7 +5991,10 @@ function MetricChart(props){
   var minTrades=props.minTrades!=null?props.minTrades:0;
   var pts=[];
   for(var i=0;i<sorted.length;i++){
-    var slice=sorted.slice(0,i+1);
+    // CHANGED: perPoint mode = compute on just this single entry (not cumulative slice). Used by
+    // per-trade views like Avg Pos Size where each point is the trade's actual size, not the
+    // running average.
+    var slice=props.perPoint?[sorted[i]]:sorted.slice(0,i+1);
     if(minTrades>0){
       var nT=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){if(t&&t.status!=="open")nT++;});});
       if(nT<minTrades)continue;
@@ -5868,8 +6051,9 @@ function MetricChart(props){
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8,gap:8}}>
         <div style={{display:"flex",alignItems:"baseline",gap:8,flexWrap:"wrap"}}>
           <div style={{fontSize:20,fontWeight:700,color:color,fontVariantNumeric:"tabular-nums"}}>{fmt(display.v)}</div>
-          {/* CHANGED: Optional meta label to the right of the value (e.g. total trading time on the Trades chart). */}
-          {props.meta&&<div style={{fontSize:11,color:"#94a3b8",fontWeight:600,fontVariantNumeric:"tabular-nums"}}>{props.meta}</div>}
+          {/* CHANGED: meta may be a string OR a function (display, hovering) => string for hover-
+             aware readouts (e.g. Trades chart's trading time scoped to the hovered day). */}
+          {props.meta&&<div style={{fontSize:11,color:"#94a3b8",fontWeight:600,fontVariantNumeric:"tabular-nums"}}>{typeof props.meta==="function"?props.meta(display,effectiveHoverIdx!=null):props.meta}</div>}
         </div>
         <div style={{textAlign:"right"}}>
           <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Change</div>
@@ -5931,8 +6115,10 @@ function EquityCurve(props){
   // CHANGED: starting balance before the first entry, for % change / % drawdown when $ is hidden.
   var startBal=0;
   try{startBal=getAccountBalanceAtDate(entries[0].date);}catch(e){}
-  // CHANGED: When the range is this-week or last-week, plot one point per closed trade (chronologically) instead of per day.
-  var granular=props.range==="thisweek"||props.range==="week";
+  // CHANGED: Always plot per-trade (chronologically) so intraday drawdowns are captured. A day
+  // with a -$1000 drawdown followed by a +$1200 winner used to show as net +$200 with no
+  // drawdown; granular per-trade reveals the actual peak-to-trough.
+  var granular=true;
   var pts=[];var cum=0,peak=0,maxDD=0,maxDDPct=0;
   if(granular){
     var allT=[];
@@ -5944,6 +6130,12 @@ function EquityCurve(props){
       var mb=parseTimeToMinsOfDay(b.t.time)||0;
       return ma-mb;
     });
+    // CHANGED: Prepend $0 baseline so the curve starts at 0 and rises with the first trade,
+    // matching the day-level visualization users expected.
+    if(allT.length>0){
+      var d0g=new Date(allT[0].date);d0g.setDate(d0g.getDate()-1);
+      pts.push({date:d0g.toISOString().slice(0,10),cum:0,peak:0});
+    }
     allT.forEach(function(x){
       cum+=parseFloat(x.t.pnl)||0;
       if(cum>peak)peak=cum;
@@ -5966,6 +6158,12 @@ function EquityCurve(props){
       });
     }
   }else{
+    // CHANGED: Prepend a $0 baseline at the day BEFORE the first entry so the curve starts at 0
+    // and rises with each day's P&L, without duplicating the first entry's x-position.
+    if(entries.length>0){
+      var d0=new Date(entries[0].date);d0.setDate(d0.getDate()-1);
+      pts.push({date:d0.toISOString().slice(0,10),cum:0,peak:0});
+    }
     entries.forEach(function(r){
       cum+=parseFloat(r.pnl)||0;
       if(cum>peak)peak=cum;
@@ -6126,6 +6324,8 @@ function WhatsWorkingPanel(props){
 function RMultipleHistogram(props){
   var rows=props.rows||[],fallback=props.fallbackRiskMax||0;
   var Rs=[];
+  // CHANGED: Also collect dollar P&L per win/loss to show $ alongside R averages.
+  var winsDollar=[],lossesDollar=[];
   rows.forEach(function(r){
     var rowRisk=parseFloat(r.riskMax)||fallback;
     (r.trades||[]).forEach(function(t){
@@ -6135,15 +6335,18 @@ function RMultipleHistogram(props){
       var risk=rowRisk*sf;
       if(risk<=0)return;
       Rs.push(pnl/risk);
+      if(pnl>0)winsDollar.push(pnl);else if(pnl<0)lossesDollar.push(pnl);
     });
   });
   if(Rs.length<3)return null;
   var bounds=[-Infinity,-3,-2,-1,0,1,2,3,Infinity];
   var labels=["<-3R","-3 to -2","-2 to -1","-1 to 0","0 to 1","1 to 2","2 to 3","≥3R"];
   var counts=labels.map(function(){return 0;});
+  // CHANGED: Track sum of R per bucket so hover can show the bucket's average R, not just count.
+  var sums=labels.map(function(){return 0;});
   Rs.forEach(function(r){
     for(var i=0;i<labels.length;i++){
-      if(r>=bounds[i]&&r<bounds[i+1]){counts[i]++;break;}
+      if(r>=bounds[i]&&r<bounds[i+1]){counts[i]++;sums[i]+=r;break;}
     }
   });
   var maxCount=Math.max.apply(null,counts);
@@ -6167,22 +6370,30 @@ function RMultipleHistogram(props){
   }
   function leaveBars(){setHoverI(null);}
   var hoverCount=hoverI!=null?counts[hoverI]:null;
-  var hoverPct=hoverI!=null&&Rs.length>0?Math.round((counts[hoverI]/Rs.length)*100):null;
+  // CHANGED: Hover readout shows the bucket's AVERAGE R (per-trade) rather than this bucket's
+  // share of total trades — more actionable signal than a frequency percentage.
+  var hoverAvgR=hoverI!=null&&counts[hoverI]>0?(sums[hoverI]/counts[hoverI]):null;
   return (
     <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid #1e293b",borderRadius:10,display:"flex",flexDirection:"column",boxSizing:"border-box"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10,gap:8}}>
         <div>
           <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{hoverI!=null?labels[hoverI]:"R-Multiple Distribution"}</div>
           {hoverI!=null?(
-            <div style={{fontSize:20,fontWeight:700,color:bounds[hoverI+1]<=0?"#ef4444":"#22c55e",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{hoverCount}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:4}}>trade{hoverCount===1?"":"s"} · {hoverPct}%</span></div>
+            <div style={{fontSize:20,fontWeight:700,color:bounds[hoverI+1]<=0?"#ef4444":"#22c55e",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{hoverAvgR!=null?((hoverAvgR>=0?"+":"")+hoverAvgR.toFixed(2)+"R"):"—"}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:4}}>avg</span></div>
           ):(
             <div style={{fontSize:20,fontWeight:700,color:expR>=0?"#22c55e":"#ef4444",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{(expR>=0?"+":"")+expR.toFixed(2)}R<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:4}}>/trade</span></div>
           )}
         </div>
         <div style={{textAlign:"right",fontSize:10,color:"#94a3b8",lineHeight:1.55}}>
-          <div>Avg win: <span style={{color:"#86efac",fontWeight:700}}>+{avgWinR.toFixed(2)}R</span></div>
-          <div>Avg loss: <span style={{color:"#fca5a5",fontWeight:700}}>{avgLossR.toFixed(2)}R</span></div>
-          <div>n = {Rs.length}</div>
+          {/* CHANGED: $ dollar averages displayed beside R averages so the magnitude is concrete. */}
+          {(function(){
+            var avgWinD=winsDollar.length>0?winsDollar.reduce(function(s,v){return s+v;},0)/winsDollar.length:0;
+            var avgLossD=lossesDollar.length>0?lossesDollar.reduce(function(s,v){return s+v;},0)/lossesDollar.length:0;
+            return (<>
+              <div>Avg win ({winsDollar.length}): <span style={{color:"#86efac",fontWeight:700}}>+{avgWinR.toFixed(2)}R</span>{winsDollar.length>0&&!HIDE_DOLLAR_PNL&&<span style={{color:"#86efac",fontWeight:600,marginLeft:4}}>(+${avgWinD.toFixed(0)})</span>}</div>
+              <div>Avg loss ({lossesDollar.length}): <span style={{color:"#fca5a5",fontWeight:700}}>{avgLossR.toFixed(2)}R</span>{lossesDollar.length>0&&!HIDE_DOLLAR_PNL&&<span style={{color:"#fca5a5",fontWeight:600,marginLeft:4}}>(-${Math.abs(avgLossD).toFixed(0)})</span>}</div>
+            </>);
+          })()}
         </div>
       </div>
       <div ref={barsRef} onMouseMove={moveBars} onMouseLeave={leaveBars} onTouchStart={moveBars} onTouchMove={moveBars} onTouchEnd={leaveBars} style={{display:"flex",alignItems:"flex-end",gap:3,height:120,marginBottom:6,cursor:"crosshair",touchAction:"none"}}>
@@ -6231,7 +6442,11 @@ function DisciplineScatter(props){
         // Use process-only score so each trade's "discipline so far today" is reflected.
         var score=calcDiscipline(slice,parseFloat(r.riskMax)||0,{processOnly:true,commitment:r.commitment||null});
         var pnl=parseFloat(t.pnl)||0;
-        var rm=parseFloat(r.riskMax)||0;
+        // CHANGED: R must use the trade's effective risk cap (riskMax × sizeFraction), matching
+        // the canonical tradeR() used everywhere else. Without this, half-size trades plotted at
+        // half the R the Today strip reports.
+        var sfT=(t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))?parseFloat(t.sizeFraction):1;
+        var rm=(parseFloat(r.riskMax)||0)*sfT;
         pts.push({date:r.date,score:score,pnl:pnl,pct:sb>0?(pnl/sb*100):0,r:rm>0?(pnl/rm):0,n:1});
       });
     });
@@ -6243,8 +6458,11 @@ function DisciplineScatter(props){
       if(isNaN(score))score=calcDiscipline(trades,parseFloat(r.riskMax)||0);
       var dayPnl=parseFloat(r.pnl)||0;
       var sb=0;try{sb=getAccountBalanceAtDate(r.date);}catch(e){}
-      var rm=parseFloat(r.riskMax)||0;
-      pts.push({date:r.date,score:score,pnl:dayPnl,pct:sb>0?(dayPnl/sb*100):0,r:rm>0?(dayPnl/rm):0,n:trades.length});
+      // CHANGED: Day R = sum of each trade's R against its own (sf-scaled) risk cap. Matches the
+      // canonical dayR() the Today strip and rest of the app use. Previously divided dayPnl by the
+      // raw riskMax, halving R on half-size days.
+      var dayRVal=dayR(trades,parseFloat(r.riskMax)||0);
+      pts.push({date:r.date,score:score,pnl:dayPnl,pct:sb>0?(dayPnl/sb*100):0,r:dayRVal,n:trades.length});
     });
   }
   if(pts.length<3)return null;
@@ -6310,8 +6528,16 @@ function DisciplineScatter(props){
           )}
         </div>
         <div style={{textAlign:"right",fontSize:10,color:"#94a3b8",lineHeight:1.55}}>
-          <div>Below thr ({below.length}): <span style={{color:belowAvgR>=0?"#86efac":"#fca5a5",fontWeight:700}}>{fmtR(belowAvgR)}</span></div>
-          <div>At/above ({above.length}): <span style={{color:aboveAvgR>=0?"#86efac":"#fca5a5",fontWeight:700}}>{fmtR(aboveAvgR)}</span></div>
+          {/* CHANGED: $ averages alongside R averages so the magnitude is concrete. */}
+          {(function(){
+            var bAvgD=below.length>0?below.reduce(function(s,p){return s+(p.pnl||0);},0)/below.length:0;
+            var aAvgD=above.length>0?above.reduce(function(s,p){return s+(p.pnl||0);},0)/above.length:0;
+            function fmtD(v){return (v>=0?"+$":"-$")+Math.abs(v).toFixed(0);}
+            return (<>
+              <div>Below thr ({below.length}): <span style={{color:belowAvgR>=0?"#86efac":"#fca5a5",fontWeight:700}}>{fmtR(belowAvgR)}</span>{below.length>0&&!HIDE_DOLLAR_PNL&&<span style={{color:bAvgD>=0?"#86efac":"#fca5a5",fontWeight:600,marginLeft:4}}>({fmtD(bAvgD)})</span>}</div>
+              <div>At/above ({above.length}): <span style={{color:aboveAvgR>=0?"#86efac":"#fca5a5",fontWeight:700}}>{fmtR(aboveAvgR)}</span>{above.length>0&&!HIDE_DOLLAR_PNL&&<span style={{color:aAvgD>=0?"#86efac":"#fca5a5",fontWeight:600,marginLeft:4}}>({fmtD(aAvgD)})</span>}</div>
+            </>);
+          })()}
         </div>
       </div>
       <svg ref={svgRef} viewBox={"0 0 "+W+" "+H} style={{display:"block",width:"100%",height:"100%",flex:1,minHeight:120,cursor:hover!=null&&props.onNavigateToTrade?"pointer":"crosshair",touchAction:"none"}} preserveAspectRatio="none" onMouseMove={onMove} onMouseLeave={onLeave} onTouchStart={onMove} onTouchMove={onMove} onTouchEnd={onLeave} onClick={onSvgClick}>
@@ -6854,9 +7080,17 @@ function PerformanceTab(props){
             function renderChart(){
               if(selectedMetric==="totalPnl")return <EquityCurve entries={filtered} range={range}/>;
               if(selectedMetric==="trades"){
-                // CHANGED: Total trading time displayed to the right of the Trades value in the chart readout.
-                var ttMs=0;filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(t&&t.status!=="open"){var d=tradeDurationMs(t);if(d>0)ttMs+=d;}});});
-                var ttMeta=ttMs>0?(fmtDurationMs(ttMs)+" trading"):"";
+                // CHANGED: Trading time scoped to hovered day when hovering, else period total.
+                function ttForRows(rows){var ms=0;rows.forEach(function(r){(r.trades||[]).forEach(function(t){if(t&&t.status!=="open"){var d=tradeDurationMs(t);if(d>0)ms+=d;}});});return ms;}
+                var totalTtMs=ttForRows(filtered);
+                var ttMeta=function(display,hovering){
+                  if(hovering&&display&&display.date){
+                    var dayRows=filtered.filter(function(r){return r.date===display.date;});
+                    var dayMs=ttForRows(dayRows);
+                    return dayMs>0?(fmtDurationMs(dayMs)+" trading"):"";
+                  }
+                  return totalTtMs>0?(fmtDurationMs(totalTtMs)+" trading"):"";
+                };
                 return <MetricChart entries={filtered} label="Trades per Day" color="#a5b4fc" compute={computeTradeCount} format={fmtCount} meta={ttMeta}/>;
               }
               if(selectedMetric==="profitFactor")return <MetricChart entries={filtered} minTrades={20} label="Profit Factor" color={pfColor} compute={computePF} format={fmtNum}/>;
@@ -6869,16 +7103,25 @@ function PerformanceTab(props){
               // CHANGED: Avg Pos Size chart — running average position size across the slice.
               // In $ mode plots dollars; in Hide-$ mode plots % of account balance at slice end.
               if(selectedMetric==="avgPosSize"){
-                function computeAvgPos(slice){var s=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status==="open")return;var p=parseFloat(t.positionSize);if(!isNaN(p)&&p>0){s+=p;n++;}});});return n>0?(s/n):null;}
-                function computeAvgPosPct(slice){
-                  var avg=computeAvgPos(slice);if(avg==null)return null;
-                  var lastDate=slice.length>0?slice[slice.length-1].date:null;
-                  if(!lastDate)return null;
-                  var bal=0;try{bal=getAccountBalanceAtDate(lastDate);}catch(e){}
-                  return bal>0?(avg/bal*100):null;
+                // CHANGED: Per-trade points — build synthetic rows where each row holds ONE trade,
+                // in chronological order. Combined with perPoint=true, this makes each chart
+                // point represent that single trade's actual position size (not a running avg).
+                var perTradeRows=[];
+                filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(t&&t.status!=="open")perTradeRows.push({date:r.date,trades:[t]});});});
+                perTradeRows.sort(function(a,b){
+                  var da=new Date(a.date).getTime(),db=new Date(b.date).getTime();
+                  if(da!==db)return da-db;
+                  var ma=parseTimeToMinsOfDay(a.trades[0].time)||0,mb=parseTimeToMinsOfDay(b.trades[0].time)||0;
+                  return ma-mb;
+                });
+                function computeTradePos(slice){var t=slice[0]&&slice[0].trades&&slice[0].trades[0];if(!t)return null;var p=parseFloat(t.positionSize);return (!isNaN(p)&&p>0)?p:null;}
+                function computeTradePosPct(slice){
+                  var p=computeTradePos(slice);if(p==null)return null;
+                  var bal=0;try{bal=getAccountBalanceAtDate(slice[0].date);}catch(e){}
+                  return bal>0?(p/bal*100):null;
                 }
-                if(HIDE_DOLLAR_PNL)return <MetricChart entries={filtered} minTrades={5} label="Avg Pos Size" color="#a5b4fc" compute={computeAvgPosPct} format={fmtPct}/>;
-                return <MetricChart entries={filtered} minTrades={5} label="Avg Pos Size" color="#a5b4fc" compute={computeAvgPos} format={function(v){return "$"+Math.round(v).toLocaleString();}}/>;
+                if(HIDE_DOLLAR_PNL)return <MetricChart entries={perTradeRows} perPoint={true} label="Position Size" color="#a5b4fc" compute={computeTradePosPct} format={fmtPct}/>;
+                return <MetricChart entries={perTradeRows} perPoint={true} label="Position Size" color="#a5b4fc" compute={computeTradePos} format={function(v){return "$"+Math.round(v).toLocaleString();}}/>;
               }
               return <EquityCurve entries={filtered} range={range}/>;
             }
@@ -6942,7 +7185,6 @@ function PerformanceTab(props){
               </StatSec>
             );
           })()}
-          <div style={{breakInside:"avoid",WebkitColumnBreakInside:"avoid",marginBottom:16}}><StreakTracker rows={filtered} settings={settings}/></div>
           {/* CHANGED: R-Multiple + Discipline Scatter rendered consecutively so they group in the masonry. */}
           <div style={{breakInside:"avoid",WebkitColumnBreakInside:"avoid",marginBottom:16}}><RMultipleHistogram rows={filtered} fallbackRiskMax={parseFloat(settings.riskMax)||0}/></div>
           <div style={{breakInside:"avoid",WebkitColumnBreakInside:"avoid",marginBottom:16}}><DisciplineScatter rows={filtered} settings={settings} range={range} onNavigateToTrade={props.onNavigateToTrade}/></div>
@@ -7154,18 +7396,16 @@ function PerformanceTab(props){
              so the duplicate panel just took space without adding info. */}
           {(function(){
             function summarize(filterFn){
-              var n=0,w=0,l=0,pnl=0,pcts=[];
+              var n=0,w=0,l=0,lossPnl=0,lossPcts=[];
               allTrades.forEach(function(t){
                 if(!filterFn(t))return;
-                n++;var p=parseFloat(t.pnl)||0;pnl+=p;
-                if(p>0)w++;else if(p<0)l++;
-                var pp=parseFloat(t.pctPnl);if(!isNaN(pp))pcts.push(pp);
+                n++;var p=parseFloat(t.pnl)||0;
+                if(p>0)w++;else if(p<0){l++;lossPnl+=p;var pp=parseFloat(t.pctPnl);if(!isNaN(pp))lossPcts.push(pp);}
               });
-              var wr=n>0?Math.round((w/n)*100):0;
               var lr=n>0?Math.round((l/n)*100):0;
-              var avgPct=pcts.length>0?(pcts.reduce(function(s,v){return s+v;},0)/pcts.length):0;
-              var expectancy=n>0?pnl/n:0;
-              return {n:n,wr:wr,lr:lr,avgPct:avgPct,expectancy:expectancy};
+              var avgLoss=l>0?lossPnl/l:0;
+              var avgLossPct=lossPcts.length>0?(lossPcts.reduce(function(s,v){return s+v;},0)/lossPcts.length):0;
+              return {n:n,l:l,lr:lr,avgLoss:avgLoss,avgLossPct:avgLossPct};
             }
             var cats=[
               {label:"No setup tagged",stat:summarize(function(t){return !t.setup;})},
@@ -7179,19 +7419,17 @@ function PerformanceTab(props){
               <StatSec title="Untagged Trades" colSpan={props.mobile?1:6}>
                 {cats.map(function(c,i){
                   var g=c.stat;
-                  var pnlStr=HIDE_DOLLAR_PNL?((g.avgPct>=0?"+":"")+g.avgPct.toFixed(2)+"%"):((g.expectancy>=0?"+":"-")+"$"+Math.abs(g.expectancy).toFixed(2)+" exp");
-                  var avgPctStr=(g.avgPct>=0?"+":"")+g.avgPct.toFixed(2)+"% avg";
+                  var lossStr=g.l>0?(HIDE_DOLLAR_PNL?(g.avgLossPct.toFixed(2)+"%"):("-$"+Math.abs(g.avgLoss).toFixed(2))):"—";
                   return (
                     <div key={c.label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:i<cats.length-1?"1px solid #1e293b":"none",gap:8}}>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:13,color:"#e2e8f0",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.label}</div>
-                        <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>{g.n} trade{g.n===1?"":"s"} · {g.wr}% WR</div>
+                      <div style={{flex:1,minWidth:0,display:"flex",alignItems:"center",gap:7}}>
+                        <span style={{width:6,height:6,borderRadius:"50%",background:"#ef4444",flexShrink:0}}/>
+                        <div style={{minWidth:0}}>
+                          <div style={{fontSize:13,color:"#e2e8f0",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.label}</div>
+                          <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>{g.n} trade{g.n===1?"":"s"} · <span style={{color:"#fca5a5"}}>{g.l} loss{g.l===1?"":"es"} ({g.lr}%)</span></div>
+                        </div>
                       </div>
-                      {/* CHANGED: LR is the primary big number; expectancy + avg drop to small secondary text. */}
-                      <div style={{textAlign:"right",flexShrink:0}}>
-                        <div style={{fontSize:18,fontWeight:800,color:g.lr>=50?"#ef4444":g.lr>=33?"#fbbf24":"#94a3b8",fontVariantNumeric:"tabular-nums",letterSpacing:-0.3,lineHeight:1}}>{g.lr}<span style={{marginLeft:2}}>% LR</span></div>
-                        <div style={{fontSize:10,color:"#94a3b8",fontVariantNumeric:"tabular-nums",marginTop:3}}>{pnlStr}</div>
-                      </div>
+                      <div style={{textAlign:"right",flexShrink:0}}><div style={{fontSize:13,fontWeight:700,color:g.l>0?"#ef4444":"#64748b",fontVariantNumeric:"tabular-nums"}}>{lossStr}</div><div style={{fontSize:10,color:"#94a3b8",fontWeight:600,marginTop:1}}>{g.l>0?"avg loss":"no losses"}</div></div>
                     </div>
                   );
                 })}
@@ -7386,6 +7624,9 @@ function SettingsTab(props){
   useEffect(function(){if(props.initialTransferAmount){setTransferDraft(function(d){return Object.assign({},d,{type:"withdrawal",amount:String(props.initialTransferAmount)});});}},[props.initialTransferAmount]);
   // CHANGED: Allowance-target notification input.
   var [allowanceTargetInput,setAllowanceTargetInput]=useState(function(){var v=getAllowanceTarget();return v>0?String(v):"";});
+  // CHANGED: Inline editable allowance % — typing updates localStorage immediately so the
+  // displayed allowance recomputes on the next render.
+  var [allowancePctInput,setAllowancePctInput]=useState(function(){return String(getWithdrawalAllowancePct());});
   var [instruments,setInstruments]=useState(loadInstruments());
   var [newInst,setNewInst]=useState({symbol:"",name:"",classId:"options"});
   var [eventsReloadKey,setEventsReloadKey]=useState(0);
@@ -7586,6 +7827,22 @@ function SettingsTab(props){
                   <div style={{fontSize:16,fontWeight:700,color:"#e2e8f0",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{fmtUSD(totalWdr)}</div>
                 </div>
               </div>
+              {/* CHANGED: Manual half-size toggle. Auto-engages when weekly or monthly goal is hit
+                 — this toggle lets users opt in early. When locked by a goal hit, the toggle
+                 becomes a read-only indicator. */}
+              {(function(){
+                var locked=isWeeklyGoalHit(props.liveTotalPnL||0)||isMonthlyGoalHit(props.liveTotalPnL||0);
+                var on=isMonthHalfsizeActive();
+                return (
+                  <div style={{marginBottom:12,padding:"10px 12px",background:"#0a0a0f",border:"1px solid "+(on?"#facc15":"#334155"),borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+                    <div style={{minWidth:0}}>
+                      <div style={{fontSize:12,color:"#e2e8f0",fontWeight:700}}>{on?"🔒 Half-size active":"Half-size trading"}</div>
+                      <div style={{fontSize:10,color:"#64748b",marginTop:2}}>{locked?"Locked on — weekly/monthly goal hit":on?"Manual opt-in — tap to turn off":"All sizing/risk halves for the rest of the month"}</div>
+                    </div>
+                    <button disabled={locked} onClick={function(){if(locked)return;setMonthHalfsizeActive(!on);if(!on===false){try{localStorage.removeItem("tf-month-goal-banner-dismissed");}catch(e){}}if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"5px 12px",background:on?"#facc15":"#1e293b",border:"1px solid "+(on?"#facc15":"#475569"),borderRadius:5,color:on?"#422006":"#cbd5e1",fontSize:11,fontWeight:700,cursor:locked?"not-allowed":"pointer",fontFamily:"inherit",opacity:locked?0.7:1,flexShrink:0}}>{on?"On":"Off"}</button>
+                  </div>
+                );
+              })()}
             </>
           );
         })()}
@@ -7607,19 +7864,29 @@ function SettingsTab(props){
                 <span style={{fontSize:16,fontWeight:800,color:unlocked?"#22c55e":"#f59e0b"}}>{fmt(allowance)}</span>
               </div>
               <div style={{fontSize:11,color:"#64748b",marginTop:5,lineHeight:1.5}}>
-                {WITHDRAWAL_ALLOWANCE_PCT}% of {fmt(Math.max(0,profit))} profit{lastDate?" since last withdrawal":" (all-time)"}
+                {getWithdrawalAllowancePct()}% of {fmt(Math.max(0,profit))} profit{lastDate?" since last withdrawal":" (all-time)"}
               </div>
               {allowance<=0&&<div style={{fontSize:11,color:"#fdba74",marginTop:5}}>No profit{lastDate?" since your last withdrawal":""} yet, so the suggested allowance is $0. You can still log this — it's just a guide.</div>}
-              {overAllowance&&<div style={{fontSize:11,color:"#fca5a5",marginTop:5}}>Over allowance by {fmt(entered-allowance)} — you can still log it, but it exceeds the {WITHDRAWAL_ALLOWANCE_PCT}% guide.</div>}
-              {/* CHANGED: Notify-me-at target. When the live allowance reaches this amount, a banner shows on Home. */}
+              {overAllowance&&<div style={{fontSize:11,color:"#fca5a5",marginTop:5}}>Over allowance by {fmt(entered-allowance)} — you can still log it, but it exceeds the {getWithdrawalAllowancePct()}% guide.</div>}
+              {/* CHANGED: Inline editable % of profit. Updates the allowance readout immediately
+                 via local state mirror, persists on Set. The home banner is now driven by the
+                 Monthly Withdrawal goal, not a separate $ target. */}
               <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid #1e293b44"}}>
-                <label style={{fontSize:11,color:"#94a3b8",fontWeight:600,display:"block",marginBottom:5}}>Notify me when allowance reaches</label>
-                <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                  <span style={{fontSize:13,color:"#64748b"}}>$</span>
-                  <input type="number" value={allowanceTargetInput} onChange={function(e){setAllowanceTargetInput(e.target.value);}} placeholder="e.g. 500" style={Object.assign({},fld,{flex:1})}/>
-                  <button onClick={function(){var v=parseFloat(allowanceTargetInput)||0;saveAllowanceTarget(v);setAllowanceTargetInput(v>0?String(v):"");if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"7px 14px",background:"#4f46e5",border:"none",borderRadius:5,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>Set</button>
+                {/* CHANGED: Enable/disable allowance entirely. When off, the suggested allowance
+                   reads 0 everywhere and the payout nudge stops firing. */}
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                  <label style={{fontSize:11,color:"#94a3b8",fontWeight:600}}>Allowance suggestions</label>
+                  <button onClick={function(){setAllowanceEnabled(!getAllowanceEnabled());if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"3px 10px",background:getAllowanceEnabled()?"#14532d":"#1e293b",border:"1px solid "+(getAllowanceEnabled()?"#22c55e":"#334155"),borderRadius:4,color:getAllowanceEnabled()?"#86efac":"#94a3b8",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{getAllowanceEnabled()?"On":"Off"}</button>
                 </div>
-                {getAllowanceTarget()>0?<div style={{fontSize:11,color:"#86efac",marginTop:6}}>✓ You'll see a banner on Home when your allowance hits {fmt(getAllowanceTarget())}.{" "}<button onClick={function(){saveAllowanceTarget(0);setAllowanceTargetInput("");if(props.bumpReloadKey)props.bumpReloadKey();}} style={{background:"none",border:"none",color:"#64748b",fontSize:11,cursor:"pointer",fontFamily:"inherit",textDecoration:"underline",padding:0}}>Clear</button></div>:<div style={{fontSize:11,color:"#64748b",marginTop:6}}>Leave blank for no notification.</div>}
+                {getAllowanceEnabled()&&<>
+                  <label style={{fontSize:11,color:"#94a3b8",fontWeight:600,display:"block",marginBottom:5}}>Allowance % of profit</label>
+                  <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                    <input type="number" value={allowancePctInput} onChange={function(e){var v=e.target.value;setAllowancePctInput(v);var n=parseFloat(v);if(!isNaN(n)&&n>0)setWithdrawalAllowancePct(n);}} placeholder="30" style={Object.assign({},fld,{width:80,flex:"none"})}/>
+                    <span style={{fontSize:13,color:"#64748b"}}>%</span>
+                    <button onClick={function(){var n=parseFloat(allowancePctInput);if(!isNaN(n)&&n>0){setWithdrawalAllowancePct(n);}if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"7px 14px",background:"#4f46e5",border:"none",borderRadius:5,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>Set</button>
+                  </div>
+                  <div style={{fontSize:11,color:"#64748b",marginTop:6}}>Banner on Home fires when your monthly withdrawal goal is hit.</div>
+                </>}
               </div>
             </div>
           );
@@ -8393,10 +8660,14 @@ function App(props){
       try{
         var closedT=(state.trades||[]).filter(function(t){return t&&t.status!=="open";});
         var note=state.dailyNote||"";
-        // No closed trades AND no note → don't create an empty journal entry.
-        if(closedT.length===0&&!note)return;
         var key="journal:"+todayStr().replace(/\//g,"-");
         var existing=null;try{var raw=localStorage.getItem(key);if(raw)existing=JSON.parse(raw);}catch(e){}
+        // CHANGED: If state's note is empty but the saved entry has one (e.g. user typed in the
+        // Journal textarea which writes localStorage directly), preserve it. Prevents the autosave
+        // from wiping the note when other state changes (commitment Yes/No, etc.) trigger a save.
+        if(!note&&existing&&existing.note)note=existing.note;
+        // No closed trades AND no note → don't create an empty journal entry.
+        if(closedT.length===0&&!note)return;
         var riskMaxN=parseFloat(settings.riskMax)||0;
         var discScore=0;try{discScore=calcDiscipline(closedT,riskMaxN,{commitment:state.commitment||null});}catch(e){}
         var entry={
@@ -8534,11 +8805,15 @@ function App(props){
         // yesterday and merge: if it already has trades, keep them; if both have trades, union by id.
         // This prevents catastrophic loss when state.trades is stale/partial relative to the saved
         // journal (e.g., after cloud-pull, migration, or app reopened past midnight).
-        if(state.trades&&state.trades.length>0){
+        // CHANGED: Split open vs closed. Closed trades roll into yesterday's journal entry. Open
+        // trades (no exits yet) CARRY OVER into today's state so the live position isn't lost.
+        var openCarry=(state.trades||[]).filter(function(t){return t&&t.status==="open";});
+        var closedT=(state.trades||[]).filter(function(t){return t&&t.status!=="open";});
+        if(closedT.length>0){
           var key="journal:"+state.date.replace(/\//g,"-");
           var existing=null;
           try{var raw=localStorage.getItem(key);if(raw)existing=JSON.parse(raw);}catch(e){}
-          var mergedTrades=state.trades.slice();
+          var mergedTrades=closedT.slice();
           if(existing&&Array.isArray(existing.trades)&&existing.trades.length>0){
             var seen={};
             mergedTrades.forEach(function(t){if(t&&t.id!=null)seen[t.id]=true;});
@@ -8561,7 +8836,10 @@ function App(props){
           });
           safeWriteJournalEntry(key,entry);
         }
-        setState(defaultState());
+        // Fresh state for today, but preserve any still-open positions.
+        var fresh=defaultState();
+        if(openCarry.length>0)fresh.trades=openCarry;
+        setState(fresh);
       }
     }
     checkRollover();
@@ -8598,8 +8876,15 @@ function App(props){
       v.splice(overIdx,1);
     }
     var stopThreshPct=(riskMaxPct>0)?riskMaxPct*sf:0;
+    // CHANGED: "Max risk exceeded" is dollar-based, not %-based. Previous %-based check
+    // (pctPnl < -(riskMaxPct × sf)) was conceptually wrong: at half-size both the dollar risk
+    // cap AND the position shrink by sf, so the % stays invariant — multiplying by sf made the
+    // threshold artificially tight. Also, for trades sized below max, % loss can exceed
+    // riskMaxPct while the actual dollar loss is still under the cap. Compare $ to $.
+    var rmDollar=parseFloat(settings&&settings.riskMax)||0;
+    var riskCapDollars=rmDollar>0?rmDollar*sf:0;
     var maxRiskIdx=v.indexOf("Max risk exceeded");
-    var stoppedOut=(!isNaN(pnlNum)&&pnlNum<0&&!isNaN(pctNum)&&stopThreshPct>0&&pctNum<-stopThreshPct);
+    var stoppedOut=(!isNaN(pnlNum)&&pnlNum<0&&riskCapDollars>0&&pnlNum<-riskCapDollars);
     if(stoppedOut){
       if(maxRiskIdx<0)v.push("Max risk exceeded");
     }else if(maxRiskIdx>=0){
@@ -8608,6 +8893,7 @@ function App(props){
     var patch={violations:v,sizeFraction:sf};
     if(effPosMax>0)patch.posMaxAtEntry=effPosMax;
     if(stopThreshPct>0)patch.stopThreshPctAtEntry=stopThreshPct;
+    if(riskCapDollars>0)patch.riskCapDollarsAtEntry=riskCapDollars;
     return Object.assign({},t,patch);
   }
   function saveTrade(t){
@@ -8868,7 +9154,7 @@ function App(props){
             {tab==="trades"&&<TradesTab mobile={mobile} state={state} setState={setState} showForm={showForm} setShowForm={setShowForm} trade={trade} setTrade={setTrade} saveTrade={saveTrade} deleteTrade={deleteTrade} tradeStatus={tradeStatus} phase={phase} settings={settings} preCheckComplete={preCheckComplete} totalPnL={totalPnL} initialDate={tradesInitialDate} reloadKey={reloadKey} bumpReloadKey={bumpReloadKey} timezone={settings.timezone} liveTrades={liveTrades} openLiveTrade={function(lt){setLiveTradeManaging(lt);}} displayPosMin={dPosMin} displayPosMax={dPosMax} displayRiskMin={dRiskMin} displayRiskMax={dRiskMax} tradeOptions={tradeOptions} autoAddViolations={autoAddViolations} refreshHistory={bumpReloadKey} checklistVersion={checklistVersion}/>}
           </>);
         })()}
-        {tab==="goals"&&<GoalsTab mobile={mobile} settings={settings} reloadKey={reloadKey} liveTotalPnL={totalPnL} tradeOptions={tradeOptions} state={state}/>}
+        {tab==="goals"&&<GoalsTab mobile={mobile} settings={settings} reloadKey={reloadKey} bumpReloadKey={bumpReloadKey} liveTotalPnL={totalPnL} tradeOptions={tradeOptions} state={state}/>}
         {tab==="performance"&&<PerformanceTab mobile={mobile} settings={settings} reloadKey={reloadKey} totalPnL={totalPnL} state={state} onNavigateToTrade={navigateToTrade}/>}
         {tab==="settings"&&<SettingsTab onSignOut={props.onSignOut} settings={settings} setSettings={setSettings} tradeOptions={tradeOptions} setTradeOptions={setTradeOptions} liveTotalPnL={totalPnL} initialTransferAmount={pendingWithdrawAmount} focusSection={settingsFocus} bumpReloadKey={bumpReloadKey} onChecklistChange={function(){setChecklistVersion(function(v){return v+1;});setState(function(s){var c=Object.assign({},s.preChecklist||{});var items=loadChecklistItems();items.forEach(function(it){if(c[it.key]==null)c[it.key]=false;});return Object.assign({},s,{preChecklist:c});});}}/>}
         {liveTradeManaging&&<ManageTradeView trade={liveTradeManaging} onClose={function(){setLiveTradeManaging(null);}} onSave={function(updated){saveTrade(updated);}} onDelete={function(){deleteTrade(liveTradeManaging.id);setLiveTradeManaging(null);}} settings={settings} tradeOptions={tradeOptions}/>}
