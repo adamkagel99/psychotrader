@@ -3545,7 +3545,8 @@ function GoalsSnapshot(props){
   var disciplineTarget=loadDisciplineLockThreshold();
   var accountTarget=parseFloat(goals.accountTarget)||0;
   // CHANGED: Total Withdrawn target is auto-derived from allowance % × Monthly P&L goal. Hidden when allowance % is 0.
-  var withdrawalTarget=(WITHDRAWAL_ALLOWANCE_PCT>0&&monthlyTarget>0)?(WITHDRAWAL_ALLOWANCE_PCT/100)*monthlyTarget:0;
+  var _wpctRaw=goals.withdrawalPct;var _wpct=(_wpctRaw===""||_wpctRaw==null)?30:parseFloat(_wpctRaw);if(isNaN(_wpct))_wpct=0;
+  var withdrawalTarget=(_wpct>0&&monthlyTarget>0)?(_wpct/100)*monthlyTarget:0;
   var totalWithdrawn=getTotalWithdrawn();
   function money(v){if(HIDE_DOLLAR_PNL)return (v<0?"-":"")+"$•••";return (v<0?"-$":"$")+Math.abs(Math.round(v)).toLocaleString();}
   // CHANGED: when $ is hidden, P&L goals are shown in R (value ÷ risk-per-trade).
@@ -5103,7 +5104,7 @@ function GoalRing(props){
 
 function GoalsTab(props){
   var settings=props.settings,liveTotalPnL=props.liveTotalPnL||0;
-  var EMPTY_GOALS={weeklyMultiplier:"4",monthlyPnL:"",winRate:"",disciplineScore:"",accountTarget:"",withdrawals:"",custom:[],hidden:{}};
+  var EMPTY_GOALS={weeklyMultiplier:"4",monthlyPnL:"",winRate:"",disciplineScore:"",accountTarget:"",withdrawals:"",withdrawalPct:"30",custom:[],hidden:{}};
   // Defensive load that handles legacy or new formats and arrays
   function normalizeStored(p){
     if(!p)return Object.assign({},EMPTY_GOALS);
@@ -5235,7 +5236,9 @@ function GoalsTab(props){
   var disciplineTarget=loadDisciplineLockThreshold();
   var accountTarget=parseFloat(goals.accountTarget)||0;
   // CHANGED: Total Withdrawn target is auto-derived from allowance % × Monthly P&L goal. Hidden when allowance % is 0.
-  var withdrawalTarget=(WITHDRAWAL_ALLOWANCE_PCT>0&&monthlyTarget>0)?(WITHDRAWAL_ALLOWANCE_PCT/100)*monthlyTarget:0;
+  var withdrawalPctRaw=goals.withdrawalPct;
+  var withdrawalPct=(withdrawalPctRaw===""||withdrawalPctRaw==null)?30:parseFloat(withdrawalPctRaw);if(isNaN(withdrawalPct))withdrawalPct=0;
+  var withdrawalTarget=(withdrawalPct>0&&monthlyTarget>0)?(withdrawalPct/100)*monthlyTarget:0;
   var totalWithdrawn=getTotalWithdrawn();
 
   var transferTotalVal=transferTotal(loadTransfers());
@@ -5300,7 +5303,7 @@ function GoalsTab(props){
           <button onClick={function(){setEditing(false);}} style={{background:"none",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:14,cursor:"pointer",fontFamily:"inherit",padding:"6px 14px"}}>Cancel</button>
         </div>
         <div style={{padding:"10px 12px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:8,marginBottom:12,fontSize:13,color:"#94a3b8",lineHeight:1.5}}>Daily P&L target is auto-calculated from each enabled session's position size and gain hard stop: <span style={{color:"#22c55e",fontWeight:700}}>${Math.round(autoDaily)}</span> (one winning trade per session at its gain stop, sized by risk max ${(parseFloat(settings.riskMax)||0)}). Adjust sessions and gain stops in Settings.</div>
-        {[{key:"weeklyMultiplier",label:"Weekly P&L Multiplier (× Daily Target)",ph:"e.g. 4"},{key:"monthlyPnL",label:"Monthly P&L Target ($)",ph:"e.g. 3000"},{key:"winRate",label:"Win Rate Target (%)",ph:"e.g. 60"},{key:"accountTarget",label:"Account Milestone ($)",ph:"e.g. 5000"}].map(function(f){
+        {[{key:"weeklyMultiplier",label:"Weekly P&L Multiplier (× Daily Target)",ph:"e.g. 4"},{key:"monthlyPnL",label:"Monthly P&L Target ($)",ph:"e.g. 3000"},{key:"winRate",label:"Win Rate Target (%)",ph:"e.g. 60"},{key:"accountTarget",label:"Account Milestone ($)",ph:"e.g. 5000"},{key:"withdrawalPct",label:"Withdrawal Allowance (% of Monthly Goal — 0 hides card)",ph:"e.g. 30"}].map(function(f){
           return <div key={f.key} style={{marginBottom:12}}><label style={lbl}>{f.label}</label><input type="number" value={draft[f.key]||""} onChange={function(e){var v=e.target.value;setDraft(function(g){return Object.assign({},g,{[f.key]:v});});}} placeholder={f.ph} style={fld}/></div>;
         })}
         <button onClick={saveStandardGoals} style={{width:"100%",padding:"13px",background:"linear-gradient(135deg,#4f46e5,#6366f1)",color:"#fff",border:"none",borderRadius:10,fontSize:16,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginTop:4}}>Save Goals</button>
