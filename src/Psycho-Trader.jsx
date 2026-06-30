@@ -2430,7 +2430,11 @@ function TradeTile(props){
   }
   var setupChain=[t.setup,t.timeframe,t.candlePattern].filter(function(x){return !!x;});
   var hasSetupInfo=setupChain.length>0;
-  var hasTags=emos.length>0||effViolations.length>0;
+  // CHANGED: Compute out-of-session tag at render time from the trade's actual start time so
+  // newly-created, edited, and legacy trades all show consistently. Heatmap uses the same
+  // getSessionForTrade derivation.
+  var _isOutOfSession=(function(){try{return getSessionForTrade(t)===null;}catch(e){return false;}})();
+  var hasTags=emos.length>0||effViolations.length>0||_isOutOfSession;
   var shots=t.screenshots||[];
   var showButtons=!hideControls&&(onEdit||onDelete);
 
@@ -2565,11 +2569,12 @@ function TradeTile(props){
         </div>
       )}
 
-      {/* TAGS: emotions + violations */}
+      {/* TAGS: emotions + violations + out-of-session */}
       {hasTags&&(
         <div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:8}}>
           {emos.map(function(e){return <Tag key={e} label={e} color={emotionTagColor(e)}/>;})}
           {effViolations.map(function(v){return <Tag key={v} label={"⚠ "+v} color="#f87171"/>;})}
+          {_isOutOfSession&&<Tag label="⊘ Out of session" color="#fcd34d"/>}
         </div>
       )}
 
