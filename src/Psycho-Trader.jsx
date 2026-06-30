@@ -210,11 +210,21 @@ function fmtDurationMs(ms){
 // Day-of-week comes from openedAt so a back-entered trade gets the right weekday.
 function getSessionForTrade(t){
   if(!t)return null;
-  var timeStr=(t.entries&&t.entries[0]&&t.entries[0].time)||t.time||null;
-  var mins=parseTimeToMinsOfDay(timeStr);
-  var date=null;
-  if(t.openedAt){try{date=new Date(t.openedAt);}catch(e){}}
-  if(mins==null&&date){mins=date.getHours()*60+date.getMinutes();}
+  // CHANGED: Canonical start = earliest leg timestamp (matches the time the card displays and
+  // the Sort comparator). Falls back to openedAt, then to legacy time strings.
+  var ms=null;
+  try{
+    var ents=t.entries||[];
+    var arr=ents.map(function(e){return Number(e&&e.time);}).filter(function(n){return !isNaN(n)&&n>0;});
+    if(arr.length>0)ms=Math.min.apply(null,arr);
+  }catch(e){}
+  if(ms==null){var op=Number(t.openedAt);if(!isNaN(op)&&op>0)ms=op;}
+  var mins=null,date=null;
+  if(ms!=null){date=new Date(ms);mins=date.getHours()*60+date.getMinutes();}
+  else{
+    var timeStr=(t.entries&&t.entries[0]&&typeof t.entries[0].time==="string"&&t.entries[0].time)||t.time||null;
+    mins=parseTimeToMinsOfDay(timeStr);
+  }
   if(mins==null)return null;
   var day=(date?date.getDay():getNow().getDay());
   // Pass 1: exact match — time falls inside a session window and the day is enabled for it.
@@ -4385,8 +4395,23 @@ function TradesTab(props){
   // CHANGED: Multi-level sort. Each sort id maps to a comparator; the chain applies them in
   // priority order, falling through to the next only when the current one ties. An empty chain
   // (or only "timestamp") defaults to chronological by openedAt.
+  // CHANGED: Canonical "trade start" — same source the cards display: earliest entry leg time,
+  // falling back to openedAt, then t.time. Used by both Sort and out-of-session detection so all
+  // three (display, order, tag) agree.
+  function _tradeStart(t){
+    if(!t)return 0;
+    try{
+      var ents=t.entries||[];
+      var times=ents.map(function(e){return Number(e&&e.time);}).filter(function(n){return !isNaN(n)&&n>0;});
+      if(times.length>0)return Math.min.apply(null,times);
+    }catch(e){}
+    var op=Number(t.openedAt);if(!isNaN(op)&&op>0)return op;
+    // Last-ditch: parse legacy "h:mm AM/PM" string against today.
+    try{var s=String(t.time||"");var m=s.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);if(m){var d=new Date();var h=parseInt(m[1],10),mm=parseInt(m[2],10);var ap=(m[3]||"").toUpperCase();if(ap==="PM"&&h<12)h+=12;if(ap==="AM"&&h===12)h=0;d.setHours(h,mm,0,0);return d.getTime();}}catch(e){}
+    return 0;
+  }
   var SORT_CMP={
-    timestamp:function(a,b){return(parseFloat(a.openedAt)||0)-(parseFloat(b.openedAt)||0);},
+    timestamp:function(a,b){return _tradeStart(a)-_tradeStart(b);},
     pnl_pos:function(a,b){return(parseFloat(b.pnl)||0)-(parseFloat(a.pnl)||0);},
     pnl_neg:function(a,b){return(parseFloat(a.pnl)||0)-(parseFloat(b.pnl)||0);},
     pct_pos:function(a,b){return(parseFloat(b.pctPnl)||0)-(parseFloat(a.pctPnl)||0);},
@@ -4407,14 +4432,6 @@ function TradesTab(props){
       return 0;
     };
   }
-  // CHANGED: Default chronological order (earliest start first) — uses each trade's openedAt
-  // (or first entry time, or t.time fallback). The user's explicit Sort overrides this baseline.
-  function _tradeStart(t){
-    if(t&&typeof t.openedAt==="number")return t.openedAt;
-    try{var e=(t.entries||[])[0];if(e&&e.time){var d=new Date(); var m=String(e.time).match(/^(\d+):(\d+)\s*(AM|PM)?$/i);if(m){var h=parseInt(m[1],10);var mm=parseInt(m[2],10);var ap=(m[3]||"").toUpperCase();if(ap==="PM"&&h<12)h+=12;if(ap==="AM"&&h===12)h=0;d.setHours(h,mm,0,0);return d.getTime();}}}catch(e){}
-    return 0;
-  }
-  displayTrades=displayTrades.slice().sort(function(a,b){return _tradeStart(a)-_tradeStart(b);});
   displayTrades=displayTrades.slice().sort(makeChainCmp(sortChain,false));
   // CHANGED: Build an "all journal" trade list (every date + today) with the SAME filters and sort
   // applied, so the all-screenshots view honors the Sort/Filter controls. Each trade carries its date.
