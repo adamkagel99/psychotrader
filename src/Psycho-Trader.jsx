@@ -5464,8 +5464,11 @@ function GoalsTab(props){
   var [newGoal,setNewGoal]=useState({title:"",target:"",metric:"pnl",period:"daily",prefix:"$",suffix:"",customName:"",deadline:"",filterField:"",filterValue:""});
 
   useEffect(function(){
-    try{var s=localStorage.getItem(GOALS_KEY);if(s)setGoals(normalizeStored(JSON.parse(s)));}catch(e){}
-  },[]);
+    // CHANGED: Re-read on every reloadKey bump so cloud-pulled updates, custom-edit setters that
+    // write directly, and external tab writes all flow into the snapshot view. Previously this
+    // only ran on mount, leaving the Goals tab showing stale targets after sync/external edits.
+    try{var s=localStorage.getItem(GOALS_KEY);if(s)setGoals(normalizeStored(JSON.parse(s)));else setGoals(EMPTY_GOALS);}catch(e){}
+  },[props.reloadKey]);
 
   function persist(g){
     try{localStorage.setItem(GOALS_KEY,JSON.stringify(g));}catch(e){}
@@ -5524,6 +5527,8 @@ function GoalsTab(props){
     setGoals(function(prev){
       var updated=normalizeStored(Object.assign({},prev,{custom:(prev.custom||[]).filter(function(g){return g.id!==id;})}));
       try{localStorage.setItem(GOALS_KEY,JSON.stringify(updated));}catch(e){}
+      // CHANGED: Bump reloadKey so the Dashboard's standalone goals readouts refresh too.
+      if(props.bumpReloadKey)props.bumpReloadKey();
       return updated;
     });
   }
@@ -5531,6 +5536,8 @@ function GoalsTab(props){
     setGoals(function(prev){
       var updated=normalizeStored(Object.assign({},prev,{custom:(prev.custom||[]).map(function(g){return g.id===id?Object.assign({},g,patch):g;})}));
       try{localStorage.setItem(GOALS_KEY,JSON.stringify(updated));}catch(e){}
+      // CHANGED: Bump reloadKey so the Dashboard's standalone goals readouts refresh too.
+      if(props.bumpReloadKey)props.bumpReloadKey();
       return updated;
     });
   }
@@ -5763,7 +5770,14 @@ function GoalsTab(props){
         <div style={{fontSize:18,fontWeight:700,color:"#e2e8f0"}}>Goals</div>
         <div style={{display:"flex",gap:8}}>
           <button onClick={function(){setShowAdd(function(o){return !o;});}} style={{padding:"8px 14px",background:showAdd?"#1e293b":"#14532d",border:"1px solid "+(showAdd?"#475569":"#166534"),borderRadius:6,color:showAdd?"#94a3b8":"#86efac",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>{showAdd?"Cancel":"+ Add Goal"}</button>
-          <button onClick={function(){setDraft(normalizeStored(goals));setEditing(true);}} style={{padding:"8px 14px",background:"#1e1b4b",border:"1px solid #4338ca",borderRadius:6,color:"#a5b4fc",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Edit</button>
+          <button onClick={function(){
+            // CHANGED: Read fresh from localStorage right before opening the editor so the draft
+            // can't lag behind cloud-pulled or externally-edited values.
+            var fresh=goals;try{var s=localStorage.getItem(GOALS_KEY);if(s)fresh=normalizeStored(JSON.parse(s));}catch(e){}
+            setGoals(fresh);
+            setDraft(normalizeStored(fresh));
+            setEditing(true);
+          }} style={{padding:"8px 14px",background:"#1e1b4b",border:"1px solid #4338ca",borderRadius:6,color:"#a5b4fc",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Edit</button>
         </div>
       </div>
 
