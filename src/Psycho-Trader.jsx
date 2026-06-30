@@ -226,22 +226,10 @@ function getSessionForTrade(t){
     if(days.indexOf(day)<0)continue;
     return s.id;
   }
-  // CHANGED: Pass 2 — nearest enabled session by time distance. Ensures trades placed off-hours
-  // (after market close, before pre-market, etc.) still get attributed to a session so they show
-  // up in session breakdowns and the Session×Day heatmap.
-  var best=null,bestDist=Infinity;
-  for(var j=0;j<CACHED_SESSIONS.length;j++){
-    var s2=CACHED_SESSIONS[j];
-    if(s2.enabled===false)continue;
-    var d2=s2.days||[1,2,3,4,5];
-    if(d2.indexOf(day)<0)continue;
-    var dist;
-    if(mins<s2.startMin)dist=s2.startMin-mins;
-    else if(mins>=s2.endMin)dist=mins-s2.endMin;
-    else dist=0;
-    if(dist<bestDist){bestDist=dist;best=s2.id;}
-  }
-  return best;
+  // CHANGED: Off-hours trades (started outside every enabled session window for that weekday)
+  // return null so the heatmap routes them to the "Out of session" row, instead of being
+  // silently attributed to the nearest session.
+  return null;
 }
 function getSessionAt(minutesLocal){
   var dayOfWeek=getNow().getDay();
@@ -455,14 +443,15 @@ function daysBetween(aStr,bStr){
   var b=new Date(bStr);b.setHours(0,0,0,0);
   return Math.round((b.getTime()-a.getTime())/86400000);
 }
-function checkDisciplineLock(todayTrades,commitment){
+function checkDisciplineLock(todayTrades,commitment,commitmentsMap){
   try{
     var threshold=loadDisciplineLockThreshold();
     // 1) Same-day: today's live trades drop below threshold -> locked today (no unlock).
     var tToday=(todayTrades||[]).filter(function(t){return t.status!=="open";});
     if(tToday.length>0){
       // CHANGED: Include commitment penalties so the lock score matches journal/performance.
-      var todayScore=calcDiscipline(tToday,0,{processOnly:true,commitment:commitment||null});
+      // Per-session map preferred; falls back to legacy single commitment.
+      var todayScore=calcDiscipline(tToday,0,commitmentsMap?{processOnly:true,commitments:commitmentsMap}:{processOnly:true,commitment:commitment||null});
       if(todayScore<threshold){
         return {locked:true,fromDate:todayStr(),score:Math.round(todayScore),sameDay:true};
       }
@@ -480,7 +469,7 @@ function checkDisciplineLock(todayTrades,commitment){
     // settings change, etc.) would now score it above threshold. This prevents the lock from
     // silently disappearing after a recompute.
     var liveScore=(prior.trades&&prior.trades.length>0)
-      ? calcDiscipline(prior.trades,0,{processOnly:true,commitment:prior.commitment||null})
+      ? calcDiscipline(prior.trades,0,prior.commitments?{processOnly:true,commitments:prior.commitments}:{processOnly:true,commitment:prior.commitment||null})
       : (prior.disciplineScore!=null?parseFloat(prior.disciplineScore):100);
     var wasLocked=!!prior.wasLocked;
     var score=wasLocked?(prior.lockScore!=null?parseFloat(prior.lockScore):liveScore):liveScore;
@@ -545,8 +534,21 @@ function calcDiscipline(trades,riskMaxArg,opts){
   // CHANGED: Commitment adherence penalties. If a commitment was made for the day, exceeding the
   // committed trade cap and/or self-marking setup deviation each subtract from the process score and
   // count as a violation (so a winning-but-off-plan day forfeits the R bonus, like rule violations do).
+  // CHANGED: When `opts.commitments` (per-session map) is provided, penalties are scoped per session:
+  // each session's trades are checked against its own maxTrades; setup-deviation flags accumulate.
   var com=opts&&opts.commitment;
-  if(com&&com.committed){
+  var comMap=opts&&opts.commitments;
+  if(comMap&&typeof comMap==="object"){
+    Object.keys(comMap).forEach(function(sid){
+      var sc=comMap[sid];if(!sc||!sc.committed)return;
+      var sessTrades;
+      if(sid==="_legacy")sessTrades=trades.filter(function(t){return t&&t.status!=="open";});
+      else sessTrades=trades.filter(function(t){return t&&t.status!=="open"&&t.sessionId===sid;});
+      var maxT=parseInt(sc.maxTrades);
+      if(!isNaN(maxT)&&maxT>0&&sessTrades.length>maxT){processScore-=(ds.overTradePenalty!=null?ds.overTradePenalty:10);anyViolation=true;}
+      if(sc.setupsReviewAffirmed===false){processScore-=(ds.setupDeviationPenalty!=null?ds.setupDeviationPenalty:10);anyViolation=true;}
+    });
+  }else if(com&&com.committed){
     var maxT=parseInt(com.maxTrades);
     var closedN=trades.filter(function(t){return t&&t.status!=="open";}).length;
     if(!isNaN(maxT)&&maxT>0&&closedN>maxT){processScore-=(ds.overTradePenalty!=null?ds.overTradePenalty:10);anyViolation=true;}
@@ -817,7 +819,7 @@ function pctOfAccount(dollars){
 // Position display helper: $ normally, % of account when $ hidden.
 function fmtPositionDisplay(pos){return HIDE_DOLLAR_PNL?pctOfAccount(pos):("$"+Number(pos).toLocaleString(undefined,{maximumFractionDigits:0}));}
 function defaultChecklist(){return {sleptWell:false,identifiedPDH:false,identifiedPDL:false,marked15minOpen:false,positionSized:false,candlesOverlapping:false};}
-function defaultState(){return {date:todayStr(),preChecklist:defaultChecklist(),conditionsChecked:{},trades:[],dailyNote:"",ruleViolations:[],commitment:null,noTradeReason:"",noTradeReasons:[],noTradeShots:[]};}
+function defaultState(){return {date:todayStr(),preChecklist:defaultChecklist(),conditionsChecked:{},trades:[],dailyNote:"",ruleViolations:[],commitment:null,commitments:{},noTradeReason:"",noTradeReasons:[],noTradeShots:[]};}
 // CHANGED: Each leg gets its own timestamp on creation. Editable in the form.
 function mkEntry(){return {id:Date.now()+Math.random(),contracts:"",price:"",time:Date.now()};}
 function mkExit(){return {id:Date.now()+Math.random(),contracts:"",price:"",time:Date.now()};}
@@ -1016,21 +1018,126 @@ function todayCleanStatus(todayTrades,todayRiskMax){
 // CHANGED: PRE-MARKET COMMITMENT — the trader states a plan before the day (max trades + which
 // setups they'll take). At day's end we score adherence against their OWN stated plan, which
 // lands harder than a generic rule. Returns null if no commitment was made.
+// CHANGED: Per-entry no-trade-day details with retroactive edit. Read-only by default; an "Edit"
+// link flips it to an inline form for reasons/note/screenshots, then persists back to the
+// journal entry on save.
+function NoTradeDayDetails(props){
+  var entry=props.entry,isToday=props.isToday,selectedDate=props.selectedDate;
+  var [editing,setEditing]=useState(false);
+  var [reasons,setReasons]=useState(entry.noTradeReasons||[]);
+  var [reasonText,setReasonText]=useState(entry.noTradeReason||"");
+  var [shots,setShots]=useState(entry.noTradeShots||[]);
+  var [uploading,setUploading]=useState(false);
+  var fileRef=useRef(null);
+  var hasContent=(entry.noTradeReasons||[]).length>0||entry.noTradeReason||(entry.noTradeShots||[]).length>0||entry.noTradeLoggedAt;
+  // Auto-no-trade entries with zero content still render so the user can add notes.
+  if(!hasContent&&!entry.autoNoTrade&&!editing)return null;
+  function persist(next){
+    var updated=Object.assign({},entry,next);
+    var dateKey=isToday?todayStr():(selectedDate||entry.date);
+    try{localStorage.setItem("journal:"+dateKey.replace(/\//g,"-"),JSON.stringify(updated));}catch(e){}
+    if(isToday&&props.setTodayJournalEntry)props.setTodayJournalEntry(updated);
+    else if(props.setPastSessions)props.setPastSessions(function(arr){return arr.map(function(x){return x.date===dateKey?updated:x;});});
+    if(props.bumpReloadKey)props.bumpReloadKey();
+  }
+  function save(){persist({noTradeReasons:reasons,noTradeReason:reasonText,noTradeShots:shots,autoNoTrade:false});setEditing(false);}
+  function cancel(){setReasons(entry.noTradeReasons||[]);setReasonText(entry.noTradeReason||"");setShots(entry.noTradeShots||[]);setEditing(false);}
+  if(editing){
+    var fld={width:"100%",padding:"10px 12px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8,color:"#e2e8f0",fontSize:14,fontFamily:"inherit",boxSizing:"border-box"};
+    return (
+      <div style={{marginBottom:12,padding:"12px 14px",background:"#0a0a0f",border:"1px solid #4338ca",borderRadius:8}}>
+        <div style={{fontSize:12,color:"#a5b4fc",letterSpacing:1,textTransform:"uppercase",marginBottom:8,fontWeight:600}}>Edit No-Trade Day Notes</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:10}}>
+          {["No A+ setups","Choppy / no trend","High-impact news","Not focused","Rules kept me out","Already hit goal","Personal / away"].map(function(reason){
+            var picked=reasons.indexOf(reason)>=0;
+            return <button key={reason} onClick={function(){setReasons(function(arr){var idx=arr.indexOf(reason);var n=arr.slice();if(idx>=0)n.splice(idx,1);else n.push(reason);return n;});}} style={{padding:"5px 10px",background:picked?"#1e1b4b":"#0a0a0f",border:"1px solid "+(picked?"#6366f1":"#334155"),borderRadius:14,color:picked?"#a5b4fc":"#94a3b8",fontSize:12,fontWeight:picked?700:500,cursor:"pointer",fontFamily:"inherit"}}>{picked?"✓ ":""}{reason}</button>;
+          })}
+        </div>
+        <textarea value={reasonText} onChange={function(e){setReasonText(e.target.value);}} placeholder="Detail (optional)" style={Object.assign({},fld,{minHeight:60,resize:"vertical",lineHeight:1.5,marginBottom:10})}/>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+          <label style={{fontSize:11,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Screenshots {shots.length>0&&<span style={{color:"#475569",fontWeight:400,marginLeft:4}}>({shots.length})</span>}</label>
+          <button onClick={function(){if(fileRef.current)fileRef.current.click();}} disabled={uploading} style={{padding:"4px 10px",background:uploading?"#1e293b":"#0c2b3d",border:"1px solid "+(uploading?"#334155":"#38bdf8"),borderRadius:6,color:uploading?"#475569":"#38bdf8",fontSize:12,fontWeight:600,cursor:uploading?"not-allowed":"pointer",fontFamily:"inherit"}}>{uploading?"Uploading...":"+ Add Image"}</button>
+        </div>
+        <input ref={fileRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={function(e){var files=Array.from(e.target.files||[]);if(files.length===0)return;setUploading(true);Promise.all(files.map(function(f){return compressImage(f);})).then(function(urls){setShots(function(prev){return prev.concat(urls);});setUploading(false);}).catch(function(){setUploading(false);});e.target.value="";}}/>
+        {shots.length>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(80px,1fr))",gap:6,marginBottom:10}}>{shots.map(function(src,si){return <div key={si} style={{position:"relative",aspectRatio:"1",background:"#0a0a0f",border:"1px solid #334155",borderRadius:6,overflow:"hidden"}}><img src={src} alt={"Screenshot "+(si+1)} onClick={function(){if(props.setNoTradeViewer)props.setNoTradeViewer(src);}} style={{width:"100%",height:"100%",objectFit:"cover",cursor:"pointer",display:"block"}}/><button onClick={function(){setShots(function(p){var n=p.slice();n.splice(si,1);return n;});}} aria-label="Remove" style={{position:"absolute",top:3,right:3,width:18,height:18,padding:0,background:"#000000cc",border:"1px solid #475569",borderRadius:"50%",color:"#fca5a5",fontSize:11,cursor:"pointer",fontFamily:"inherit",lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button></div>;})}</div>}
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={save} style={{flex:1,padding:"9px",background:"#0f1f15",border:"1px solid #166534",borderRadius:6,color:"#86efac",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Save</button>
+          <button onClick={cancel} style={{padding:"9px 14px",background:"transparent",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>Cancel</button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div style={{marginBottom:12,padding:"10px 12px",background:"#0a0a0f",border:"1px solid #4338ca44",borderRadius:8}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:6}}>
+        <span style={{fontSize:10,fontWeight:800,color:"#fcd34d",background:"#1c1408",border:"1px solid #a16207",borderRadius:4,padding:"2px 7px",letterSpacing:0.5,flexShrink:0}}>⊘ NO-TRADE DAY{entry.autoNoTrade?" (auto)":""}</span>
+        <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+          {entry.noTradeLoggedAt&&!entry.autoNoTrade&&<span style={{fontSize:10,color:"#64748b"}}>logged {(function(){try{var d=new Date(entry.noTradeLoggedAt);return d.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});}catch(e){return "";}})()}</span>}
+          <button onClick={function(){setEditing(true);}} style={{padding:"2px 8px",background:"transparent",border:"1px solid #4338ca",borderRadius:4,color:"#a5b4fc",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit",letterSpacing:0.5}}>EDIT</button>
+        </div>
+      </div>
+      {(entry.noTradeReasons||[]).length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:entry.noTradeReason?8:0}}>{(entry.noTradeReasons||[]).map(function(r){return <span key={r} style={{fontSize:11,color:"#a5b4fc",background:"#1e1b4b",border:"1px solid #4338ca",borderRadius:12,padding:"2px 9px",fontWeight:600}}>{r}</span>;})}</div>}
+      {entry.noTradeReason&&<div style={{fontSize:13,color:"#cbd5e1",lineHeight:1.5}}>{entry.noTradeReason}</div>}
+      {!entry.noTradeReason&&(entry.noTradeReasons||[]).length===0&&<div style={{fontSize:12,color:"#64748b",fontStyle:"italic"}}>No notes yet — tap EDIT to add reasons or context.</div>}
+    </div>
+  );
+}
+// CHANGED: PER-SESSION COMMITMENTS. The new authoritative store is `state.commitments`, an
+// object keyed by sessionId. Each value has the same shape as the legacy single commitment.
+// `getCommitmentsMap` returns it and migrates a legacy `state.commitment` if present.
+function getCommitmentsMap(state){
+  if(!state)return {};
+  if(state.commitments&&typeof state.commitments==="object"&&!Array.isArray(state.commitments))return state.commitments;
+  if(state.commitment&&state.commitment.committed)return {_legacy:state.commitment};
+  return {};
+}
+// CHANGED: Build an aggregate single-commitment object from the per-session map, for legacy
+// consumers that still read `state.commitment` directly. maxTrades = sum, setups = joined,
+// setupsReviewAffirmed = AND (false if any false; true only if every committed session is true).
+function aggregateCommitment(map){
+  var entries=Object.keys(map||{}).map(function(k){return map[k];}).filter(function(c){return c&&c.committed;});
+  if(entries.length===0)return null;
+  var sumMax=0,anyMax=false,setupsArr=[],earliestAt=Infinity,affirmedVals=[],reviewedAll=true;
+  entries.forEach(function(c){
+    var n=parseInt(c.maxTrades);if(!isNaN(n)&&n>0){sumMax+=n;anyMax=true;}
+    if(c.setups)setupsArr.push(c.setups);
+    if(typeof c.committedAt==="number"&&c.committedAt<earliestAt)earliestAt=c.committedAt;
+    if(c.setupsReviewAffirmed!=null)affirmedVals.push(c.setupsReviewAffirmed);
+    if(!c.reviewed)reviewedAll=false;
+  });
+  var aff=null;if(affirmedVals.indexOf(false)>=0)aff=false;else if(affirmedVals.length>0&&affirmedVals.every(function(v){return v===true;}))aff=true;
+  return {committed:true,committedAt:isFinite(earliestAt)?earliestAt:Date.now(),maxTrades:anyMax?String(sumMax):"",setups:setupsArr.join(" · "),reviewed:reviewedAll,setupsReviewAffirmed:aff};
+}
 function scoreCommitment(state){
-  var c=state&&state.commitment;
-  if(!c||!c.committed)return null;
+  var map=getCommitmentsMap(state);
+  var sids=Object.keys(map);
+  var committedSids=sids.filter(function(sid){return map[sid]&&map[sid].committed;});
+  if(committedSids.length===0)return null;
   var closed=(state.trades||[]).filter(function(t){return t&&t.status!=="open";});
-  var actualTrades=closed.length;
-  var maxT=parseInt(c.maxTrades);
-  var hasMax=!isNaN(maxT)&&maxT>0;
-  var overTrades=hasMax&&actualTrades>maxT;
-  // Adherence: kept the trade cap (or none set). Setups are qualitative (self-affirmed at review).
-  var kept=[];
-  var broke=[];
-  if(hasMax){(overTrades?broke:kept).push(overTrades?("Took "+actualTrades+" trades vs. committed max of "+maxT):("Stayed within your "+maxT+"-trade cap ("+actualTrades+" taken)"));}
-  if(c.setupsReviewAffirmed===true)kept.push("Traded only your committed setups");
-  if(c.setupsReviewAffirmed===false)broke.push("Deviated from your committed setups");
-  return {committed:true,maxTrades:hasMax?maxT:null,actualTrades:actualTrades,overTrades:overTrades,setups:c.setups||"",kept:kept,broke:broke,reviewed:c.reviewed===true,adhered:broke.length===0};
+  var perSession=[];
+  var allKept=[],allBroke=[];
+  var allReviewed=true;
+  var anySetupsText="";
+  var aggMax=0,aggActual=0,anyOver=false;
+  committedSids.forEach(function(sid){
+    var c=map[sid];
+    var st=sid==="_legacy"?closed:closed.filter(function(t){return t.sessionId===sid;});
+    var sessLabel=null;try{var ss=getSessionByID(sid);if(ss)sessLabel=ss.label||ss.id;}catch(e){}
+    if(!sessLabel)sessLabel=sid==="_legacy"?"Day":sid;
+    var maxT=parseInt(c.maxTrades);
+    var hasMax=!isNaN(maxT)&&maxT>0;
+    var over=hasMax&&st.length>maxT;
+    if(hasMax){aggMax+=maxT;if(over)anyOver=true;}
+    aggActual+=st.length;
+    if(over){allBroke.push(sessLabel+": took "+st.length+" vs. committed "+maxT);}
+    else if(hasMax){allKept.push(sessLabel+": stayed within "+maxT+" ("+st.length+" taken)");}
+    if(c.setupsReviewAffirmed===true)allKept.push(sessLabel+": traded only your committed setups");
+    if(c.setupsReviewAffirmed===false)allBroke.push(sessLabel+": deviated from committed setups");
+    if(!c.reviewed)allReviewed=false;
+    if(c.setups)anySetupsText+=(anySetupsText?" · ":"")+sessLabel+": "+c.setups;
+    perSession.push({sessionId:sid,label:sessLabel,maxTrades:hasMax?maxT:null,actualTrades:st.length,overTrades:over,setups:c.setups||"",setupsReviewAffirmed:c.setupsReviewAffirmed,reviewed:c.reviewed===true});
+  });
+  return {committed:true,maxTrades:aggMax>0?aggMax:null,actualTrades:aggActual,overTrades:anyOver,setups:anySetupsText,kept:allKept,broke:allBroke,reviewed:allReviewed,adhered:allBroke.length===0,perSession:perSession};
 }
 function getTotalWithdrawn(){
   return loadTransfers().filter(function(t){return String(t.type||"").toLowerCase()==="withdrawal";}).reduce(function(s,t){return s+Math.abs(parseFloat(t.amount)||0);},0);
@@ -2162,8 +2269,20 @@ function ChecklistPanel(props){
             if(item.key==="positionSized"&&settings&&settings.positionMin&&settings.positionMax){
               var sf=1;
               try{
+                // CHANGED: Match the CURRENT session's sizing if we're inside one; otherwise the
+                // next upcoming session today; fallback to the first enabled session of the day.
                 var sess=getSessions(settings).filter(function(s){return s.enabled!==false;});
-                if(sess.length>0&&sess[0].sizeFraction!=null){var v=parseFloat(sess[0].sizeFraction);if(!isNaN(v)&&v>0)sf=v;}
+                if(sess.length>0){
+                  var nowMins=getCurrentMinutesLocal();
+                  var pick=null;
+                  for(var si=0;si<sess.length;si++){var s=sess[si];if(nowMins>=s.startMin&&nowMins<s.endMin){pick=s;break;}}
+                  if(!pick){
+                    var upcoming=sess.filter(function(s){return s.startMin>nowMins;});
+                    upcoming.sort(function(a,b){return a.startMin-b.startMin;});
+                    pick=upcoming[0]||sess[0];
+                  }
+                  if(pick&&pick.sizeFraction!=null){var v=parseFloat(pick.sizeFraction);if(!isNaN(v)&&v>0)sf=v;}
+                }
               }catch(e){}
               if(isMonthHalfsizeActive())sf=sf*0.5;
               var pMin=Math.round(parseFloat(settings.positionMin)*sf);
@@ -2217,9 +2336,17 @@ function SessionStrategy(props){
       ):(
         <div style={{fontSize:14,color:"#94a3b8",lineHeight:1.6,fontStyle:"italic"}}>{isClosed?"Review your trades in the Journal.":rule?"No session notes — add them in Settings → Session Strategy.":"No active session — times don't match any configured session."}</div>
       )}
-      {/* CHANGED: Today's economic events (filtered by user's saved currency / impact filters) shown below the session notes. */}
+      {/* CHANGED: Today's economic events filtered by the LIVE home-tab filter state (passed via
+          props) so this panel always matches the Economic Events panel on Home, not a stale
+          localStorage snapshot. */}
       {(function(){
-        var ev=getTodaysFilteredEvents();
+        var allEv=getTodaysFilteredEvents();
+        // Re-apply live filters from props on top, in case localStorage is stale.
+        var cf=Array.isArray(props.currencyFilter)?props.currencyFilter:null;
+        var imf=Array.isArray(props.impactFilter)?props.impactFilter:null;
+        var ev=allEv;
+        if(cf&&cf.length>0)ev=ev.filter(function(e){return cf.indexOf(eventCurrency(e))>=0;});
+        if(imf&&imf.length>0)ev=ev.filter(function(e){return imf.indexOf(normalizeImpact(e.impact))>=0;});
         if(!ev||ev.length===0)return null;
         var now=getPT();
         function fmtTime(d){var h=d.getHours();var m=d.getMinutes();var ap=h>=12?"PM":"AM";var hh=h%12||12;return hh+":"+String(m).padStart(2,"0")+" "+ap;}
@@ -3613,7 +3740,7 @@ function TodayStrip(props){
   }catch(e){}
   var disc=storedTodayScore!=null
     ? storedTodayScore
-    : calcDiscipline(todayTrades,riskMax,{commitment:(props.state&&props.state.commitment)||null});
+    : calcDiscipline(todayTrades,riskMax,{commitments:getCommitmentsMap(props.state)});
   var cap=(props.state&&props.state.commitment&&props.state.commitment.maxTrades!=null&&props.state.commitment.maxTrades!=="")?parseInt(props.state.commitment.maxTrades):null;
   var pnlColor=pnl>0?"#22c55e":pnl<0?"#ef4444":"#94a3b8";
   // CHANGED: Intraday drawdown — sort today's closed trades chronologically, track peak cumulative P&L,
@@ -3692,7 +3819,7 @@ function GoalsSnapshot(props){
   var allT=rows.reduce(function(a,e){return a.concat(e.trades||[]);},[]);
   var allW=allT.filter(function(t){return parseFloat(t.pnl)>0;});
   var oWR=allT.length>0?allW.length/allT.length*100:0;
-  var aDisc=rows.length>0?rows.reduce(function(s,e){return s+calcDiscipline(e.trades||[],e.riskMax,{commitment:e.commitment||null});},0)/rows.length:0;
+  var aDisc=rows.length>0?rows.reduce(function(s,e){return s+calcDiscipline(e.trades||[],e.riskMax,e.commitments?{commitments:e.commitments}:{commitment:e.commitment||null});},0)/rows.length:0;
   var autoDaily=computeDailyTarget(settings);
   var weeklyMultiplier=parseFloat(goals.weeklyMultiplier)||4;
   // CHANGED: Daily and weekly targets honor half-size mode — halved when committed for the
@@ -3975,63 +4102,75 @@ function DashboardTab(props){
   );
 }
 
-// CHANGED: PRE-MARKET COMMITMENT PANEL — set a plan before trading; locks once committed so it
-// can't be quietly edited mid-day. Shows in the pre-market/active phase before the day's review.
+// CHANGED: PER-SESSION COMMITMENT PANEL — stacks one card per enabled session for today.
+// Each session is committed independently; locks once committed so it can't be quietly edited
+// mid-day. Writes to state.commitments[sessionId]. Maintains state.commitment as the aggregated
+// summary for any legacy reads.
 function CommitmentPanel(props){
-  var state=props.state,setState=props.setState,phase=props.phase,settings=props.settings;
-  var c=state.commitment||{};
-  var committed=!!c.committed;
-  var [open,setOpen]=useState(!committed);
-  // CHANGED: Default Max Trades to the SUM of enabled sessions' maxTrades for today's weekday,
-  // pulled from Session Strategy. The user can override; helper text shows the breakdown.
-  var sessionCapBreakdown=(function(){
+  var state=props.state,setState=props.setState,settings=props.settings;
+  // Build the list of sessions enabled today (matches CommitmentPanel's old "today's sessions" logic).
+  var todaySessions=(function(){
     try{
       var dow=getNow().getDay();
-      var sess=getSessions(settings||{}).filter(function(s){if(s.enabled===false)return false;var days=s.days||[1,2,3,4,5];return days.indexOf(dow)>=0;});
-      var parts=sess.map(function(s){return {label:s.label||s.id,cap:(s.maxTrades!=null?parseInt(s.maxTrades):99)};}).filter(function(x){return !isNaN(x.cap);});
-      var total=parts.reduce(function(s,x){return s+x.cap;},0);
-      return {parts:parts,total:total};
-    }catch(e){return {parts:[],total:0};}
+      return getSessions(settings||{}).filter(function(s){if(s.enabled===false)return false;var days=s.days||[1,2,3,4,5];return days.indexOf(dow)>=0;});
+    }catch(e){return [];}
   })();
-  // CHANGED: max-trades is now derived from session strategy, not user-entered.
-  var derivedMax=sessionCapBreakdown.total>0?String(sessionCapBreakdown.total):"";
+  if(todaySessions.length===0)return null;
+  return (
+    <div style={{marginBottom:props.hideMargin?0:14,display:"flex",flexDirection:"column",gap:10}}>
+      {todaySessions.map(function(s){return <SessionCommitmentCard key={s.id} session={s} state={state} setState={setState} settings={settings}/>;})}
+    </div>
+  );
+}
+// CHANGED: Single per-session commitment card. maxTrades is derived from this session's
+// strategy cap (no longer a daily sum). Setups field is per-session.
+function SessionCommitmentCard(props){
+  var state=props.state,setState=props.setState,session=props.session;
+  var sid=session.id;
+  var map=getCommitmentsMap(state);
+  var c=map[sid]||{};
+  var committed=!!c.committed;
+  var [open,setOpen]=useState(!committed);
+  var derivedCap=(function(){var n=parseInt(session.maxTrades);return !isNaN(n)&&n>0?String(n):"";})();
   var [setups,setSetups]=useState(c.setups||"");
+  function persist(nextMap){
+    var agg=aggregateCommitment(nextMap);
+    setState(function(s){return Object.assign({},s,{commitments:nextMap,commitment:agg||s.commitment||null});});
+  }
   function commit(){
-    setState(function(s){return Object.assign({},s,{commitment:{committed:true,committedAt:Date.now(),maxTrades:derivedMax,setups:setups,reviewed:false,setupsReviewAffirmed:null}});});
+    var newMap=Object.assign({},map);
+    newMap[sid]={committed:true,committedAt:Date.now(),maxTrades:derivedCap,setups:setups,reviewed:false,setupsReviewAffirmed:null};
+    persist(newMap);
     setOpen(false);
   }
   var lbl={fontSize:12,color:"#94a3b8",fontWeight:600,marginBottom:4,display:"block"};
   var fld={width:"100%",padding:"10px 12px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8,color:"#e2e8f0",fontSize:14,fontFamily:"inherit",boxSizing:"border-box"};
+  var sessLabel=session.label||session.id;
   if(committed&&!open){
     return (
-      <div style={{marginBottom:props.hideMargin?0:14,padding:"12px 14px",background:"#0f1a14",border:"1px solid #166534",borderRadius:10,width:"100%",boxSizing:"border-box",display:"flex",flexDirection:"column"}}>
+      <div style={{padding:"12px 14px",background:"#0f1a14",border:"1px solid #166534",borderRadius:10,width:"100%",boxSizing:"border-box",display:"flex",flexDirection:"column"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <span style={{fontSize:13,fontWeight:700,color:"#86efac"}}>✓ Today's commitment</span>
-          <span style={{fontSize:11,color:"#94a3b8"}}>locked in</span>
+          <span style={{fontSize:13,fontWeight:700,color:"#86efac"}}>✓ {sessLabel} commitment</span>
+          <span style={{fontSize:11,color:"#94a3b8",cursor:"pointer"}} onClick={function(){setOpen(true);}}>edit</span>
         </div>
         <div style={{fontSize:13,color:"#cbd5e1",marginTop:6,lineHeight:1.5}}>
           {c.maxTrades?("Max "+c.maxTrades+" trade"+(parseInt(c.maxTrades)===1?"":"s")):"No trade cap set"}{c.setups?(" · "+c.setups):""}
         </div>
-        <div style={{fontSize:11,color:"#64748b",marginTop:6}}>You'll be scored against this at day's end.</div>
       </div>
     );
   }
   return (
-    <div style={{marginBottom:14,padding:"14px",background:"#111118",border:"1px solid #4338ca",borderRadius:10}}>
-      <div style={{fontSize:14,fontWeight:700,color:"#a5b4fc",marginBottom:4}}>Commit to today's plan</div>
-      <div style={{fontSize:12,color:"#64748b",marginBottom:12,lineHeight:1.5}}>State it before you trade. At day's end you're scored against your own plan — not a generic rule.</div>
+    <div style={{padding:"14px",background:"#111118",border:"1px solid #4338ca",borderRadius:10}}>
+      <div style={{fontSize:14,fontWeight:700,color:"#a5b4fc",marginBottom:4}}>{sessLabel} — commit to plan</div>
+      <div style={{fontSize:12,color:"#64748b",marginBottom:12,lineHeight:1.5}}>State it before you trade this session. At day's end you're scored against your own plan.</div>
       <div style={{marginBottom:10}}>
-        <label style={lbl}>Max trades today</label>
-        <div style={{padding:"10px 12px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8,fontSize:14,color:"#e2e8f0",fontFamily:"inherit"}}>{derivedMax?(derivedMax+" trade"+(parseInt(derivedMax)===1?"":"s")):"No cap from session strategy"}</div>
-        {sessionCapBreakdown.parts.length>0&&(
-          <div style={{fontSize:11,color:"#64748b",marginTop:5,lineHeight:1.5}}>
-            From session strategy: {sessionCapBreakdown.parts.map(function(p,i){return p.label+" "+p.cap+(i<sessionCapBreakdown.parts.length-1?" + ":"");}).join("")}. Edit in Settings → Session Strategy.
-          </div>
-        )}
+        <label style={lbl}>Max trades this session</label>
+        <div style={{padding:"10px 12px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8,fontSize:14,color:"#e2e8f0",fontFamily:"inherit"}}>{derivedCap?(derivedCap+" trade"+(parseInt(derivedCap)===1?"":"s")):"No cap from session strategy"}</div>
+        <div style={{fontSize:11,color:"#64748b",marginTop:5,lineHeight:1.5}}>From Session Strategy. Edit in Settings → Session Strategy.</div>
       </div>
       <div style={{marginBottom:12}}>
         <label style={lbl}>Setups you'll take (and what you'll skip)</label>
-        <textarea value={setups} onChange={function(e){setSetups(e.target.value);}} placeholder="e.g. Only A+ breakouts at PDH/PDL. Skip chop in the mid-day lull." style={Object.assign({},fld,{minHeight:64,resize:"vertical",lineHeight:1.5})}/>
+        <textarea value={setups} onChange={function(e){setSetups(e.target.value);}} placeholder="e.g. Only A+ breakouts at PDH/PDL. Skip chop." style={Object.assign({},fld,{minHeight:64,resize:"vertical",lineHeight:1.5})}/>
       </div>
       <button onClick={commit} style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#4f46e5,#6366f1)",color:"#fff",border:"none",borderRadius:8,fontSize:15,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{committed?"Update commitment":"Commit to plan"}</button>
       {committed&&<button onClick={function(){setOpen(false);}} style={{width:"100%",padding:"8px",marginTop:6,background:"none",color:"#64748b",border:"none",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>Cancel</button>}
@@ -4155,7 +4294,7 @@ function TradesTab(props){
     // CHANGED: A past day's riskMax is a historical fact — preserve the entry's own riskMax (only
     // fall back to current settings if absent), and score discipline against that same value.
     var entryRiskMax=(existing.riskMax!=null&&parseFloat(existing.riskMax)>0)?parseFloat(existing.riskMax):(parseFloat(settings.riskMax)||0);
-    var newEntry=Object.assign({},existing,{trades:ut,wins:ut.filter(function(x){return parseFloat(x.pnl)>0;}).length,losses:ut.filter(function(x){return parseFloat(x.pnl)<0;}).length,pnl:ut.reduce(function(s,x){return s+(parseFloat(x.pnl)||0);},0),disciplineScore:calcDiscipline(ut,entryRiskMax,{commitment:existing.commitment||null}),riskMax:entryRiskMax,noTradeDay:ut.length>0?false:!!existing.noTradeDay});
+    var newEntry=Object.assign({},existing,{trades:ut,wins:ut.filter(function(x){return parseFloat(x.pnl)>0;}).length,losses:ut.filter(function(x){return parseFloat(x.pnl)<0;}).length,pnl:ut.reduce(function(s,x){return s+(parseFloat(x.pnl)||0);},0),disciplineScore:calcDiscipline(ut,entryRiskMax,existing.commitments?{commitments:existing.commitments}:{commitment:existing.commitment||null}),riskMax:entryRiskMax,noTradeDay:ut.length>0?false:!!existing.noTradeDay});
     try{localStorage.setItem("journal:"+selectedDate.replace(/\//g,"-"),JSON.stringify(newEntry));}catch(e){}
     setPastSessions(function(arr){var found=arr.some(function(x){return x.date===selectedDate;});return found?arr.map(function(x){return x.date===selectedDate?newEntry:x;}):arr.concat([newEntry]);});
     setPastNewTrade(null);
@@ -4173,7 +4312,7 @@ function TradesTab(props){
     var ut=(sourceEntry.trades||[]).map(function(x){return x.id===enriched.id?enriched:x;});
     // CHANGED: Today's riskMax follows current settings (live day); a past day preserves its own.
     var entryRiskMax=isToday?(parseFloat(settings.riskMax)||0):((sourceEntry.riskMax!=null&&parseFloat(sourceEntry.riskMax)>0)?parseFloat(sourceEntry.riskMax):(parseFloat(settings.riskMax)||0));
-    var newEntry=Object.assign({},sourceEntry,{trades:ut,wins:ut.filter(function(x){return parseFloat(x.pnl)>0;}).length,losses:ut.filter(function(x){return parseFloat(x.pnl)<0;}).length,pnl:ut.reduce(function(s,x){return s+(parseFloat(x.pnl)||0);},0),disciplineScore:calcDiscipline(ut,entryRiskMax,{commitment:(sourceEntry&&sourceEntry.commitment)||state.commitment||null}),riskMax:entryRiskMax,noTradeDay:ut.length>0?false:!!sourceEntry.noTradeDay});
+    var newEntry=Object.assign({},sourceEntry,{trades:ut,wins:ut.filter(function(x){return parseFloat(x.pnl)>0;}).length,losses:ut.filter(function(x){return parseFloat(x.pnl)<0;}).length,pnl:ut.reduce(function(s,x){return s+(parseFloat(x.pnl)||0);},0),disciplineScore:calcDiscipline(ut,entryRiskMax,(sourceEntry&&sourceEntry.commitments)?{commitments:sourceEntry.commitments}:(Object.keys(getCommitmentsMap(state)).length?{commitments:getCommitmentsMap(state)}:{commitment:(sourceEntry&&sourceEntry.commitment)||state.commitment||null})),riskMax:entryRiskMax,noTradeDay:ut.length>0?false:!!sourceEntry.noTradeDay});
     var dateKey=isToday?todayStr():selectedDate;
     var written=safeWriteJournalEntry("journal:"+dateKey.replace(/\//g,"-"),newEntry);
     if(written)newEntry=written;
@@ -4195,7 +4334,7 @@ function TradesTab(props){
     var ut=(sourceEntry.trades||[]).filter(function(x){return x.id!==tradeId;});
     // CHANGED: Today's riskMax follows current settings (live day); a past day preserves its own.
     var entryRiskMax=isToday?(parseFloat(settings.riskMax)||0):((sourceEntry.riskMax!=null&&parseFloat(sourceEntry.riskMax)>0)?parseFloat(sourceEntry.riskMax):(parseFloat(settings.riskMax)||0));
-    var newEntry=Object.assign({},sourceEntry,{trades:ut,wins:ut.filter(function(x){return parseFloat(x.pnl)>0;}).length,losses:ut.filter(function(x){return parseFloat(x.pnl)<0;}).length,pnl:ut.reduce(function(s,x){return s+(parseFloat(x.pnl)||0);},0),disciplineScore:calcDiscipline(ut,entryRiskMax,{commitment:(sourceEntry&&sourceEntry.commitment)||state.commitment||null}),riskMax:entryRiskMax,noTradeDay:ut.length>0?false:!!sourceEntry.noTradeDay});
+    var newEntry=Object.assign({},sourceEntry,{trades:ut,wins:ut.filter(function(x){return parseFloat(x.pnl)>0;}).length,losses:ut.filter(function(x){return parseFloat(x.pnl)<0;}).length,pnl:ut.reduce(function(s,x){return s+(parseFloat(x.pnl)||0);},0),disciplineScore:calcDiscipline(ut,entryRiskMax,(sourceEntry&&sourceEntry.commitments)?{commitments:sourceEntry.commitments}:(Object.keys(getCommitmentsMap(state)).length?{commitments:getCommitmentsMap(state)}:{commitment:(sourceEntry&&sourceEntry.commitment)||state.commitment||null})),riskMax:entryRiskMax,noTradeDay:ut.length>0?false:!!sourceEntry.noTradeDay});
     var dateKey=isToday?todayStr():selectedDate;
     var written=safeWriteJournalEntry("journal:"+dateKey.replace(/\//g,"-"),newEntry);
     if(written)newEntry=written;
@@ -4246,6 +4385,14 @@ function TradesTab(props){
       return 0;
     };
   }
+  // CHANGED: Default chronological order (earliest start first) — uses each trade's openedAt
+  // (or first entry time, or t.time fallback). The user's explicit Sort overrides this baseline.
+  function _tradeStart(t){
+    if(t&&typeof t.openedAt==="number")return t.openedAt;
+    try{var e=(t.entries||[])[0];if(e&&e.time){var d=new Date(); var m=String(e.time).match(/^(\d+):(\d+)\s*(AM|PM)?$/i);if(m){var h=parseInt(m[1],10);var mm=parseInt(m[2],10);var ap=(m[3]||"").toUpperCase();if(ap==="PM"&&h<12)h+=12;if(ap==="AM"&&h===12)h=0;d.setHours(h,mm,0,0);return d.getTime();}}}catch(e){}
+    return 0;
+  }
+  displayTrades=displayTrades.slice().sort(function(a,b){return _tradeStart(a)-_tradeStart(b);});
   displayTrades=displayTrades.slice().sort(makeChainCmp(sortChain,false));
   // CHANGED: Build an "all journal" trade list (every date + today) with the SAME filters and sort
   // applied, so the all-screenshots view honors the Sort/Filter controls. Each trade carries its date.
@@ -4283,7 +4430,7 @@ function TradesTab(props){
           (if any). When viewing a past day that had a lock event saved on its journal row, shows
           the historical lock summary. Otherwise hidden. */}
       {(function(){
-        var liveLock=checkDisciplineLock(state.trades,state.commitment);
+        var liveLock=checkDisciplineLock(state.trades,state.commitment,getCommitmentsMap(state));
         var isViewingToday=selectedDate===todayStr();
         // Determine what to show based on selected date.
         var mode=null,lock=null,entryNote="";
@@ -4343,7 +4490,7 @@ function TradesTab(props){
         // same (potentially halved) risk unit. Without this, a half-size day showed half the
         // R the gate was measuring.
         var bEffSF=rule.sizeFraction!=null?parseFloat(rule.sizeFraction)||1:1;
-        var bLock=checkDisciplineLock(state.trades,state.commitment);
+        var bLock=checkDisciplineLock(state.trades,state.commitment,getCommitmentsMap(state));
         if(bLock.locked)bEffSF=Math.min(bEffSF,0.5);
         if(isMonthHalfsizeActive())bEffSF=Math.min(bEffSF,0.5);
         var riskMaxNum=(parseFloat(settings.riskMax)||0)*bEffSF;
@@ -4391,7 +4538,7 @@ function TradesTab(props){
       })()}
       {/* CHANGED: Conditions banner removed entirely (feature deprecated). */}
       {/* CHANGED: Position/Risk strip removed from journal — shown in the New Trade form instead. */}
-      {phase!=="closed"&&<SessionStrategy phase={phase} preCheckComplete={preCheckComplete} settings={settings}/>}
+      {phase!=="closed"&&<SessionStrategy phase={phase} preCheckComplete={preCheckComplete} settings={settings} currencyFilter={props.eventCurrencyFilter} impactFilter={props.eventImpactFilter}/>}
       {phase!=="closed"&&isToday&&props.liveTrades&&props.liveTrades.length>0&&(
         <div style={CS({marginBottom:16,border:"1px solid #ea580c",background:"#1c1108"})}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
@@ -4628,6 +4775,7 @@ function TradesTab(props){
               noTradeLoggedAt:Date.now(),
               ruleViolations:[],
               commitment:state.commitment||null,
+              commitments:getCommitmentsMap(state),
               wins:0,losses:0,
               riskMax:parseFloat(settings.riskMax)||0,
               // CHANGED: A logged no-trade day represents a deliberately disciplined choice —
@@ -4681,20 +4829,13 @@ function TradesTab(props){
         // displays when commitment context differs.
         var disc=(entry.disciplineScore!=null
           ? parseFloat(entry.disciplineScore)
-          : calcDiscipline(sTrades,entry.riskMax,{commitment:entry.commitment||(isToday?(props.state&&props.state.commitment):null)||null}));
+          : calcDiscipline(sTrades,entry.riskMax,entry.commitments?{commitments:entry.commitments}:(isToday?{commitments:getCommitmentsMap(props.state)}:{commitment:entry.commitment||null})));
         return (
           <div style={CS({marginTop:18,border:"1px solid "+(isToday?"#16653444":"#1e293b")})}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
               <div style={{fontSize:13,color:isToday?"#86efac":"#a5b4fc",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{isToday?"Saved to Journal ✓":"Day Summary"}</div>
             </div>
-            {entry.noTradeDay&&((entry.noTradeReasons||[]).length>0||entry.noTradeReason||entry.noTradeLoggedAt)&&<div style={{marginBottom:12,padding:"10px 12px",background:"#0a0a0f",border:"1px solid #4338ca44",borderRadius:8}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:6}}>
-                <span style={{fontSize:10,fontWeight:800,color:"#fcd34d",background:"#1c1408",border:"1px solid #a16207",borderRadius:4,padding:"2px 7px",letterSpacing:0.5,flexShrink:0}}>⊘ NO-TRADE DAY</span>
-                {entry.noTradeLoggedAt&&<span style={{fontSize:10,color:"#64748b",flexShrink:0}}>logged {(function(){try{var d=new Date(entry.noTradeLoggedAt);return d.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});}catch(e){return "";}})()}</span>}
-              </div>
-              {(entry.noTradeReasons||[]).length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:entry.noTradeReason?8:0}}>{(entry.noTradeReasons||[]).map(function(r){return <span key={r} style={{fontSize:11,color:"#a5b4fc",background:"#1e1b4b",border:"1px solid #4338ca",borderRadius:12,padding:"2px 9px",fontWeight:600}}>{r}</span>;})}</div>}
-              {entry.noTradeReason&&<div style={{fontSize:13,color:"#cbd5e1",lineHeight:1.5}}>{entry.noTradeReason}</div>}
-            </div>}
+            {entry.noTradeDay&&<NoTradeDayDetails entry={entry} isToday={isToday} selectedDate={selectedDate} setTodayJournalEntry={setTodayJournalEntry} setPastSessions={setPastSessions} bumpReloadKey={props.bumpReloadKey} setNoTradeViewer={setNoTradeViewer}/>}
             {/* CHANGED: Day was initially saved as no-trade, then trades were taken. Preserve the original sit-out reasons as historical context. */}
             {!entry.noTradeDay&&((entry.initialNoTradeReasons||[]).length>0||entry.initialNoTradeReason)&&<div style={{marginBottom:12,padding:"10px 12px",background:"#0a0a0f",border:"1px dashed #a16207",borderRadius:8}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:6}}>
@@ -4735,15 +4876,22 @@ function TradesTab(props){
             {isToday&&(function(){
               var sc=scoreCommitment(props.state);
               if(!sc)return null;
-              var aff=props.state.commitment.setupsReviewAffirmed;
+              var aff=(function(){var m=getCommitmentsMap(props.state);var vals=Object.keys(m).map(function(k){return m[k]&&m[k].setupsReviewAffirmed;}).filter(function(v){return v!=null;});if(vals.indexOf(false)>=0)return false;if(vals.length>0&&vals.every(function(v){return v===true;}))return true;return null;})();
               function setAff(val){
-                props.setState(function(s){var com=Object.assign({},s.commitment,{setupsReviewAffirmed:val,reviewed:true});return Object.assign({},s,{commitment:com});});
+                props.setState(function(s){
+                  var m=getCommitmentsMap(s);var nm={};
+                  Object.keys(m).forEach(function(k){nm[k]=Object.assign({},m[k],{setupsReviewAffirmed:val,reviewed:true});});
+                  var agg=aggregateCommitment(nm);
+                  return Object.assign({},s,{commitments:nm,commitment:agg||s.commitment});
+                });
                 // CHANGED: Persist the updated score so Performance/lock views stay consistent with the review.
                 if(isToday&&todayJournalEntry){
                   try{
-                    var newCom=Object.assign({},props.state.commitment,{setupsReviewAffirmed:val,reviewed:true});
+                    var m2=getCommitmentsMap(props.state);var nm2={};
+                    Object.keys(m2).forEach(function(k){nm2[k]=Object.assign({},m2[k],{setupsReviewAffirmed:val,reviewed:true});});
+                    var newAgg=aggregateCommitment(nm2);
                     var et=todayJournalEntry.trades||[];
-                    var updated=Object.assign({},todayJournalEntry,{commitment:newCom,disciplineScore:calcDiscipline(et,todayJournalEntry.riskMax,{commitment:newCom})});
+                    var updated=Object.assign({},todayJournalEntry,{commitments:nm2,commitment:newAgg||todayJournalEntry.commitment,disciplineScore:calcDiscipline(et,todayJournalEntry.riskMax,{commitments:nm2})});
                     localStorage.setItem("journal:"+todayStr().replace(/\//g,"-"),JSON.stringify(updated));
                     setTodayJournalEntry(updated);
                     if(props.bumpReloadKey)props.bumpReloadKey();
@@ -4868,7 +5016,7 @@ function JournalTab(props){
       wins:ut.filter(function(x){return parseFloat(x.pnl)>0;}).length,
       losses:ut.filter(function(x){return parseFloat(x.pnl)<0;}).length,
       pnl:ut.reduce(function(s,x){return s+(parseFloat(x.pnl)||0);},0),
-      disciplineScore:calcDiscipline(ut,entryRiskMax,{commitment:selectedEntry.commitment||null}),
+      disciplineScore:calcDiscipline(ut,entryRiskMax,selectedEntry.commitments?{commitments:selectedEntry.commitments}:{commitment:selectedEntry.commitment||null}),
       riskMax:entryRiskMax
     });
     try{localStorage.setItem("journal:"+selectedEntry.date.replace(/\//g,"-"),JSON.stringify(newEntry));}catch(e){}
@@ -4900,7 +5048,7 @@ function JournalTab(props){
     var winRate=trades.length>0?Math.round((wins/trades.length)*100):0;
     var avgWin=wins>0?(trades.filter(function(t){return parseFloat(t.pnl)>0;}).reduce(function(s,t){return s+parseFloat(t.pnl);},0)/wins):0;
     var avgLoss=losses>0?Math.abs(trades.filter(function(t){return parseFloat(t.pnl)<0;}).reduce(function(s,t){return s+parseFloat(t.pnl);},0)/losses):0;
-    var liveDiscipline=editing?calcDiscipline(trades,(selectedEntry.riskMax!=null&&parseFloat(selectedEntry.riskMax)>0)?parseFloat(selectedEntry.riskMax):(parseFloat(settings.riskMax)||0),{commitment:selectedEntry.commitment||null}):(selectedEntry.disciplineScore||0);
+    var liveDiscipline=editing?calcDiscipline(trades,(selectedEntry.riskMax!=null&&parseFloat(selectedEntry.riskMax)>0)?parseFloat(selectedEntry.riskMax):(parseFloat(settings.riskMax)||0),selectedEntry.commitments?{commitments:selectedEntry.commitments}:{commitment:selectedEntry.commitment||null}):(selectedEntry.disciplineScore||0);
     // CHANGED: Day % = day P&L ÷ account balance at start of day (consistent across app).
     var sumPct=(function(){var sb=getAccountBalanceAtDate(selectedEntry.date);return sb>0?(pnlVal/sb*100):0;})();
     var winPcts=trades.filter(function(t){return parseFloat(t.pnl)>0;}).map(function(t){return parseFloat(t.pctPnl);}).filter(function(v){return !isNaN(v);});
@@ -5383,12 +5531,12 @@ function GoalsTab(props){
   var allT=rows.reduce(function(a,e){return a.concat(e.trades||[]);},[]);
   var allW=allT.filter(function(t){return parseFloat(t.pnl)>0;});
   var oWR=allT.length>0?allW.length/allT.length*100:0;
-  var aDisc=rows.length>0?rows.reduce(function(s,e){return s+calcDiscipline(e.trades||[],e.riskMax,{commitment:e.commitment||null});},0)/rows.length:0;
+  var aDisc=rows.length>0?rows.reduce(function(s,e){return s+calcDiscipline(e.trades||[],e.riskMax,e.commitments?{commitments:e.commitments}:{commitment:e.commitment||null});},0)/rows.length:0;
   // CHANGED: This-week discipline avg, computed identically to the weekly challenge (Sunday-based,
   // days with trades only) so the two figures line up.
   var discWeekStart=getWeekStart();
   var discWeekDays=rows.filter(function(e){return new Date(e.date)>=discWeekStart&&(e.trades||[]).length>0;});
-  var aDiscWeek=discWeekDays.length>0?discWeekDays.reduce(function(s,e){return s+calcDiscipline(e.trades||[],e.riskMax,{commitment:e.commitment||null});},0)/discWeekDays.length:0;
+  var aDiscWeek=discWeekDays.length>0?discWeekDays.reduce(function(s,e){return s+calcDiscipline(e.trades||[],e.riskMax,e.commitments?{commitments:e.commitments}:{commitment:e.commitment||null});},0)/discWeekDays.length:0;
   // CHANGED: This-week win rate (same Sunday-based week start), so Goals can show weekly vs all-time.
   var weekTrades=rows.filter(function(e){return new Date(e.date)>=discWeekStart;}).reduce(function(a,e){return a.concat(e.trades||[]);},[]);
   var weekWins=weekTrades.filter(function(t){return parseFloat(t.pnl)>0;}).length;
@@ -6446,7 +6594,7 @@ function DisciplineScatter(props){
       sorted.forEach(function(t,i){
         var slice=sorted.slice(0,i+1);
         // Use process-only score so each trade's "discipline so far today" is reflected.
-        var score=calcDiscipline(slice,parseFloat(r.riskMax)||0,{processOnly:true,commitment:r.commitment||null});
+        var score=calcDiscipline(slice,parseFloat(r.riskMax)||0,r.commitments?{processOnly:true,commitments:r.commitments}:{processOnly:true,commitment:r.commitment||null});
         var pnl=parseFloat(t.pnl)||0;
         // CHANGED: R must use the trade's effective risk cap (riskMax × sizeFraction), matching
         // the canonical tradeR() used everywhere else. Without this, half-size trades plotted at
@@ -6801,7 +6949,7 @@ function PerformanceTab(props){
       var liveWins=liveTrades.filter(function(t){return parseFloat(t.pnl)>0;}).length;
       var liveLosses=liveTrades.filter(function(t){return parseFloat(t.pnl)<0;}).length;
       var liveRiskMax=parseFloat((props.settings&&props.settings.riskMax))||0;
-      allRows.push({date:todayDateStr,pnl:liveTotalPnL,trades:liveTrades,wins:liveWins,losses:liveLosses,riskMax:liveRiskMax,disciplineScore:calcDiscipline(liveTrades,liveRiskMax,{commitment:(props.state&&props.state.commitment)||null})});
+      allRows.push({date:todayDateStr,pnl:liveTotalPnL,trades:liveTrades,wins:liveWins,losses:liveLosses,riskMax:liveRiskMax,disciplineScore:calcDiscipline(liveTrades,liveRiskMax,{commitments:getCommitmentsMap(props.state)})});
     }
   }
   // CHANGED: Retroactively assign correct sessionId based on each trade's actual start time.
@@ -6812,7 +6960,9 @@ function PerformanceTab(props){
     var fixed=r.trades.map(function(t){
       if(!t)return t;
       var derived=getSessionForTrade(t);
-      if(derived&&derived!==t.sessionId){changed=true;return Object.assign({},t,{sessionId:derived});}
+      // CHANGED: When derived is null (trade started off-hours), explicitly clear any stale
+      // sessionId that was stamped at creation time so the heatmap shows it as out-of-session.
+      if(derived!==t.sessionId){changed=true;return Object.assign({},t,{sessionId:derived||null});}
       return t;
     });
     return changed?Object.assign({},r,{trades:fixed}):r;
@@ -8684,7 +8834,8 @@ function App(props){
         // No closed trades AND no note → don't create an empty journal entry.
         if(closedT.length===0&&!note)return;
         var riskMaxN=parseFloat(settings.riskMax)||0;
-        var discScore=0;try{discScore=calcDiscipline(closedT,riskMaxN,{commitment:state.commitment||null});}catch(e){}
+        var _commMap=getCommitmentsMap(state);
+        var discScore=0;try{discScore=calcDiscipline(closedT,riskMaxN,{commitments:_commMap});}catch(e){}
         var entry={
           date:todayStr(),
           pnl:closedT.reduce(function(s,t){return s+(parseFloat(t.pnl)||0);},0),
@@ -8692,6 +8843,7 @@ function App(props){
           note:note,
           ruleViolations:state.ruleViolations||[],
           commitment:state.commitment||null,
+          commitments:_commMap,
           wins:closedT.filter(function(t){return parseFloat(t.pnl)>0;}).length,
           losses:closedT.filter(function(t){return parseFloat(t.pnl)<0;}).length,
           riskMax:riskMaxN,
@@ -8724,7 +8876,7 @@ function App(props){
     },500);
     return function(){clearTimeout(timer);};
   // eslint-disable-next-line
-  },[state.trades,state.dailyNote,state.commitment,state.ruleViolations,settings.riskMax]);
+  },[state.trades,state.dailyNote,state.commitment,state.commitments,state.ruleViolations,settings.riskMax]);
   // CHANGED: One-time migration — re-evaluate "Oversized entry" against the session-scaled posMax,
   // and restamp posMaxAtEntry on all historical trades. Skips silently on storage quota errors.
   useEffect(function(){
@@ -8772,7 +8924,7 @@ function App(props){
           try{
             var closedT=nt.filter(function(x){return x&&x.status!=="open";});
             var riskMaxN=parseFloat(entry.riskMax)||0;
-            newScore=calcDiscipline(closedT,riskMaxN,{commitment:entry.commitment||null});
+            newScore=calcDiscipline(closedT,riskMaxN,entry.commitments?{commitments:entry.commitments}:{commitment:entry.commitment||null});
           }catch(de){}
           var scoreChanged=(parseFloat(entry.disciplineScore)||0)!==(parseFloat(newScore)||0);
           if(tradesChanged||scoreChanged){
@@ -8844,12 +8996,32 @@ function App(props){
             trades:mergedTrades,
             wins:wins,
             losses:losses,
-            disciplineScore:calcDiscipline(mergedTrades,rolloverRiskMax,{commitment:state.commitment||(existing&&existing.commitment)||null}),
+            disciplineScore:calcDiscipline(mergedTrades,rolloverRiskMax,{commitments:(Object.keys(getCommitmentsMap(state)).length?getCommitmentsMap(state):((existing&&existing.commitments)||{}))}),
             note:state.dailyNote||(existing&&existing.note)||"",
             riskMax:rolloverRiskMax,
-            commitment:state.commitment||(existing&&existing.commitment)||null
+            commitment:state.commitment||(existing&&existing.commitment)||null,
+            commitments:(Object.keys(getCommitmentsMap(state)).length?getCommitmentsMap(state):((existing&&existing.commitments)||{}))
           });
           safeWriteJournalEntry(key,entry);
+        }else{
+          // CHANGED: No closed trades for the prior date. If the market was open that day
+          // (weekday, non-holiday) AND no existing entry, auto-record a no-trade day so the
+          // calendar/heatmap/streaks treat it as a deliberate sit-out. User can retroactively
+          // add reasons/notes via the past-date edit flow.
+          try{
+            var ntKey="journal:"+state.date.replace(/\//g,"-");
+            var hadExisting=false;try{hadExisting=!!localStorage.getItem(ntKey);}catch(e){}
+            if(!hadExisting){
+              var parts=String(state.date).split("/");
+              var dObj=parts.length===3?new Date(parseInt(parts[2],10),parseInt(parts[0],10)-1,parseInt(parts[1],10)):null;
+              var dow=dObj?dObj.getDay():-1;
+              var marketWasOpen=dObj&&dow!==0&&dow!==6&&!MARKET_HOLIDAYS[state.date];
+              if(marketWasOpen){
+                var ntEntry={date:state.date,pnl:0,trades:[],note:state.dailyNote||"",noTradeReason:"",noTradeReasons:[],noTradeShots:[],noTradeDay:true,noTradeLoggedAt:Date.now(),autoNoTrade:true,ruleViolations:[],commitment:state.commitment||null,commitments:getCommitmentsMap(state),wins:0,losses:0,riskMax:parseFloat(settings.riskMax)||0,disciplineScore:100};
+                safeWriteJournalEntry(ntKey,ntEntry);
+              }
+            }
+          }catch(e){}
         }
         // Fresh state for today, but preserve any still-open positions.
         var fresh=defaultState();
@@ -8861,6 +9033,35 @@ function App(props){
     var id=setInterval(checkRollover,60000);
     return function(){clearInterval(id);};
   },[state.date]);
+  // CHANGED: One-time backfill on mount. Scan past trading weekdays (Mon–Fri, non-holiday) from
+  // the earliest existing journal entry up to yesterday. Any missing date becomes an auto
+  // no-trade-day stub the user can retroactively annotate.
+  useEffect(function(){
+    try{
+      var rows=loadJournalRows();
+      if(rows.length===0)return;
+      var dates=rows.map(function(r){return r.date;}).filter(Boolean);
+      var earliest=null;
+      dates.forEach(function(s){var p=s.split("/");if(p.length===3){var d=new Date(+p[2],+p[0]-1,+p[1]);if(!earliest||d<earliest)earliest=d;}});
+      if(!earliest)return;
+      var yest=new Date();yest.setHours(0,0,0,0);yest.setDate(yest.getDate()-1);
+      var existing={};rows.forEach(function(r){existing[r.date]=true;});
+      var cur=new Date(earliest);cur.setHours(0,0,0,0);
+      var wrote=0;
+      while(cur<=yest){
+        var dow=cur.getDay();
+        var mm=cur.getMonth()+1,dd=cur.getDate(),yy=cur.getFullYear();
+        var key=mm+"/"+dd+"/"+yy;
+        if(dow!==0&&dow!==6&&!MARKET_HOLIDAYS[key]&&!existing[key]){
+          var ntEntry={date:key,pnl:0,trades:[],note:"",noTradeReason:"",noTradeReasons:[],noTradeShots:[],noTradeDay:true,noTradeLoggedAt:Date.now(),autoNoTrade:true,ruleViolations:[],commitment:null,commitments:{},wins:0,losses:0,riskMax:parseFloat(settings.riskMax)||0,disciplineScore:100};
+          try{localStorage.setItem("journal:"+key.replace(/\//g,"-"),JSON.stringify(ntEntry));wrote++;}catch(e){}
+        }
+        cur.setDate(cur.getDate()+1);
+      }
+      if(wrote>0&&bumpReloadKey)bumpReloadKey();
+    }catch(e){}
+  // eslint-disable-next-line
+  },[]);
   var [phase,setPhase]=useState(getPhase());
   // CHANGED: Re-check phase every second so the trade button enables promptly when a session opens (was 30s, caused noticeable lag).
   useEffect(function(){var id=setInterval(function(){setPhase(function(prev){var next=getPhase();return next!==prev?next:prev;});},1000);return function(){clearInterval(id);};},[]);
@@ -8877,7 +9078,7 @@ function App(props){
     // CHANGED: Half-size lock means "at most half of full size", not "half of whatever the
     // session already shrank you to". Without this floor, a session with sf=0.5 combined with the
     // lock's ×0.5 produced 0.25 — way more restrictive than the user expects from "half-size".
-    try{var lk=checkDisciplineLock(state.trades,state.commitment);if(lk&&lk.locked)sf=Math.min(sf,0.5);}catch(e){}
+    try{var lk=checkDisciplineLock(state.trades,state.commitment,getCommitmentsMap(state));if(lk&&lk.locked)sf=Math.min(sf,0.5);}catch(e){}
     // CHANGED: Month-halfsize mode caps SF at 0.5 too (same floor as the lock), so the trade is
     // measured against the half-size threshold and oversized-entry flags fire correctly.
     if(isMonthHalfsizeActive())sf=Math.min(sf,0.5);
@@ -9020,7 +9221,7 @@ function App(props){
   // up here so both tradeStatus and the display values below share the same scaling.
   var sessForSf=getSessions(settings).find(function(s){return s.id===phase;});
   var effSF=sessForSf&&sessForSf.sizeFraction!=null?parseFloat(sessForSf.sizeFraction)||1:1;
-  var liveLockForSF=checkDisciplineLock(state.trades,state.commitment);
+  var liveLockForSF=checkDisciplineLock(state.trades,state.commitment,getCommitmentsMap(state));
   if(liveLockForSF.locked)effSF=Math.min(effSF,0.5);
   // CHANGED: When the month-halfsize-remaining mode is on (set after monthly P&L goal hit),
   // cap effective size fraction at 0.5 for live trade computations too.
