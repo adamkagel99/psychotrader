@@ -1142,6 +1142,23 @@ function scoreCommitment(state){
 function getTotalWithdrawn(){
   return loadTransfers().filter(function(t){return String(t.type||"").toLowerCase()==="withdrawal";}).reduce(function(s,t){return s+Math.abs(parseFloat(t.amount)||0);},0);
 }
+// CHANGED: Months elapsed since the first journal entry (or first deposit transfer if no journal
+// yet), inclusive of the current month, minimum 1. Used to scale the lifetime Total Withdrawn
+// target = monthly allowance × monthsElapsed, so the ring stays meaningful as time passes.
+function getMonthsTradingElapsed(){
+  try{
+    var earliest=null;
+    var rows=loadJournalRows();
+    rows.forEach(function(r){var p=String(r.date||"").split("/");if(p.length===3){var d=new Date(+p[2],+p[0]-1,1);if(!earliest||d<earliest)earliest=d;}});
+    if(!earliest){
+      (loadTransfers()||[]).forEach(function(t){if(!t||!t.date)return;var p=String(t.date).split("/");if(p.length===3){var d=new Date(+p[2],+p[0]-1,1);if(!earliest||d<earliest)earliest=d;}});
+    }
+    if(!earliest)return 1;
+    var now=new Date();var cur=new Date(now.getFullYear(),now.getMonth(),1);
+    var months=(cur.getFullYear()-earliest.getFullYear())*12+(cur.getMonth()-earliest.getMonth())+1;
+    return Math.max(1,months);
+  }catch(e){return 1;}
+}
 // CHANGED: Daily target = the FIRST enabled session's gain-stop $ only ($ = riskMax × sizeFraction
 // × gainStopR). Rationale: hitting the gain stop in the first session is a hard stop for the day,
 // so no later session contributes to "the goal." Sessions are evaluated in chronological order.
@@ -3831,7 +3848,7 @@ function GoalsSnapshot(props){
   var accountTarget=parseFloat(goals.accountTarget)||0;
   // CHANGED: Total Withdrawn target is auto-derived from Withdrawal Allowance % × Monthly P&L goal. Hidden when allowance % is 0.
   var _wpct=getAllowanceEnabled()?getWithdrawalAllowancePctRaw():0;
-  var withdrawalTarget=(_wpct>0&&monthlyTarget>0)?(_wpct/100)*monthlyTarget:0;
+  var withdrawalTarget=(_wpct>0&&monthlyTarget>0)?(_wpct/100)*monthlyTarget*getMonthsTradingElapsed():0;
   var totalWithdrawn=getTotalWithdrawn();
   // CHANGED: Month-to-date withdrawals (abs sum of negative transfers dated this month).
   var monthlyWithdrawalTarget=parseFloat(goals.monthlyWithdrawals)||0;
@@ -5386,7 +5403,15 @@ function GoalRing(props){
           {/* CHANGED: Show the actual percentage (e.g. 117%) even when over target — keeps every
              card visually consistent. The check-mark is removed; ring color already signals
              goal-met (greener accent). */}
-          <span style={{fontSize:cmp?12:17,fontWeight:800,color:ringColor,fontVariantNumeric:"tabular-nums"}}>{Math.round(pctRaw)}<span style={{fontSize:cmp?7:9}}>%</span></span>
+          {/* CHANGED: auto-shrink the percentage text when it's 4+ digits so it never overflows the ring. */}
+          {(function(){
+            var n=Math.round(pctRaw);
+            var digits=String(Math.abs(n)).length;
+            var base=cmp?12:17;
+            var size=digits>=5?(cmp?8:11):digits===4?(cmp?10:13):base;
+            var sufSize=cmp?7:9;if(digits>=4)sufSize=cmp?6:8;
+            return <span style={{fontSize:size,fontWeight:800,color:ringColor,fontVariantNumeric:"tabular-nums",lineHeight:1}}>{n}<span style={{fontSize:sufSize}}>%</span></span>;
+          })()}
         </div>
       </div>
       {/* CHANGED: Keep the original "target X%" / "of $Y" footer text when over target — don't
@@ -5559,7 +5584,7 @@ function GoalsTab(props){
   var accountTarget=parseFloat(goals.accountTarget)||0;
   // CHANGED: Total Withdrawn target is auto-derived from Withdrawal Allowance % × Monthly P&L goal. Hidden when allowance % is 0.
   var _wpct=getAllowanceEnabled()?getWithdrawalAllowancePctRaw():0;
-  var withdrawalTarget=(_wpct>0&&monthlyTarget>0)?(_wpct/100)*monthlyTarget:0;
+  var withdrawalTarget=(_wpct>0&&monthlyTarget>0)?(_wpct/100)*monthlyTarget*getMonthsTradingElapsed():0;
   var totalWithdrawn=getTotalWithdrawn();
   // CHANGED: Month-to-date withdrawals goal.
   var monthlyWithdrawalTarget=parseFloat(goals.monthlyWithdrawals)||0;
