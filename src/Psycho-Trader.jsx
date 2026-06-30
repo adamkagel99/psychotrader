@@ -3870,7 +3870,7 @@ function GoalsSnapshot(props){
   // CHANGED: build GoalRing tiles grouped by category to mirror the Goals tab.
   var account=[],perf=[],pnl=[];
   if(!hidden.account&&accountTarget>0)account.push({key:"account",label:"Account Balance",value:props.currentAccount||0,target:accountTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:money,formatTarget:money,compact:true});
-  if(!hidden.withdrawals&&withdrawalTarget>0)account.push({key:"withdrawals",label:"Total Withdrawn",value:totalWithdrawn,target:withdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:money,formatTarget:money,compact:true});
+  // CHANGED: Total Withdrawn card removed — no editable goal field for it, and Monthly Withdrawal already covers cash-out cadence.
   if(!hidden.monthlyWithdrawals&&monthlyWithdrawalTarget>0)account.push({key:"monthlyWithdrawals",label:"Monthly Withdrawal",value:monthlyWithdrawn,target:monthlyWithdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:money,formatTarget:money,compact:true});
   if(!hidden.winRate&&winRateTarget>0)perf.push({key:"winRate",label:"Win Rate",value:oWR,target:winRateTarget,suffix:"%",decimals:0,targetDecimals:0,wrColor:true,compact:true});
   if(!hidden.discipline&&disciplineTarget>0)perf.push({key:"discipline",label:"Discipline",value:aDisc,target:disciplineTarget,suffix:"%",decimals:0,targetDecimals:0,discColor:true,compact:true});
@@ -5883,7 +5883,6 @@ function GoalsTab(props){
                 <div style={gridStyle}>
                   {!hidden.account&&accountTarget>0&&renderStandardCard("account",{label:"Account Balance",value:currentAccount,target:accountTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true})}
                   {monthlyWithdrawalTarget>0&&renderStandardCard("monthlyWithdrawals",{label:"Monthly Withdrawal",value:monthlyWithdrawn,target:monthlyWithdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true})}
-                  {withdrawalTarget>0&&renderStandardCard("withdrawals",{label:"Total Withdrawn",value:totalWithdrawn,target:withdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true})}
                   {customByBucket.account.map(renderInlineCustom)}
                 </div>
               </div>
