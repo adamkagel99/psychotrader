@@ -6843,7 +6843,11 @@ function SessionDayHeatmap(props){
     var rRisk=parseFloat(r.riskMax)||fallbackRisk;
     (r.trades||[]).forEach(function(t){
       if(!t||t.status==="open")return;
-      var sidx=sessions.findIndex(function(s){return s.id===t.sessionId;});
+      // CHANGED: Always derive sessionId from the trade's actual start time at render time,
+      // never trust the stamped t.sessionId. Trades stamped at creation under an older code
+      // path (e.g. nearest-session fallback) would otherwise land in the wrong row.
+      var derivedSid=getSessionForTrade(t);
+      var sidx=derivedSid?sessions.findIndex(function(s){return s.id===derivedSid;}):-1;
       if(sidx<0)sidx=OUT_IDX; // CHANGED: route to "Out of session" instead of skipping.
       var pnl=parseFloat(t.pnl)||0;
       grid[sidx][di].pnl+=pnl;
