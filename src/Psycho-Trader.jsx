@@ -4262,22 +4262,25 @@ function DashboardTab(props){
 // summary for any legacy reads.
 function CommitmentPanel(props){
   var state=props.state,setState=props.setState,settings=props.settings;
-  // Build the list of sessions enabled today (matches CommitmentPanel's old "today's sessions" logic).
-  var todaySessions=(function(){
+  // Only show the upcoming session (from 15 minutes before its start until it ends).
+  // If a session is currently active OR within its 15-min pre-window, show that one only.
+  // Committed sessions still render (as ✓ locked summary) even after end so the user has feedback.
+  var visible=(function(){
     try{
       var dow=getNow().getDay();
-      return getSessions(settings||{}).filter(function(s){if(s.enabled===false)return false;var days=s.days||[1,2,3,4,5];return days.indexOf(dow)>=0;});
+      var now=getCurrentMinutesLocal();
+      var todays=getSessions(settings||{}).filter(function(s){if(s.enabled===false)return false;var days=s.days||[1,2,3,4,5];return days.indexOf(dow)>=0;});
+      // Only sessions currently in their [start-15min, endMin] window.
+      return todays.filter(function(s){return now>=(s.startMin-15)&&now<s.endMin;});
     }catch(e){return [];}
   })();
-  if(todaySessions.length===0)return null;
+  if(visible.length===0)return null;
   return (
     <div style={{marginBottom:props.hideMargin?0:14,display:"flex",flexDirection:"column",gap:10}}>
-      {todaySessions.map(function(s){return <SessionCommitmentCard key={s.id} session={s} state={state} setState={setState} settings={settings}/>;})}
+      {visible.map(function(s){return <SessionCommitmentCard key={s.id} session={s} state={state} setState={setState} settings={settings}/>;})}
     </div>
   );
 }
-// CHANGED: Single per-session commitment card. maxTrades is derived from this session's
-// strategy cap (no longer a daily sum). Setups field is per-session.
 function SessionCommitmentCard(props){
   var state=props.state,setState=props.setState,session=props.session;
   var sid=session.id;
@@ -4299,7 +4302,7 @@ function SessionCommitmentCard(props){
   }
   var lbl={fontSize:12,color:"#94a3b8",fontWeight:600,marginBottom:4,display:"block"};
   var fld={width:"100%",padding:"10px 12px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8,color:"#e2e8f0",fontSize:14,fontFamily:"inherit",boxSizing:"border-box"};
-  var sessLabel=session.label||session.id;
+  var sessLabel=(function(){var nm=(session.name&&String(session.name).trim())||(session.label&&String(session.label).trim());if(nm)return nm;function fm(m){var h=Math.floor(m/60),mm=m%60,ap=h>=12?"PM":"AM";var h12=((h+11)%12)+1;return h12+":"+(mm<10?"0":"")+mm+" "+ap;}return fm(session.startMin)+"–"+fm(session.endMin);})();
   if(committed&&!open){
     return (
       <div style={{padding:"12px 14px",background:"#0f1a14",border:"1px solid #166534",borderRadius:10,width:"100%",boxSizing:"border-box",display:"flex",flexDirection:"column"}}>
@@ -4804,7 +4807,7 @@ function TradesTab(props){
         </div>
         <div style={{position:"relative",flex:1}}>
           <button onClick={function(){setFilterOpen(function(o){return !o;});setSortOpen(false);}} style={{width:"100%",padding:"8px 12px",background:activeFilterCount>0?"#1e1b4b":"#111118",border:"1px solid "+(activeFilterCount>0?"#4338ca":"#334155"),borderRadius:6,color:activeFilterCount>0?"#a5b4fc":"#64748b",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <span>Filter{activeFilterCount>0?" ("+activeFilterCount+") · "+filterResultCount+" result"+(filterResultCount===1?"":"s"):""}{activeFilterCount>0&&(function(){var src=isAllScope?allGalleryTrades:displayTrades;var sum=src.reduce(function(s,t){return s+(parseFloat(t.pnl)||0);},0);var fmt=HIDE_DOLLAR_PNL?(sum<0?"-$•••":"$•••"):((sum<0?"-$":"$")+Math.abs(Math.round(sum)).toLocaleString());return <span style={{marginLeft:8,color:sum>0?"#86efac":sum<0?"#fca5a5":"#94a3b8",fontWeight:700}}>· {fmt}</span>;})()}</span><span style={{fontSize:12}}>▾</span>
+            <span>Filter{activeFilterCount>0?" ("+activeFilterCount+") · "+filterResultCount+" result"+(filterResultCount===1?"":"s"):""}{activeFilterCount>0&&filterResultCount>0&&(function(){var src=isAllScope?allGalleryTrades:displayTrades;var sum=src.reduce(function(s,t){return s+(parseFloat(t.pnl)||0);},0);var fmt=HIDE_DOLLAR_PNL?(sum<0?"-$•••":"$•••"):((sum<0?"-$":"$")+Math.abs(Math.round(sum)).toLocaleString());return <span style={{marginLeft:8,color:sum>0?"#86efac":sum<0?"#fca5a5":"#94a3b8",fontWeight:700}}>· {fmt}</span>;})()}</span><span style={{fontSize:12}}>▾</span>
           </button>
           {filterOpen&&(
             <div style={{position:"absolute",top:"100%",right:0,left:0,background:"#1e293b",border:"1px solid #334155",borderRadius:8,zIndex:300,boxShadow:"0 8px 24px #00000088",marginTop:4,padding:"10px 12px",maxHeight:360,overflowY:"auto"}}>
@@ -4991,7 +4994,17 @@ function TradesTab(props){
         </div>
         );
       })()}
-      {((!isToday&&pastSession)||(isToday&&todayJournalEntry))&&(function(){
+      {((!isToday&&pastSession)||(isToday&&todayJournalEntry&&(function(){
+        // CHANGED: On TODAY, only render Day Summary once the last enabled session for the current
+        // weekday has ended. Past days always render.
+        try{
+          var dow=getNow().getDay();
+          var sess=getSessions(settings||{}).filter(function(s){return s.enabled!==false&&(s.days||[1,2,3,4,5]).indexOf(dow)>=0;});
+          if(sess.length===0)return true;
+          var lastEnd=Math.max.apply(null,sess.map(function(s){return s.endMin;}));
+          return getCurrentMinutesLocal()>=lastEnd;
+        }catch(e){return true;}
+      })()))&&(function(){
         var entry=isToday?todayJournalEntry:pastSession;
         var sTrades=entry.trades||[];
         var sPnl=parseFloat(entry.pnl)||0;
@@ -5100,7 +5113,13 @@ function TradesTab(props){
           byGroup[key].items.push({t:t,i:i});
         });
         // Ensure every relevant session has a group entry (even if empty).
-        relevantSess.forEach(function(s){if(!byGroup[s.id]){byGroup[s.id]={key:s.id,items:[]};groupOrder.push(s.id);}});
+        // For TODAY: only include sessions that have started (or are within 15 min of start).
+        // Future sessions stay hidden until their window opens. Past days always show all.
+        var nowMins=isToday?getCurrentMinutesLocal():null;
+        relevantSess.forEach(function(s){
+          if(isToday&&nowMins<(s.startMin-15))return;
+          if(!byGroup[s.id]){byGroup[s.id]={key:s.id,items:[]};groupOrder.push(s.id);}
+        });
         groupOrder.sort(function(a,b){
           if(a==="_out")return 1;if(b==="_out")return -1;
           var sa=enabledSess.find(function(s){return s.id===a;});
