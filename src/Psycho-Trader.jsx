@@ -4804,7 +4804,7 @@ function TradesTab(props){
         </div>
         <div style={{position:"relative",flex:1}}>
           <button onClick={function(){setFilterOpen(function(o){return !o;});setSortOpen(false);}} style={{width:"100%",padding:"8px 12px",background:activeFilterCount>0?"#1e1b4b":"#111118",border:"1px solid "+(activeFilterCount>0?"#4338ca":"#334155"),borderRadius:6,color:activeFilterCount>0?"#a5b4fc":"#64748b",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <span>Filter{activeFilterCount>0?" ("+activeFilterCount+") · "+filterResultCount+" result"+(filterResultCount===1?"":"s"):""}</span><span style={{fontSize:12}}>▾</span>
+            <span>Filter{activeFilterCount>0?" ("+activeFilterCount+") · "+filterResultCount+" result"+(filterResultCount===1?"":"s"):""}{activeFilterCount>0&&(function(){var src=isAllScope?allGalleryTrades:displayTrades;var sum=src.reduce(function(s,t){return s+(parseFloat(t.pnl)||0);},0);var fmt=HIDE_DOLLAR_PNL?(sum<0?"-$•••":"$•••"):((sum<0?"-$":"$")+Math.abs(Math.round(sum)).toLocaleString());return <span style={{marginLeft:8,color:sum>0?"#86efac":sum<0?"#fca5a5":"#94a3b8",fontWeight:700}}>· {fmt}</span>;})()}</span><span style={{fontSize:12}}>▾</span>
           </button>
           {filterOpen&&(
             <div style={{position:"absolute",top:"100%",right:0,left:0,background:"#1e293b",border:"1px solid #334155",borderRadius:8,zIndex:300,boxShadow:"0 8px 24px #00000088",marginTop:4,padding:"10px 12px",maxHeight:360,overflowY:"auto"}}>
