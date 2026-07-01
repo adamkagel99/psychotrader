@@ -829,7 +829,7 @@ function pctOfAccount(dollars){
 // Position display helper: $ normally, % of account when $ hidden.
 function fmtPositionDisplay(pos){return HIDE_DOLLAR_PNL?pctOfAccount(pos):("$"+Number(pos).toLocaleString(undefined,{maximumFractionDigits:0}));}
 function defaultChecklist(){return {sleptWell:false,identifiedPDH:false,identifiedPDL:false,marked15minOpen:false,positionSized:false,candlesOverlapping:false};}
-function defaultState(){return {date:todayStr(),preChecklist:defaultChecklist(),conditionsChecked:{},trades:[],dailyNote:"",ruleViolations:[],commitment:null,commitments:{},noTradeReason:"",noTradeReasons:[],noTradeShots:[]};}
+function defaultState(){return {date:todayStr(),preChecklist:defaultChecklist(),conditionsChecked:{},trades:[],dailyNote:"",ruleViolations:[],commitment:null,commitments:{},noTradeReason:"",noTradeReasons:[],noTradeShots:[],noTradeSessions:{}};}
 // CHANGED: Each leg gets its own timestamp on creation. Editable in the form.
 function mkEntry(){return {id:Date.now()+Math.random(),contracts:"",price:"",time:Date.now()};}
 function mkExit(){return {id:Date.now()+Math.random(),contracts:"",price:"",time:Date.now()};}
@@ -1028,6 +1028,61 @@ function todayCleanStatus(todayTrades,todayRiskMax){
 // CHANGED: PRE-MARKET COMMITMENT — the trader states a plan before the day (max trades + which
 // setups they'll take). At day's end we score adherence against their OWN stated plan, which
 // lands harder than a generic rule. Returns null if no commitment was made.
+// CHANGED: Per-session no-trade panel. Rendered inside each empty enabled-for-today session
+// group. Lets the user record why they skipped that specific session (independent of others).
+// Once saved shows the recorded state read-only with an Edit affordance.
+function SessionNoTradePanel(props){
+  var data=props.data;
+  var isLogged=!!data;
+  var [editing,setEditing]=useState(!isLogged);
+  var [reasons,setReasons]=useState((data&&data.reasons)||[]);
+  var [reason,setReason]=useState((data&&data.reason)||"");
+  var [shots,setShots]=useState((data&&data.shots)||[]);
+  var [uploading,setUploading]=useState(false);
+  var fileRef=useRef(null);
+  function save(){props.onSave(props.sessionId,{reasons:reasons,reason:reason,shots:shots});setEditing(false);}
+  function cancel(){setReasons((data&&data.reasons)||[]);setReason((data&&data.reason)||"");setShots((data&&data.shots)||[]);setEditing(false);}
+  if(isLogged&&!editing){
+    return (
+      <div style={{padding:"10px 12px",background:"#0a0a0f",border:"1px dashed #4338ca44",borderRadius:8}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:6}}>
+          <span style={{fontSize:10,fontWeight:800,color:"#fcd34d",background:"#1c1408",border:"1px solid #a16207",borderRadius:4,padding:"2px 7px",letterSpacing:0.5}}>⊘ NO-TRADE SESSION</span>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={function(){setEditing(true);}} style={{padding:"2px 8px",background:"transparent",border:"1px solid #4338ca",borderRadius:4,color:"#a5b4fc",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit",letterSpacing:0.5}}>EDIT</button>
+            <button onClick={function(){if(confirm("Clear no-trade log for this session?"))props.onClear(props.sessionId);}} style={{padding:"2px 8px",background:"transparent",border:"1px solid #4b5563",borderRadius:4,color:"#94a3b8",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit",letterSpacing:0.5}}>CLEAR</button>
+          </div>
+        </div>
+        {(data.reasons||[]).length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:data.reason?8:0}}>{data.reasons.map(function(r){return <span key={r} style={{fontSize:11,color:"#a5b4fc",background:"#1e1b4b",border:"1px solid #4338ca",borderRadius:12,padding:"2px 9px",fontWeight:600}}>{r}</span>;})}</div>}
+        {data.reason&&<div style={{fontSize:13,color:"#cbd5e1",lineHeight:1.5}}>{data.reason}</div>}
+        {(data.shots||[]).length>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(70px,1fr))",gap:5,marginTop:8}}>{data.shots.map(function(src,si){return <img key={si} src={src} alt="" onClick={function(){if(props.setNoTradeViewer)props.setNoTradeViewer(src);}} style={{width:"100%",aspectRatio:"1",objectFit:"cover",borderRadius:4,cursor:"pointer",border:"1px solid #334155"}}/>;})}</div>}
+      </div>
+    );
+  }
+  var fld={width:"100%",padding:"10px 12px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8,color:"#e2e8f0",fontSize:14,fontFamily:"inherit",boxSizing:"border-box"};
+  return (
+    <div style={{padding:"12px 14px",background:"#0a0a0f",border:"1px dashed #4338ca44",borderRadius:8}}>
+      <div style={{fontSize:12,color:"#a5b4fc",letterSpacing:1,textTransform:"uppercase",marginBottom:6,fontWeight:600}}>Skip this session?</div>
+      <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Record why you sat out this session. Sitting out is a valid disciplined choice worth journaling.</div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:10}}>
+        {["No A+ setups","Choppy / no trend","High-impact news","Not focused","Rules kept me out","Already hit goal","Personal / away"].map(function(r){
+          var picked=reasons.indexOf(r)>=0;
+          return <button key={r} onClick={function(){setReasons(function(arr){var i=arr.indexOf(r);var n=arr.slice();if(i>=0)n.splice(i,1);else n.push(r);return n;});}} style={{padding:"5px 10px",background:picked?"#1e1b4b":"#0a0a0f",border:"1px solid "+(picked?"#6366f1":"#334155"),borderRadius:14,color:picked?"#a5b4fc":"#94a3b8",fontSize:12,fontWeight:picked?700:500,cursor:"pointer",fontFamily:"inherit"}}>{picked?"✓ ":""}{r}</button>;
+        })}
+      </div>
+      <textarea value={reason} onChange={function(e){setReason(e.target.value);}} placeholder="Optional detail" style={Object.assign({},fld,{minHeight:56,resize:"vertical",lineHeight:1.5,marginBottom:10})}/>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+        <label style={{fontSize:11,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Screenshots{shots.length>0?" ("+shots.length+")":""}</label>
+        <button onClick={function(){if(fileRef.current)fileRef.current.click();}} disabled={uploading} style={{padding:"4px 10px",background:uploading?"#1e293b":"#0c2b3d",border:"1px solid "+(uploading?"#334155":"#38bdf8"),borderRadius:6,color:uploading?"#475569":"#38bdf8",fontSize:12,fontWeight:600,cursor:uploading?"not-allowed":"pointer",fontFamily:"inherit"}}>{uploading?"Uploading...":"+ Add"}</button>
+      </div>
+      <input ref={fileRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={function(e){var files=Array.from(e.target.files||[]);if(files.length===0)return;setUploading(true);Promise.all(files.map(function(f){return compressImage(f);})).then(function(urls){setShots(function(p){return p.concat(urls);});setUploading(false);}).catch(function(){setUploading(false);});e.target.value="";}}/>
+      {shots.length>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(70px,1fr))",gap:5,marginBottom:10}}>{shots.map(function(src,si){return <div key={si} style={{position:"relative"}}><img src={src} alt="" style={{width:"100%",aspectRatio:"1",objectFit:"cover",borderRadius:4,border:"1px solid #334155"}}/><button onClick={function(){setShots(function(p){var n=p.slice();n.splice(si,1);return n;});}} style={{position:"absolute",top:2,right:2,width:16,height:16,padding:0,background:"#000000cc",border:"1px solid #475569",borderRadius:"50%",color:"#fca5a5",fontSize:10,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>✕</button></div>;})}</div>}
+      <div style={{display:"flex",gap:8}}>
+        <button onClick={save} style={{flex:1,padding:"9px",background:"#0f1f15",border:"1px solid #166534",borderRadius:6,color:"#86efac",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Log no-trade for this session</button>
+        {isLogged&&<button onClick={cancel} style={{padding:"9px 14px",background:"transparent",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>Cancel</button>}
+      </div>
+    </div>
+  );
+}
 // CHANGED: Per-entry no-trade-day details with retroactive edit. Read-only by default; an "Edit"
 // link flips it to an inline form for reasons/note/screenshots, then persists back to the
 // journal entry on save.
@@ -4832,29 +4887,111 @@ function TradesTab(props){
         </div>
         );
       })()}
-      <div style={{display:"grid",gridTemplateColumns:props.mobile?"1fr":"1fr 1fr 1fr",gap:12,alignItems:"stretch"}}>
-      {displayTrades.map(function(t,i){
-        var isEditing=editingId===t.id;
-        if(!isToday){
+      {/* CHANGED: Group trade cards by session (in the same chronological order as sort). Each
+          session gets its own header + grid so the grouping is visually distinct. Empty enabled
+          sessions render an inline no-trade log so each session can be logged independently.
+          Card #N is the overall index (preserves chronology). Out-of-session trades bucket last. */}
+      {(function(){
+        var enabledSess=[];
+        try{enabledSess=getSessions(settings).filter(function(s){return s.enabled!==false;});}catch(e){}
+        // Determine day-of-week of the entry being viewed (today or the past date).
+        var entryDate=(function(){
+          var s=isToday?todayStr():(selectedDate||(pastSession&&pastSession.date));
+          if(!s)return null;
+          var p=String(s).split("/");if(p.length!==3)return null;
+          return new Date(+p[2],+p[0]-1,+p[1]);
+        })();
+        var dow=entryDate?entryDate.getDay():-1;
+        var relevantSess=enabledSess.filter(function(s){var days=s.days||[1,2,3,4,5];return days.indexOf(dow)>=0;});
+        // Read current no-trade-session data from state (today) or entry (past).
+        var ntSessions=(isToday?(props.state&&props.state.noTradeSessions):((pastSession&&pastSession.noTradeSessions)||(todayJournalEntry&&todayJournalEntry.noTradeSessions)))||{};
+        var byGroup={};
+        var groupOrder=[];
+        displayTrades.forEach(function(t,i){
+          var sid=null;try{sid=getSessionForTrade(t);}catch(e){}
+          var key=sid||"_out";
+          if(!byGroup[key]){byGroup[key]={key:key,items:[]};groupOrder.push(key);}
+          byGroup[key].items.push({t:t,i:i});
+        });
+        // Ensure every relevant session has a group entry (even if empty).
+        relevantSess.forEach(function(s){if(!byGroup[s.id]){byGroup[s.id]={key:s.id,items:[]};groupOrder.push(s.id);}});
+        groupOrder.sort(function(a,b){
+          if(a==="_out")return 1;if(b==="_out")return -1;
+          var sa=enabledSess.find(function(s){return s.id===a;});
+          var sb=enabledSess.find(function(s){return s.id===b;});
+          return ((sa&&sa.startMin)||0)-((sb&&sb.startMin)||0);
+        });
+        function fmtMins(m){var h=Math.floor(m/60),mm=m%60,ap=h>=12?"PM":"AM";var h12=((h+11)%12)+1;return h12+":"+(mm<10?"0":"")+mm+" "+ap;}
+        function headerFor(key){
+          if(key==="_out")return {label:"Out of Session",sub:"",color:"#fcd34d",border:"#a1620744"};
+          var s=enabledSess.find(function(x){return x.id===key;});
+          if(!s)return {label:key,sub:"",color:"#94a3b8",border:"#33415544"};
+          return {label:s.label||s.id,sub:fmtMins(s.startMin)+" – "+fmtMins(s.endMin),color:"#a5b4fc",border:"#4338ca44"};
+        }
+        // Persist per-session no-trade record (creates or updates).
+        function saveSessionNoTrade(sid,patch){
+          if(isToday){
+            props.setState(function(s){
+              var map=Object.assign({},s.noTradeSessions||{});
+              var cur=map[sid]||{reasons:[],reason:"",shots:[],loggedAt:null};
+              map[sid]=Object.assign({},cur,patch,{loggedAt:cur.loggedAt||Date.now()});
+              return Object.assign({},s,{noTradeSessions:map});
+            });
+          }else if(pastSession){
+            var map=Object.assign({},pastSession.noTradeSessions||{});
+            var cur=map[sid]||{reasons:[],reason:"",shots:[],loggedAt:null};
+            map[sid]=Object.assign({},cur,patch,{loggedAt:cur.loggedAt||Date.now()});
+            var updated=Object.assign({},pastSession,{noTradeSessions:map});
+            try{localStorage.setItem("journal:"+String(pastSession.date).replace(/\//g,"-"),JSON.stringify(updated));}catch(e){}
+            if(setPastSessions)setPastSessions(function(arr){return arr.map(function(x){return x.date===pastSession.date?updated:x;});});
+            if(props.bumpReloadKey)props.bumpReloadKey();
+          }
+        }
+        function clearSessionNoTrade(sid){
+          if(isToday){
+            props.setState(function(s){var map=Object.assign({},s.noTradeSessions||{});delete map[sid];return Object.assign({},s,{noTradeSessions:map});});
+          }else if(pastSession){
+            var map=Object.assign({},pastSession.noTradeSessions||{});delete map[sid];
+            var updated=Object.assign({},pastSession,{noTradeSessions:map});
+            try{localStorage.setItem("journal:"+String(pastSession.date).replace(/\//g,"-"),JSON.stringify(updated));}catch(e){}
+            if(setPastSessions)setPastSessions(function(arr){return arr.map(function(x){return x.date===pastSession.date?updated:x;});});
+            if(props.bumpReloadKey)props.bumpReloadKey();
+          }
+        }
+        return groupOrder.map(function(gk){
+          var g=byGroup[gk];
+          var hdr=headerFor(gk);
+          var isEmpty=g.items.length===0;
+          var isRelevantSession=gk!=="_out"&&relevantSess.some(function(s){return s.id===gk;});
           return (
-            <div key={t.id||i} style={isEditing?{gridColumn:"1 / -1"}:null}>
-              {isEditing
-                ?<TradeForm trade={editDraft||t} setTrade={function(updater){setEditDraft(function(prev){var base=prev||t;return typeof updater==="function"?updater(base):updater;});}} onSave={function(updated){savePastTrade(updated);setEditDraft(null);}} onCancel={cancelEdit} settings={settings} tradeOptions={props.tradeOptions}/>
-                :<TradeTile t={t} i={i} posMax={settings.positionMax} riskMax={settings.riskMax} onDelete={function(){deletePastTrade(t.id);}} onEdit={function(){startEdit(t);}}/>
-              }
+            <div key={gk} style={{marginBottom:16}}>
+              <div style={{display:"flex",alignItems:"baseline",gap:10,marginBottom:8,paddingBottom:6,borderBottom:"1px solid "+hdr.border}}>
+                <span style={{fontSize:11,fontWeight:800,letterSpacing:1,textTransform:"uppercase",color:hdr.color}}>{hdr.label}</span>
+                {hdr.sub&&<span style={{fontSize:11,color:"#64748b",fontVariantNumeric:"tabular-nums"}}>{hdr.sub}</span>}
+                <span style={{fontSize:11,color:"#475569",marginLeft:"auto"}}>{g.items.length===0?(ntSessions[gk]?"no-trade":"empty"):g.items.length+" trade"+(g.items.length===1?"":"s")}</span>
+              </div>
+              {!isEmpty&&(
+                <div style={{display:"grid",gridTemplateColumns:props.mobile?"1fr":"1fr 1fr 1fr",gap:12,alignItems:"stretch"}}>
+                  {g.items.map(function(pair){
+                    var t=pair.t,i=pair.i;
+                    var isEditing=editingId===t.id;
+                    var onDeleteFn=isToday?function(){deleteTrade(t.id);}:function(){deletePastTrade(t.id);};
+                    return (
+                      <div key={t.id||i} style={isEditing?{gridColumn:"1 / -1"}:null}>
+                        {isEditing
+                          ?<TradeForm trade={editDraft||t} setTrade={function(updater){setEditDraft(function(prev){var base=prev||t;return typeof updater==="function"?updater(base):updater;});}} onSave={function(updated){savePastTrade(updated);setEditDraft(null);}} onCancel={cancelEdit} settings={settings} tradeOptions={props.tradeOptions}/>
+                          :<TradeTile t={t} i={i} posMax={settings.positionMax} riskMax={settings.riskMax} onDelete={onDeleteFn} onEdit={function(){startEdit(t);}}/>
+                        }
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {isEmpty&&isRelevantSession&&<SessionNoTradePanel sessionId={gk} sessionLabel={hdr.label} data={ntSessions[gk]} onSave={saveSessionNoTrade} onClear={clearSessionNoTrade} setNoTradeViewer={setNoTradeViewer}/>}
             </div>
           );
-        }
-        return (
-          <div key={t.id} style={isEditing?{gridColumn:"1 / -1"}:null}>
-            {isEditing
-              ?<TradeForm trade={editDraft||t} setTrade={function(updater){setEditDraft(function(prev){var base=prev||t;return typeof updater==="function"?updater(base):updater;});}} onSave={function(updated){savePastTrade(updated);setEditDraft(null);}} onCancel={cancelEdit} settings={settings} tradeOptions={props.tradeOptions}/>
-              :<TradeTile t={t} i={i} posMax={settings.positionMax} riskMax={settings.riskMax} onDelete={function(){deleteTrade(t.id);}} onEdit={function(){startEdit(t);}}/>
-            }
-          </div>
-        );
-      })}
-      </div>
+        });
+      })()}
       {/* CHANGED: Day summary + note editor. Shows for past dates always, and today after save-to-journal. */}
       {((!isToday&&pastSession)||(isToday&&todayJournalEntry))&&(function(){
         var entry=isToday?todayJournalEntry:pastSession;
@@ -8908,6 +9045,7 @@ function App(props){
           ruleViolations:state.ruleViolations||[],
           commitment:state.commitment||null,
           commitments:_commMap,
+          noTradeSessions:state.noTradeSessions||{},
           wins:closedT.filter(function(t){return parseFloat(t.pnl)>0;}).length,
           losses:closedT.filter(function(t){return parseFloat(t.pnl)<0;}).length,
           riskMax:riskMaxN,
@@ -8940,7 +9078,7 @@ function App(props){
     },500);
     return function(){clearTimeout(timer);};
   // eslint-disable-next-line
-  },[state.trades,state.dailyNote,state.commitment,state.commitments,state.ruleViolations,settings.riskMax]);
+  },[state.trades,state.dailyNote,state.commitment,state.commitments,state.noTradeSessions,state.ruleViolations,settings.riskMax]);
   // CHANGED: One-time migration — re-evaluate "Oversized entry" against the session-scaled posMax,
   // and restamp posMaxAtEntry on all historical trades. Skips silently on storage quota errors.
   useEffect(function(){
