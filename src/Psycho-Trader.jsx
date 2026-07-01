@@ -4741,7 +4741,7 @@ function TradesTab(props){
           if(!s)return true;
           var cap=parseInt(s.maxTrades);
           if(isNaN(cap)||cap<=0)return true;
-          var trades=(props.liveTrades||[]).filter(function(t){if(!t||t.status==="open")return false;try{return getSessionForTrade(t)===phase;}catch(e){return false;}});
+          var trades=((props.state&&props.state.trades)||[]).filter(function(t){if(!t||t.status==="open")return false;try{return getSessionForTrade(t)===phase;}catch(e){return false;}});
           return trades.length<cap;
         }catch(e){return true;}
       })()&&<SessionStrategy phase={phase} preCheckComplete={preCheckComplete} settings={settings} currencyFilter={props.eventCurrencyFilter} impactFilter={props.eventImpactFilter}/>}
