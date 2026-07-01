@@ -7277,6 +7277,41 @@ function PerformanceTab(props){
   var breakevens=allTrades.filter(function(t){return Math.abs(parseFloat(t.pnl)||0)<0.01;});
   // CHANGED: No-trade days are deliberate breakeven days (zero trades, net $0) — tracked alongside BE.
   var noTradeDays=filtered.filter(function(r){return r.noTradeDay&&(r.trades||[]).filter(function(t){return t.status!=="open";}).length===0;});
+  // CHANGED: Per-session no-trade tally. Counts explicit `entry.noTradeSessions[sid]` entries
+  // AND implicit auto-no-trade sessions (empty enabled sessions on days that had SOME trades).
+  var noTradeSessionsTally=(function(){
+    var explicit=0,implicit=0,reasonCounts={},daysWithNoTradeSession={};
+    filtered.forEach(function(r){
+      if(!r||!r.date)return;
+      var ct=(r.trades||[]).filter(function(t){return t&&t.status!=="open";});
+      // Determine which enabled sessions applied that weekday.
+      var parts=String(r.date).split("/");if(parts.length!==3)return;
+      var dObj=new Date(+parts[2],+parts[0]-1,+parts[1]);var dow=dObj.getDay();
+      var sess=[];try{sess=getSessions(settings).filter(function(s){return s.enabled!==false&&(s.days||[1,2,3,4,5]).indexOf(dow)>=0;});}catch(e){}
+      var sessionTradeCounts={};
+      ct.forEach(function(t){var sid=null;try{sid=getSessionForTrade(t);}catch(e){}if(sid)sessionTradeCounts[sid]=(sessionTradeCounts[sid]||0)+1;});
+      sess.forEach(function(s){
+        var emptyForThisSession=!sessionTradeCounts[s.id];
+        if(!emptyForThisSession)return;
+        var logged=r.noTradeSessions&&r.noTradeSessions[s.id];
+        if(logged){
+          explicit++;
+          (logged.reasons||[]).forEach(function(rr){reasonCounts[rr]=(reasonCounts[rr]||0)+1;});
+          if(logged.reason)reasonCounts["(custom)"]=(reasonCounts["(custom)"]||0)+1;
+        }else{
+          implicit++;
+        }
+        daysWithNoTradeSession[r.date]=true;
+      });
+    });
+    return {explicit:explicit,implicit:implicit,total:explicit+implicit,reasonCounts:reasonCounts,dayCount:Object.keys(daysWithNoTradeSession).length};
+  })();
+  // CHANGED: Trades whose start time fell outside every enabled session window for their day.
+  var outOfSessionTrades=(function(){
+    var count=0;
+    filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(!t||t.status==="open")return;var sid=null;try{sid=getSessionForTrade(t);}catch(e){}if(!sid)count++;});});
+    return count;
+  })();
   var winRate=allTrades.length>0?Math.round((wins.length/allTrades.length)*100):0;
   // CHANGED: Snapshot-based trade count — falls back to wins+losses per row when r.trades is empty
   // (legacy corruption case). Prefers actual trades array length when present.
@@ -7840,22 +7875,30 @@ function PerformanceTab(props){
             )}
             {breakevens.length===0&&<StatRow label="Status" value="No breakevens yet" color="#86efac"/>}
             {/* CHANGED: No-trade days — deliberate sit-outs that net breakeven for the day. */}
-            <StatRow label="No-Trade Days" value={noTradeDays.length+" day"+(noTradeDays.length===1?"":"s")} last={noTradeDays.length===0} color={noTradeDays.length>0?"#fcd34d":"#64748b"}/>
-            {noTradeDays.length>0&&(function(){
-              // Tally reason tags across no-trade days in range.
+            <StatRow label="No-Trade Days" value={noTradeDays.length+" day"+(noTradeDays.length===1?"":"s")} color={noTradeDays.length>0?"#fcd34d":"#64748b"}/>
+            {/* CHANGED: Per-session no-trade tally. Counts sessions skipped on days that still had
+                trades in other sessions, plus fully-skipped days. Explicit = user logged reasons;
+                implicit = auto (session window ended empty, no notes added). */}
+            <StatRow label="No-Trade Sessions" value={noTradeSessionsTally.total+" session"+(noTradeSessionsTally.total===1?"":"s")+(noTradeSessionsTally.explicit>0?" ("+noTradeSessionsTally.explicit+" logged)":"")} color={noTradeSessionsTally.total>0?"#fcd34d":"#64748b"}/>
+            <StatRow label="Out-of-Session Trades" value={outOfSessionTrades+" trade"+(outOfSessionTrades===1?"":"s")} last={noTradeDays.length===0&&noTradeSessionsTally.total===0} color={outOfSessionTrades>0?"#fcd34d":"#64748b"}/>
+            {(noTradeDays.length>0||noTradeSessionsTally.explicit>0)&&(function(){
+              // Tally reason tags across no-trade days AND per-session no-trade logs in range.
               var counts={};
               noTradeDays.forEach(function(d){
                 var reasons=(d.noTradeReasons&&d.noTradeReasons.length)?d.noTradeReasons:(d.noTradeReason?["(custom)"]:[]);
                 reasons.forEach(function(r){counts[r]=(counts[r]||0)+1;});
               });
+              // CHANGED: Also include per-session no-trade reasons.
+              Object.keys(noTradeSessionsTally.reasonCounts).forEach(function(k){counts[k]=(counts[k]||0)+noTradeSessionsTally.reasonCounts[k];});
               var keys=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a];});
               if(keys.length===0)return <StatRow label="Reasons" value="(none tagged)" last color="#64748b"/>;
+              var totalLoggedInstances=noTradeDays.length+noTradeSessionsTally.explicit;
               return (
                 <div style={{padding:"8px 0 4px",borderBottom:"none"}}>
                   <div style={{fontSize:11,color:"#94a3b8",marginBottom:6,fontWeight:600}}>Reasons</div>
                   {keys.map(function(k,i){
                     var n=counts[k];
-                    var pct=Math.round((n/noTradeDays.length)*100);
+                    var pct=Math.round((n/Math.max(1,totalLoggedInstances))*100);
                     return (
                       <div key={k} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",borderBottom:i<keys.length-1?"1px solid #1e293b":"none"}}>
                         <div style={{display:"flex",alignItems:"center",gap:7,minWidth:0,flex:1}}>
