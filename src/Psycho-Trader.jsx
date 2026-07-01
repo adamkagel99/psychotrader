@@ -1043,12 +1043,14 @@ function SessionCommitmentReview(props){
   })();
   var c=map[sid];
   if(!c||!c.committed)return null;
-  var closedInSession=(props.sessionTrades||[]).filter(function(t){return t&&t.status!=="open";});
+  var closedInSession=(props.sessionTrades||[]).filter(function(t){return !t||t.status!=="open";});
   var maxT=parseInt(c.maxTrades);
   var hasMax=!isNaN(maxT)&&maxT>0;
-  // CHANGED: Only display review once the session has ended — either by time (past its endMin,
-  // or any past day) or by trigger (trade-cap reached).
-  var capHit=hasMax&&closedInSession.length>=maxT;
+  // CHANGED: End triggered by time (past endMin / past day) OR by trade-cap — from either the
+  // commitment's cap or the session config's cap, whichever is set.
+  var sessCap=props.session&&parseInt(props.session.maxTrades);
+  var hasSessCap=!isNaN(sessCap)&&sessCap>0;
+  var capHit=(hasMax&&closedInSession.length>=maxT)||(hasSessCap&&closedInSession.length>=sessCap);
   if(!props.sessionEnded&&!capHit)return null;
   var over=hasMax&&closedInSession.length>maxT;
   var aff=c.setupsReviewAffirmed;
@@ -4436,6 +4438,7 @@ function TradesTab(props){
   var [filterOpen,setFilterOpen]=useState(false);
   var [filters,setFilters]=useState(function(){try{var s=localStorage.getItem("pt-trades-filters");return s?JSON.parse(s):{};}catch(e){return {};}});
   useEffect(function(){try{localStorage.setItem("pt-trades-filters",JSON.stringify(filters));}catch(e){}},[filters]);
+  var [collapsedMap,setCollapsedMap]=useState(function(){var m={};try{for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf("pt-sess-collapse:")===0)m[k.slice(17)]=localStorage.getItem(k)==="1";}}catch(e){}return m;});
   // CHANGED: Screenshot gallery scope — "session" (current date) or "all" (whole journal).
   var [galleryScope,setGalleryScope]=useState("session");
   // CHANGED: No-Trade Day screenshot upload state + a lightbox viewer for those shots.
@@ -5182,15 +5185,21 @@ function TradesTab(props){
           var hdr=headerFor(gk);
           var isEmpty=g.items.length===0;
           var isRelevantSession=gk!=="_out"&&relevantSess.some(function(s){return s.id===gk;});
+          var collapseKey="pt-sess-collapse:"+gk;
+          var isCollapsed=collapsedMap[gk]===true;
+          function toggleCollapsed(){
+            setCollapsedMap(function(m){var n=Object.assign({},m);n[gk]=!n[gk];try{localStorage.setItem(collapseKey,n[gk]?"1":"0");}catch(e){}return n;});
+          }
           return (
             <div key={gk} style={{marginBottom:16}}>
-              <div style={{display:"flex",alignItems:"baseline",gap:10,marginBottom:8,paddingBottom:6,borderBottom:"1px solid "+hdr.border}}>
+              <div onClick={toggleCollapsed} style={{display:"flex",alignItems:"baseline",gap:10,marginBottom:isCollapsed?0:8,paddingBottom:6,borderBottom:"1px solid "+hdr.border,cursor:"pointer",userSelect:"none"}}>
+                <span style={{fontSize:11,color:hdr.color,transform:isCollapsed?"rotate(-90deg)":"none",transition:"transform 0.15s",display:"inline-block"}}>▾</span>
                 <span style={{fontSize:11,fontWeight:800,letterSpacing:1,textTransform:"uppercase",color:hdr.color}}>{hdr.label}</span>
                 {hdr.sub&&<span style={{fontSize:11,color:"#64748b",fontVariantNumeric:"tabular-nums"}}>{hdr.sub}</span>}
                 <span style={{fontSize:11,color:"#475569",marginLeft:"auto"}}>{g.items.length===0?((ntSessions[gk]||sessionEnded(gk))?"no-trade":"empty"):g.items.length+" trade"+(g.items.length===1?"":"s")}</span>
               </div>
-              {/* CHANGED: Per-session commitment review — replaces the old aggregate "Daily" review. */}
-              {gk!=="_out"&&<SessionCommitmentReview sessionId={gk} sessionLabel={hdr.label} sessionTrades={g.items.map(function(p){return p.t;})} sessionEnded={sessionEnded(gk)} isToday={isToday} state={props.state} setState={props.setState} todayJournalEntry={todayJournalEntry} setTodayJournalEntry={setTodayJournalEntry} pastSession={pastSession} setPastSessions={setPastSessions} bumpReloadKey={props.bumpReloadKey}/>}
+              {!isCollapsed&&(<>
+              {gk!=="_out"&&<SessionCommitmentReview sessionId={gk} sessionLabel={hdr.label} session={enabledSess.find(function(x){return x.id===gk;})} sessionTrades={g.items.map(function(p){return p.t;})} sessionEnded={sessionEnded(gk)} isToday={isToday} state={props.state} setState={props.setState} todayJournalEntry={todayJournalEntry} setTodayJournalEntry={setTodayJournalEntry} pastSession={pastSession} setPastSessions={setPastSessions} bumpReloadKey={props.bumpReloadKey}/>}
               {!isEmpty&&(
                 <div style={{display:"grid",gridTemplateColumns:props.mobile?"1fr":"1fr 1fr 1fr",gap:12,alignItems:"stretch"}}>
                   {g.items.map(function(pair){
@@ -5209,6 +5218,7 @@ function TradesTab(props){
                 </div>
               )}
               {isEmpty&&isRelevantSession&&<SessionNoTradePanel sessionId={gk} sessionLabel={hdr.label} data={ntSessions[gk]} sessionEnded={sessionEnded(gk)} onSave={saveSessionNoTrade} onClear={clearSessionNoTrade} setNoTradeViewer={setNoTradeViewer}/>}
+              </>)}
             </div>
           );
         });
