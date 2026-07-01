@@ -7864,31 +7864,29 @@ function PerformanceTab(props){
               var be=ct.filter(function(t){return Math.abs(parseFloat(t.pnl)||0)<0.01;}).length;
               return Math.round((be/ct.length)*100);
             });
-            return <StatSec title="Breakeven Analysis">
+            return <>
+            <StatSec title="Breakeven Analysis">
             <StatRow label="Total Breakevens" value={breakevens.length+" ("+breakevenRate+"%)"} color="#94a3b8"/>
             <StatRow label="Win/Loss/BE Split" value={wins.length+"/"+(losses.length)+"/"+breakevens.length} color="#64748b"/>
             {breakevens.length>0&&(
               <>
                 <StatRow label="Avg Breakeven Cost" value={HIDE_DOLLAR_PNL?"$•••":"$"+(breakevens.reduce(function(s,t){return s+(Math.abs(parseFloat(t.pnl)||0));},0)/breakevens.length).toFixed(2)}/>
-                <StatRow label="Breakeven Frequency" value={(breakevenRate>0?breakevenRate:"0")+"%"} color={breakevenRate>10?"#fbbf24":"#94a3b8"}/>
+                <StatRow label="Breakeven Frequency" value={(breakevenRate>0?breakevenRate:"0")+"%"} last color={breakevenRate>10?"#fbbf24":"#94a3b8"}/>
               </>
             )}
-            {breakevens.length===0&&<StatRow label="Status" value="No breakevens yet" color="#86efac"/>}
-            {/* CHANGED: No-trade days — deliberate sit-outs that net breakeven for the day. */}
+            {breakevens.length===0&&<StatRow label="Status" value="No breakevens yet" last color="#86efac"/>}
+            </StatSec>
+            {/* CHANGED: No-trade activity lives in its own section, separate from trade breakevens. */}
+            <StatSec title="No-Trade Activity">
             <StatRow label="No-Trade Days" value={noTradeDays.length+" day"+(noTradeDays.length===1?"":"s")} color={noTradeDays.length>0?"#fcd34d":"#64748b"}/>
-            {/* CHANGED: Per-session no-trade tally. Counts sessions skipped on days that still had
-                trades in other sessions, plus fully-skipped days. Explicit = user logged reasons;
-                implicit = auto (session window ended empty, no notes added). */}
             <StatRow label="No-Trade Sessions" value={noTradeSessionsTally.total+" session"+(noTradeSessionsTally.total===1?"":"s")+(noTradeSessionsTally.explicit>0?" ("+noTradeSessionsTally.explicit+" logged)":"")} color={noTradeSessionsTally.total>0?"#fcd34d":"#64748b"}/>
-            <StatRow label="Out-of-Session Trades" value={outOfSessionTrades+" trade"+(outOfSessionTrades===1?"":"s")} last={noTradeDays.length===0&&noTradeSessionsTally.total===0} color={outOfSessionTrades>0?"#fcd34d":"#64748b"}/>
+            <StatRow label="Out-of-Session Trades" value={outOfSessionTrades+" trade"+(outOfSessionTrades===1?"":"s")} last={noTradeDays.length===0&&noTradeSessionsTally.explicit===0} color={outOfSessionTrades>0?"#fcd34d":"#64748b"}/>
             {(noTradeDays.length>0||noTradeSessionsTally.explicit>0)&&(function(){
-              // Tally reason tags across no-trade days AND per-session no-trade logs in range.
               var counts={};
               noTradeDays.forEach(function(d){
                 var reasons=(d.noTradeReasons&&d.noTradeReasons.length)?d.noTradeReasons:(d.noTradeReason?["(custom)"]:[]);
                 reasons.forEach(function(r){counts[r]=(counts[r]||0)+1;});
               });
-              // CHANGED: Also include per-session no-trade reasons.
               Object.keys(noTradeSessionsTally.reasonCounts).forEach(function(k){counts[k]=(counts[k]||0)+noTradeSessionsTally.reasonCounts[k];});
               var keys=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a];});
               if(keys.length===0)return <StatRow label="Reasons" value="(none tagged)" last color="#64748b"/>;
@@ -7912,7 +7910,8 @@ function PerformanceTab(props){
                 </div>
               );
             })()}
-            </StatSec>;
+            </StatSec>
+            </>;
           })()}
           </div>
         </div>
