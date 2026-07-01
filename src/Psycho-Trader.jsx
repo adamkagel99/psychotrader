@@ -4423,10 +4423,12 @@ function TradesTab(props){
   },[props.reloadKey]);
   // CHANGED: Multi-level sort. sortChain is an ordered list of sort ids (priority: primary first).
   // Empty chain = default timestamp sort. Each id breaks ties of the ones before it.
-  var [sortChain,setSortChain]=useState([]);
+  var [sortChain,setSortChain]=useState(function(){try{var s=localStorage.getItem("pt-trades-sort");return s?JSON.parse(s):[];}catch(e){return [];}});
+  useEffect(function(){try{localStorage.setItem("pt-trades-sort",JSON.stringify(sortChain));}catch(e){}},[sortChain]);
   var [sortOpen,setSortOpen]=useState(false);
   var [filterOpen,setFilterOpen]=useState(false);
-  var [filters,setFilters]=useState({});
+  var [filters,setFilters]=useState(function(){try{var s=localStorage.getItem("pt-trades-filters");return s?JSON.parse(s):{};}catch(e){return {};}});
+  useEffect(function(){try{localStorage.setItem("pt-trades-filters",JSON.stringify(filters));}catch(e){}},[filters]);
   // CHANGED: Screenshot gallery scope — "session" (current date) or "all" (whole journal).
   var [galleryScope,setGalleryScope]=useState("session");
   // CHANGED: No-Trade Day screenshot upload state + a lightbox viewer for those shots.
