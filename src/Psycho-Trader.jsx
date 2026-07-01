@@ -1046,6 +1046,10 @@ function SessionCommitmentReview(props){
   var closedInSession=(props.sessionTrades||[]).filter(function(t){return t&&t.status!=="open";});
   var maxT=parseInt(c.maxTrades);
   var hasMax=!isNaN(maxT)&&maxT>0;
+  // CHANGED: Only display review once the session has ended — either by time (past its endMin,
+  // or any past day) or by trigger (trade-cap reached).
+  var capHit=hasMax&&closedInSession.length>=maxT;
+  if(!props.sessionEnded&&!capHit)return null;
   var over=hasMax&&closedInSession.length>maxT;
   var aff=c.setupsReviewAffirmed;
   function persist(patch){
@@ -5186,7 +5190,7 @@ function TradesTab(props){
                 <span style={{fontSize:11,color:"#475569",marginLeft:"auto"}}>{g.items.length===0?((ntSessions[gk]||sessionEnded(gk))?"no-trade":"empty"):g.items.length+" trade"+(g.items.length===1?"":"s")}</span>
               </div>
               {/* CHANGED: Per-session commitment review — replaces the old aggregate "Daily" review. */}
-              {gk!=="_out"&&<SessionCommitmentReview sessionId={gk} sessionLabel={hdr.label} sessionTrades={g.items.map(function(p){return p.t;})} isToday={isToday} state={props.state} setState={props.setState} todayJournalEntry={todayJournalEntry} setTodayJournalEntry={setTodayJournalEntry} pastSession={pastSession} setPastSessions={setPastSessions} bumpReloadKey={props.bumpReloadKey}/>}
+              {gk!=="_out"&&<SessionCommitmentReview sessionId={gk} sessionLabel={hdr.label} sessionTrades={g.items.map(function(p){return p.t;})} sessionEnded={sessionEnded(gk)} isToday={isToday} state={props.state} setState={props.setState} todayJournalEntry={todayJournalEntry} setTodayJournalEntry={setTodayJournalEntry} pastSession={pastSession} setPastSessions={setPastSessions} bumpReloadKey={props.bumpReloadKey}/>}
               {!isEmpty&&(
                 <div style={{display:"grid",gridTemplateColumns:props.mobile?"1fr":"1fr 1fr 1fr",gap:12,alignItems:"stretch"}}>
                   {g.items.map(function(pair){
