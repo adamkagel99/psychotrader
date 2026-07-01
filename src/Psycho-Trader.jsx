@@ -1034,7 +1034,11 @@ function todayCleanStatus(todayTrades,todayRiskMax){
 function SessionNoTradePanel(props){
   var data=props.data;
   var isLogged=!!data;
-  var [editing,setEditing]=useState(!isLogged);
+  // CHANGED: If the session's window has ended and no data yet, treat it as an implicit
+  // auto no-trade session. Panel starts read-only ("Auto no-trade session") with an "Add notes"
+  // affordance; only sessions that haven't yet ended (or explicitly cleared) show the "Skip?" prompt.
+  var isAutoNoTrade=!isLogged&&props.sessionEnded;
+  var [editing,setEditing]=useState(!isLogged&&!isAutoNoTrade);
   var [reasons,setReasons]=useState((data&&data.reasons)||[]);
   var [reason,setReason]=useState((data&&data.reason)||"");
   var [shots,setShots]=useState((data&&data.shots)||[]);
@@ -1042,19 +1046,24 @@ function SessionNoTradePanel(props){
   var fileRef=useRef(null);
   function save(){props.onSave(props.sessionId,{reasons:reasons,reason:reason,shots:shots});setEditing(false);}
   function cancel(){setReasons((data&&data.reasons)||[]);setReason((data&&data.reason)||"");setShots((data&&data.shots)||[]);setEditing(false);}
-  if(isLogged&&!editing){
+  // Read-only view: user has logged, OR the session has ended without any logging (auto state).
+  if((isLogged||isAutoNoTrade)&&!editing){
+    var effReasons=(data&&data.reasons)||[];
+    var effReason=(data&&data.reason)||"";
+    var effShots=(data&&data.shots)||[];
     return (
       <div style={{padding:"10px 12px",background:"#0a0a0f",border:"1px dashed #4338ca44",borderRadius:8}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:6}}>
-          <span style={{fontSize:10,fontWeight:800,color:"#fcd34d",background:"#1c1408",border:"1px solid #a16207",borderRadius:4,padding:"2px 7px",letterSpacing:0.5}}>⊘ NO-TRADE SESSION</span>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:effReasons.length||effReason||effShots.length?6:0}}>
+          <span style={{fontSize:10,fontWeight:800,color:"#fcd34d",background:"#1c1408",border:"1px solid #a16207",borderRadius:4,padding:"2px 7px",letterSpacing:0.5}}>⊘ NO-TRADE SESSION{isAutoNoTrade?" (auto)":""}</span>
           <div style={{display:"flex",gap:8}}>
-            <button onClick={function(){setEditing(true);}} style={{padding:"2px 8px",background:"transparent",border:"1px solid #4338ca",borderRadius:4,color:"#a5b4fc",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit",letterSpacing:0.5}}>EDIT</button>
-            <button onClick={function(){if(confirm("Clear no-trade log for this session?"))props.onClear(props.sessionId);}} style={{padding:"2px 8px",background:"transparent",border:"1px solid #4b5563",borderRadius:4,color:"#94a3b8",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit",letterSpacing:0.5}}>CLEAR</button>
+            <button onClick={function(){setEditing(true);}} style={{padding:"2px 8px",background:"transparent",border:"1px solid #4338ca",borderRadius:4,color:"#a5b4fc",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit",letterSpacing:0.5}}>{isAutoNoTrade&&!isLogged?"ADD NOTES":"EDIT"}</button>
+            {isLogged&&<button onClick={function(){if(confirm("Clear no-trade log for this session?"))props.onClear(props.sessionId);}} style={{padding:"2px 8px",background:"transparent",border:"1px solid #4b5563",borderRadius:4,color:"#94a3b8",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit",letterSpacing:0.5}}>CLEAR</button>}
           </div>
         </div>
-        {(data.reasons||[]).length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:data.reason?8:0}}>{data.reasons.map(function(r){return <span key={r} style={{fontSize:11,color:"#a5b4fc",background:"#1e1b4b",border:"1px solid #4338ca",borderRadius:12,padding:"2px 9px",fontWeight:600}}>{r}</span>;})}</div>}
-        {data.reason&&<div style={{fontSize:13,color:"#cbd5e1",lineHeight:1.5}}>{data.reason}</div>}
-        {(data.shots||[]).length>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(70px,1fr))",gap:5,marginTop:8}}>{data.shots.map(function(src,si){return <img key={si} src={src} alt="" onClick={function(){if(props.setNoTradeViewer)props.setNoTradeViewer(src);}} style={{width:"100%",aspectRatio:"1",objectFit:"cover",borderRadius:4,cursor:"pointer",border:"1px solid #334155"}}/>;})}</div>}
+        {effReasons.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:effReason?8:0}}>{effReasons.map(function(r){return <span key={r} style={{fontSize:11,color:"#a5b4fc",background:"#1e1b4b",border:"1px solid #4338ca",borderRadius:12,padding:"2px 9px",fontWeight:600}}>{r}</span>;})}</div>}
+        {effReason&&<div style={{fontSize:13,color:"#cbd5e1",lineHeight:1.5}}>{effReason}</div>}
+        {effShots.length>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(70px,1fr))",gap:5,marginTop:8}}>{effShots.map(function(src,si){return <img key={si} src={src} alt="" onClick={function(){if(props.setNoTradeViewer)props.setNoTradeViewer(src);}} style={{width:"100%",aspectRatio:"1",objectFit:"cover",borderRadius:4,cursor:"pointer",border:"1px solid #334155"}}/>;})}</div>}
+        {isAutoNoTrade&&!isLogged&&effReasons.length===0&&!effReason&&effShots.length===0&&<div style={{fontSize:12,color:"#64748b",fontStyle:"italic"}}>No trades placed in this session. Tap ADD NOTES to record why.</div>}
       </div>
     );
   }
@@ -4926,7 +4935,17 @@ function TradesTab(props){
           if(key==="_out")return {label:"Out of Session",sub:"",color:"#fcd34d",border:"#a1620744"};
           var s=enabledSess.find(function(x){return x.id===key;});
           if(!s)return {label:key,sub:"",color:"#94a3b8",border:"#33415544"};
-          return {label:s.label||s.id,sub:fmtMins(s.startMin)+" – "+fmtMins(s.endMin),color:"#a5b4fc",border:"#4338ca44"};
+          // CHANGED: Prefer s.name (the user-set label), then s.label (legacy), then a friendly
+          // fallback derived from the session's time window — never the raw id.
+          var nm=(s.name&&String(s.name).trim())||(s.label&&String(s.label).trim())||(fmtMins(s.startMin)+"–"+fmtMins(s.endMin));
+          return {label:nm,sub:fmtMins(s.startMin)+" – "+fmtMins(s.endMin),color:"#a5b4fc",border:"#4338ca44"};
+        }
+        // CHANGED: Has the session's window ended? (For today; past days are always "ended".)
+        function sessionEnded(sid){
+          if(!isToday)return true;
+          var s=enabledSess.find(function(x){return x.id===sid;});
+          if(!s)return true;
+          try{return getCurrentMinutesLocal()>=s.endMin;}catch(e){return false;}
         }
         // Persist per-session no-trade record (creates or updates).
         function saveSessionNoTrade(sid,patch){
@@ -4968,7 +4987,7 @@ function TradesTab(props){
               <div style={{display:"flex",alignItems:"baseline",gap:10,marginBottom:8,paddingBottom:6,borderBottom:"1px solid "+hdr.border}}>
                 <span style={{fontSize:11,fontWeight:800,letterSpacing:1,textTransform:"uppercase",color:hdr.color}}>{hdr.label}</span>
                 {hdr.sub&&<span style={{fontSize:11,color:"#64748b",fontVariantNumeric:"tabular-nums"}}>{hdr.sub}</span>}
-                <span style={{fontSize:11,color:"#475569",marginLeft:"auto"}}>{g.items.length===0?(ntSessions[gk]?"no-trade":"empty"):g.items.length+" trade"+(g.items.length===1?"":"s")}</span>
+                <span style={{fontSize:11,color:"#475569",marginLeft:"auto"}}>{g.items.length===0?((ntSessions[gk]||sessionEnded(gk))?"no-trade":"empty"):g.items.length+" trade"+(g.items.length===1?"":"s")}</span>
               </div>
               {!isEmpty&&(
                 <div style={{display:"grid",gridTemplateColumns:props.mobile?"1fr":"1fr 1fr 1fr",gap:12,alignItems:"stretch"}}>
@@ -4987,7 +5006,7 @@ function TradesTab(props){
                   })}
                 </div>
               )}
-              {isEmpty&&isRelevantSession&&<SessionNoTradePanel sessionId={gk} sessionLabel={hdr.label} data={ntSessions[gk]} onSave={saveSessionNoTrade} onClear={clearSessionNoTrade} setNoTradeViewer={setNoTradeViewer}/>}
+              {isEmpty&&isRelevantSession&&<SessionNoTradePanel sessionId={gk} sessionLabel={hdr.label} data={ntSessions[gk]} sessionEnded={sessionEnded(gk)} onSave={saveSessionNoTrade} onClear={clearSessionNoTrade} setNoTradeViewer={setNoTradeViewer}/>}
             </div>
           );
         });
