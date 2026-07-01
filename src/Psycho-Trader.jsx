@@ -4872,13 +4872,37 @@ function TradesTab(props){
                       {g.reasons&&g.reasons.length>0&&<div style={{fontSize:11,color:"#94a3b8"}}>{g.reasons.join(" · ")}</div>}
                       {g.note&&<div style={{fontSize:11,color:"#64748b",marginTop:4,fontStyle:"italic",lineHeight:1.4}}>{g.note}</div>}
                     </div>
-                  ):(
-                    <div style={{display:"grid",gridTemplateColumns:props.mobile?"1fr":"repeat(3, minmax(0,1fr))",gap:8}}>
-                      {g.trades.map(function(t,i){return (
-                        <TradeTile key={(t.id||"")+"_"+i} t={t} i={i} posMax={settings.positionMax} riskMax={settings.riskMax} hideControls={true}/>
-                      );})}
-                    </div>
-                  )}
+                  ):(function(){
+                    // CHANGED: Group by session under each date (matches the per-date journal view).
+                    var enab=[];try{enab=getSessions(settings).filter(function(s){return s.enabled!==false;});}catch(e){}
+                    function fm(m){var h=Math.floor(m/60),mm=m%60,ap=h>=12?"PM":"AM";var h12=((h+11)%12)+1;return h12+":"+(mm<10?"0":"")+mm+" "+ap;}
+                    var buckets={};var order=[];
+                    g.trades.forEach(function(t,i){
+                      var sid=null;try{sid=getSessionForTrade(t);}catch(e){}
+                      var key=sid||"_out";
+                      if(!buckets[key]){buckets[key]={items:[]};order.push(key);}
+                      buckets[key].items.push({t:t,i:i});
+                    });
+                    order.sort(function(a,b){if(a==="_out")return 1;if(b==="_out")return -1;var sa=enab.find(function(s){return s.id===a;});var sb=enab.find(function(s){return s.id===b;});return ((sa&&sa.startMin)||0)-((sb&&sb.startMin)||0);});
+                    return order.map(function(gk){
+                      var s=enab.find(function(x){return x.id===gk;});
+                      var lbl=gk==="_out"?"Out of Session":((s&&(s.name||s.label))||(s?fm(s.startMin)+"–"+fm(s.endMin):gk));
+                      var sub=gk==="_out"?"":(s?fm(s.startMin)+" – "+fm(s.endMin):"");
+                      var color=gk==="_out"?"#fcd34d":"#a5b4fc";
+                      return (
+                        <div key={gk} style={{marginBottom:10}}>
+                          <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:6}}>
+                            <span style={{fontSize:10,fontWeight:800,letterSpacing:1,textTransform:"uppercase",color:color}}>{lbl}</span>
+                            {sub&&<span style={{fontSize:10,color:"#64748b",fontVariantNumeric:"tabular-nums"}}>{sub}</span>}
+                            <span style={{fontSize:10,color:"#475569",marginLeft:"auto"}}>{buckets[gk].items.length}</span>
+                          </div>
+                          <div style={{display:"grid",gridTemplateColumns:props.mobile?"1fr":"repeat(3, minmax(0,1fr))",gap:8}}>
+                            {buckets[gk].items.map(function(p){return <TradeTile key={(p.t.id||"")+"_"+p.i} t={p.t} i={p.i} posMax={settings.positionMax} riskMax={settings.riskMax} hideControls={true}/>;})}
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
                 </div>
               );
             })}
