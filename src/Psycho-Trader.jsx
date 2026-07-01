@@ -1028,6 +1028,69 @@ function todayCleanStatus(todayTrades,todayRiskMax){
 // CHANGED: PRE-MARKET COMMITMENT — the trader states a plan before the day (max trades + which
 // setups they'll take). At day's end we score adherence against their OWN stated plan, which
 // lands harder than a generic rule. Returns null if no commitment was made.
+// CHANGED: Per-session commitment review — renders under each session header. Shows whether
+// the user honored THIS session's committed trade cap + setups; Yes/No toggle mirrors to that
+// session's slot in state.commitments[sid].
+function SessionCommitmentReview(props){
+  var sid=props.sessionId;
+  var stateSrc=props.isToday?props.state:props.pastSession;
+  if(!stateSrc)return null;
+  var map=(function(){
+    if(!stateSrc)return {};
+    if(stateSrc.commitments&&typeof stateSrc.commitments==="object")return stateSrc.commitments;
+    if(stateSrc.commitment&&stateSrc.commitment.committed)return {_legacy:stateSrc.commitment};
+    return {};
+  })();
+  var c=map[sid];
+  if(!c||!c.committed)return null;
+  var closedInSession=(props.sessionTrades||[]).filter(function(t){return t&&t.status!=="open";});
+  var maxT=parseInt(c.maxTrades);
+  var hasMax=!isNaN(maxT)&&maxT>0;
+  var over=hasMax&&closedInSession.length>maxT;
+  var aff=c.setupsReviewAffirmed;
+  function persist(patch){
+    var nm=Object.assign({},map);
+    nm[sid]=Object.assign({},c,patch,{reviewed:true});
+    var agg=aggregateCommitment(nm);
+    if(props.isToday){
+      props.setState(function(s){return Object.assign({},s,{commitments:nm,commitment:agg||s.commitment});});
+      if(props.todayJournalEntry){
+        try{
+          var et=props.todayJournalEntry.trades||[];
+          var updated=Object.assign({},props.todayJournalEntry,{commitments:nm,commitment:agg||props.todayJournalEntry.commitment,disciplineScore:calcDiscipline(et,props.todayJournalEntry.riskMax,{commitments:nm})});
+          localStorage.setItem("journal:"+todayStr().replace(/\//g,"-"),JSON.stringify(updated));
+          props.setTodayJournalEntry(updated);
+          if(props.bumpReloadKey)props.bumpReloadKey();
+        }catch(e){}
+      }
+    }else if(props.pastSession){
+      var et=props.pastSession.trades||[];
+      var updated=Object.assign({},props.pastSession,{commitments:nm,commitment:agg||props.pastSession.commitment,disciplineScore:calcDiscipline(et,props.pastSession.riskMax,{commitments:nm})});
+      try{localStorage.setItem("journal:"+String(props.pastSession.date).replace(/\//g,"-"),JSON.stringify(updated));}catch(e){}
+      if(props.setPastSessions)props.setPastSessions(function(arr){return arr.map(function(x){return x.date===props.pastSession.date?updated:x;});});
+      if(props.bumpReloadKey)props.bumpReloadKey();
+    }
+  }
+  return (
+    <div style={{marginBottom:12,padding:"10px 12px",background:over||aff===false?"#1c0a0a":"#0f1a14",border:"1px solid "+(over||aff===false?"#7f1d1d":"#166534"),borderRadius:8}}>
+      <div style={{fontSize:10,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:600,marginBottom:6}}>Commitment Review</div>
+      {hasMax&&(
+        <div style={{fontSize:12,lineHeight:1.5,color:over?"#fca5a5":"#86efac",marginBottom:c.setups?6:0}}>
+          {over?"✗ ":"✓ "}{over?("Took "+closedInSession.length+" — over "+maxT+"-trade cap"):("Stayed within "+maxT+"-trade cap ("+closedInSession.length+")")}
+        </div>
+      )}
+      {c.setups&&(
+        <>
+          <div style={{fontSize:12,color:"#94a3b8",marginBottom:6}}>Committed setups: <span style={{color:"#cbd5e1"}}>{c.setups}</span></div>
+          <div style={{display:"flex",gap:6}}>
+            <button onClick={function(){persist({setupsReviewAffirmed:true});}} style={{flex:1,padding:"6px",background:aff===true?"#14532d":"#0a0a0f",border:"1px solid "+(aff===true?"#22c55e":"#1e293b"),borderRadius:5,color:aff===true?"#86efac":"#94a3b8",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Stuck to plan</button>
+            <button onClick={function(){persist({setupsReviewAffirmed:false});}} style={{flex:1,padding:"6px",background:aff===false?"#3a1010":"#0a0a0f",border:"1px solid "+(aff===false?"#ef4444":"#1e293b"),borderRadius:5,color:aff===false?"#fca5a5":"#94a3b8",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Deviated</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 // CHANGED: Per-session no-trade panel. Rendered inside each empty enabled-for-today session
 // group. Lets the user record why they skipped that specific session (independent of others).
 // Once saved shows the recorded state read-only with an Edit affordance.
@@ -4896,6 +4959,88 @@ function TradesTab(props){
         </div>
         );
       })()}
+      {((!isToday&&pastSession)||(isToday&&todayJournalEntry))&&(function(){
+        var entry=isToday?todayJournalEntry:pastSession;
+        var sTrades=entry.trades||[];
+        var sPnl=parseFloat(entry.pnl)||0;
+        var wins=sTrades.filter(function(t){return parseFloat(t.pnl)>0;}).length;
+        var losses=sTrades.filter(function(t){return parseFloat(t.pnl)<0;}).length;
+        var bes=sTrades.filter(function(t){return Math.abs(parseFloat(t.pnl)||0)<0.01;}).length;
+        // CHANGED: Use the stored disciplineScore (kept in sync by the commitment-edit handler + the
+        // one-time migration). Recomputing live here can disagree with the journal/performance
+        // displays when commitment context differs.
+        var disc=(entry.disciplineScore!=null
+          ? parseFloat(entry.disciplineScore)
+          : calcDiscipline(sTrades,entry.riskMax,entry.commitments?{commitments:entry.commitments}:(isToday?{commitments:getCommitmentsMap(props.state)}:{commitment:entry.commitment||null})));
+        return (
+          <div style={CS({marginTop:18,border:"1px solid "+(isToday?"#16653444":"#1e293b")})}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <div style={{fontSize:13,color:isToday?"#86efac":"#a5b4fc",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{isToday?"Saved to Journal ✓":"Day Summary"}</div>
+            </div>
+            {entry.noTradeDay&&<NoTradeDayDetails entry={entry} isToday={isToday} selectedDate={selectedDate} setTodayJournalEntry={setTodayJournalEntry} setPastSessions={setPastSessions} bumpReloadKey={props.bumpReloadKey} setNoTradeViewer={setNoTradeViewer}/>}
+            {/* CHANGED: Day was initially saved as no-trade, then trades were taken. Preserve the original sit-out reasons as historical context. */}
+            {!entry.noTradeDay&&((entry.initialNoTradeReasons||[]).length>0||entry.initialNoTradeReason)&&<div style={{marginBottom:12,padding:"10px 12px",background:"#0a0a0f",border:"1px dashed #a16207",borderRadius:8}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:6}}>
+                <div style={{fontSize:10,color:"#fbbf24",textTransform:"uppercase",letterSpacing:0.5,fontWeight:600}}>Initially planned as no-trade</div>
+                {entry.initialNoTradeLoggedAt&&<span style={{fontSize:10,color:"#64748b"}}>logged {(function(){try{var d=new Date(entry.initialNoTradeLoggedAt);return d.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});}catch(e){return "";}})()}</span>}
+              </div>
+              {(entry.initialNoTradeReasons||[]).length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:entry.initialNoTradeReason?8:0}}>{(entry.initialNoTradeReasons||[]).map(function(r){return <span key={r} style={{fontSize:11,color:"#fcd34d",background:"#1c1408",border:"1px solid #a16207",borderRadius:12,padding:"2px 9px",fontWeight:600}}>{r}</span>;})}</div>}
+              {entry.initialNoTradeReason&&<div style={{fontSize:13,color:"#cbd5e1",lineHeight:1.5}}>{entry.initialNoTradeReason}</div>}
+              <div style={{fontSize:11,color:"#64748b",marginTop:6,fontStyle:"italic"}}>Took trades anyway — review whether the setup justified the change of plan.</div>
+            </div>}
+            {entry.noTradeDay&&(entry.noTradeShots||[]).length>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(80px,1fr))",gap:6,marginBottom:12}}>{(entry.noTradeShots||[]).map(function(src,si){return <div key={si} style={{aspectRatio:"1",background:"#0a0a0f",border:"1px solid #334155",borderRadius:6,overflow:"hidden"}}><img src={src} alt={"Screenshot "+(si+1)} onClick={function(){setNoTradeViewer(src);}} style={{width:"100%",height:"100%",objectFit:"cover",cursor:"pointer",display:"block"}}/></div>;})}</div>}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:14}}>
+              <div style={{padding:"8px 10px",background:"#111118",border:"1px solid #1e293b",borderRadius:6}}>
+                <div style={{fontSize:10,color:"#64748b",textTransform:"uppercase",letterSpacing:0.5}}>P&L</div>
+                <div style={{fontSize:16,fontWeight:700,color:sPnl>=0?"#22c55e":"#ef4444",marginTop:3}}>{HIDE_DOLLAR_PNL?(function(){var dateKey=isToday?todayStr():selectedDate;var startBal=getAccountBalanceAtDate(dateKey);var pct=startBal>0?(sPnl/startBal*100):0;return (pct>=0?"+":"")+pct.toFixed(2)+"%";})():((sPnl>=0?"+":"-")+"$"+Math.abs(sPnl).toFixed(2))}</div>
+              </div>
+              <div style={{padding:"8px 10px",background:"#111118",border:"1px solid #1e293b",borderRadius:6}}>
+                <div style={{fontSize:10,color:"#64748b",textTransform:"uppercase",letterSpacing:0.5}}>W/L/BE</div>
+                <div style={{fontSize:14,fontWeight:700,marginTop:3}}>
+                  <span style={{color:"#22c55e"}}>{wins}</span>
+                  <span style={{color:"#fff"}}>/</span>
+                  <span style={{color:"#ef4444"}}>{losses}</span>
+                  <span style={{color:"#fff"}}>/</span>
+                  <span style={{color:"#94a3b8"}}>{bes}</span>
+                </div>
+              </div>
+              <div style={{padding:"8px 10px",background:"#111118",border:"1px solid #1e293b",borderRadius:6}}>
+                <div style={{fontSize:10,color:"#64748b",textTransform:"uppercase",letterSpacing:0.5}}>Trades</div>
+                <div style={{fontSize:16,fontWeight:700,color:"#cbd5e1",marginTop:3}}>{sTrades.length}</div>
+              </div>
+              <div style={{padding:"8px 10px",background:"#111118",border:"1px solid #1e293b",borderRadius:6}}>
+                <div style={{fontSize:10,color:"#64748b",textTransform:"uppercase",letterSpacing:0.5}}>Discipline</div>
+                <div style={{fontSize:16,fontWeight:700,color:disc>=80?"#22c55e":disc>=60?"#fbbf24":"#ef4444",marginTop:3}}>{disc}</div>
+              </div>
+            </div>
+            {/* CHANGED: COMMITMENT REVIEW — shows once the day is saved to the journal (the enclosing
+                block already gates on todayJournalEntry) and a commitment was made. */}
+            {/* CHANGED: Render the snapshot of economic events that matched the user's filters
+               on this day. Helps re-read past sessions with the macro context they were traded in. */}
+            {(function(){
+              var ev=(entry.events||[]).slice().sort(function(a,b){return (a.ts||0)-(b.ts||0);});
+              if(ev.length===0)return null;
+              function impColor(imp){if(imp==="high")return "#ef4444";if(imp==="medium")return "#fbbf24";return "#64748b";}
+              function fmtTime(ts){if(!ts)return "";var d=new Date(ts);var h=d.getHours();var m=d.getMinutes();var ap=h>=12?"PM":"AM";var hh=h%12||12;return hh+":"+String(m).padStart(2,"0")+" "+ap;}
+              return (
+                <div style={{marginTop:14,paddingTop:12,borderTop:"1px solid #1e293b"}}>
+                  <div style={{fontSize:11,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600,marginBottom:8}}>Economic Events · {ev.length}</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                    {ev.map(function(e,i){return (
+                      <div key={i} style={{display:"flex",alignItems:"center",gap:8,fontSize:12}}>
+                        <span style={{width:6,height:6,borderRadius:"50%",background:impColor(e.impact),flexShrink:0}}/>
+                        <span style={{color:"#94a3b8",fontVariantNumeric:"tabular-nums",minWidth:60}}>{fmtTime(e.ts)}</span>
+                        <span style={{color:"#64748b",fontSize:10,fontWeight:700,letterSpacing:0.5}}>{e.currency||""}</span>
+                        <span style={{color:"#e2e8f0",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.title||""}</span>
+                      </div>
+                    );})}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        );
+      })()}
       {/* CHANGED: Group trade cards by session (in the same chronological order as sort). Each
           session gets its own header + grid so the grouping is visually distinct. Empty enabled
           sessions render an inline no-trade log so each session can be logged independently.
@@ -4989,6 +5134,8 @@ function TradesTab(props){
                 {hdr.sub&&<span style={{fontSize:11,color:"#64748b",fontVariantNumeric:"tabular-nums"}}>{hdr.sub}</span>}
                 <span style={{fontSize:11,color:"#475569",marginLeft:"auto"}}>{g.items.length===0?((ntSessions[gk]||sessionEnded(gk))?"no-trade":"empty"):g.items.length+" trade"+(g.items.length===1?"":"s")}</span>
               </div>
+              {/* CHANGED: Per-session commitment review — replaces the old aggregate "Daily" review. */}
+              {gk!=="_out"&&<SessionCommitmentReview sessionId={gk} sessionLabel={hdr.label} sessionTrades={g.items.map(function(p){return p.t;})} isToday={isToday} state={props.state} setState={props.setState} todayJournalEntry={todayJournalEntry} setTodayJournalEntry={setTodayJournalEntry} pastSession={pastSession} setPastSessions={setPastSessions} bumpReloadKey={props.bumpReloadKey}/>}
               {!isEmpty&&(
                 <div style={{display:"grid",gridTemplateColumns:props.mobile?"1fr":"1fr 1fr 1fr",gap:12,alignItems:"stretch"}}>
                   {g.items.map(function(pair){
@@ -5012,135 +5159,13 @@ function TradesTab(props){
         });
       })()}
       {/* CHANGED: Day summary + note editor. Shows for past dates always, and today after save-to-journal. */}
+      {/* CHANGED: Daily Note moved to bottom of entry — after all sessions. */}
       {((!isToday&&pastSession)||(isToday&&todayJournalEntry))&&(function(){
         var entry=isToday?todayJournalEntry:pastSession;
-        var sTrades=entry.trades||[];
-        var sPnl=parseFloat(entry.pnl)||0;
-        var wins=sTrades.filter(function(t){return parseFloat(t.pnl)>0;}).length;
-        var losses=sTrades.filter(function(t){return parseFloat(t.pnl)<0;}).length;
-        var bes=sTrades.filter(function(t){return Math.abs(parseFloat(t.pnl)||0)<0.01;}).length;
-        // CHANGED: Use the stored disciplineScore (kept in sync by the commitment-edit handler + the
-        // one-time migration). Recomputing live here can disagree with the journal/performance
-        // displays when commitment context differs.
-        var disc=(entry.disciplineScore!=null
-          ? parseFloat(entry.disciplineScore)
-          : calcDiscipline(sTrades,entry.riskMax,entry.commitments?{commitments:entry.commitments}:(isToday?{commitments:getCommitmentsMap(props.state)}:{commitment:entry.commitment||null})));
         return (
-          <div style={CS({marginTop:18,border:"1px solid "+(isToday?"#16653444":"#1e293b")})}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-              <div style={{fontSize:13,color:isToday?"#86efac":"#a5b4fc",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{isToday?"Saved to Journal ✓":"Day Summary"}</div>
-            </div>
-            {entry.noTradeDay&&<NoTradeDayDetails entry={entry} isToday={isToday} selectedDate={selectedDate} setTodayJournalEntry={setTodayJournalEntry} setPastSessions={setPastSessions} bumpReloadKey={props.bumpReloadKey} setNoTradeViewer={setNoTradeViewer}/>}
-            {/* CHANGED: Day was initially saved as no-trade, then trades were taken. Preserve the original sit-out reasons as historical context. */}
-            {!entry.noTradeDay&&((entry.initialNoTradeReasons||[]).length>0||entry.initialNoTradeReason)&&<div style={{marginBottom:12,padding:"10px 12px",background:"#0a0a0f",border:"1px dashed #a16207",borderRadius:8}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:6}}>
-                <div style={{fontSize:10,color:"#fbbf24",textTransform:"uppercase",letterSpacing:0.5,fontWeight:600}}>Initially planned as no-trade</div>
-                {entry.initialNoTradeLoggedAt&&<span style={{fontSize:10,color:"#64748b"}}>logged {(function(){try{var d=new Date(entry.initialNoTradeLoggedAt);return d.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});}catch(e){return "";}})()}</span>}
-              </div>
-              {(entry.initialNoTradeReasons||[]).length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:entry.initialNoTradeReason?8:0}}>{(entry.initialNoTradeReasons||[]).map(function(r){return <span key={r} style={{fontSize:11,color:"#fcd34d",background:"#1c1408",border:"1px solid #a16207",borderRadius:12,padding:"2px 9px",fontWeight:600}}>{r}</span>;})}</div>}
-              {entry.initialNoTradeReason&&<div style={{fontSize:13,color:"#cbd5e1",lineHeight:1.5}}>{entry.initialNoTradeReason}</div>}
-              <div style={{fontSize:11,color:"#64748b",marginTop:6,fontStyle:"italic"}}>Took trades anyway — review whether the setup justified the change of plan.</div>
-            </div>}
-            {entry.noTradeDay&&(entry.noTradeShots||[]).length>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(80px,1fr))",gap:6,marginBottom:12}}>{(entry.noTradeShots||[]).map(function(src,si){return <div key={si} style={{aspectRatio:"1",background:"#0a0a0f",border:"1px solid #334155",borderRadius:6,overflow:"hidden"}}><img src={src} alt={"Screenshot "+(si+1)} onClick={function(){setNoTradeViewer(src);}} style={{width:"100%",height:"100%",objectFit:"cover",cursor:"pointer",display:"block"}}/></div>;})}</div>}
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:14}}>
-              <div style={{padding:"8px 10px",background:"#111118",border:"1px solid #1e293b",borderRadius:6}}>
-                <div style={{fontSize:10,color:"#64748b",textTransform:"uppercase",letterSpacing:0.5}}>P&L</div>
-                <div style={{fontSize:16,fontWeight:700,color:sPnl>=0?"#22c55e":"#ef4444",marginTop:3}}>{HIDE_DOLLAR_PNL?(function(){var dateKey=isToday?todayStr():selectedDate;var startBal=getAccountBalanceAtDate(dateKey);var pct=startBal>0?(sPnl/startBal*100):0;return (pct>=0?"+":"")+pct.toFixed(2)+"%";})():((sPnl>=0?"+":"-")+"$"+Math.abs(sPnl).toFixed(2))}</div>
-              </div>
-              <div style={{padding:"8px 10px",background:"#111118",border:"1px solid #1e293b",borderRadius:6}}>
-                <div style={{fontSize:10,color:"#64748b",textTransform:"uppercase",letterSpacing:0.5}}>W/L/BE</div>
-                <div style={{fontSize:14,fontWeight:700,marginTop:3}}>
-                  <span style={{color:"#22c55e"}}>{wins}</span>
-                  <span style={{color:"#fff"}}>/</span>
-                  <span style={{color:"#ef4444"}}>{losses}</span>
-                  <span style={{color:"#fff"}}>/</span>
-                  <span style={{color:"#94a3b8"}}>{bes}</span>
-                </div>
-              </div>
-              <div style={{padding:"8px 10px",background:"#111118",border:"1px solid #1e293b",borderRadius:6}}>
-                <div style={{fontSize:10,color:"#64748b",textTransform:"uppercase",letterSpacing:0.5}}>Trades</div>
-                <div style={{fontSize:16,fontWeight:700,color:"#cbd5e1",marginTop:3}}>{sTrades.length}</div>
-              </div>
-              <div style={{padding:"8px 10px",background:"#111118",border:"1px solid #1e293b",borderRadius:6}}>
-                <div style={{fontSize:10,color:"#64748b",textTransform:"uppercase",letterSpacing:0.5}}>Discipline</div>
-                <div style={{fontSize:16,fontWeight:700,color:disc>=80?"#22c55e":disc>=60?"#fbbf24":"#ef4444",marginTop:3}}>{disc}</div>
-              </div>
-            </div>
-            {/* CHANGED: COMMITMENT REVIEW — shows once the day is saved to the journal (the enclosing
-                block already gates on todayJournalEntry) and a commitment was made. */}
-            {isToday&&(function(){
-              var sc=scoreCommitment(props.state);
-              if(!sc)return null;
-              var aff=(function(){var m=getCommitmentsMap(props.state);var vals=Object.keys(m).map(function(k){return m[k]&&m[k].setupsReviewAffirmed;}).filter(function(v){return v!=null;});if(vals.indexOf(false)>=0)return false;if(vals.length>0&&vals.every(function(v){return v===true;}))return true;return null;})();
-              function setAff(val){
-                props.setState(function(s){
-                  var m=getCommitmentsMap(s);var nm={};
-                  Object.keys(m).forEach(function(k){nm[k]=Object.assign({},m[k],{setupsReviewAffirmed:val,reviewed:true});});
-                  var agg=aggregateCommitment(nm);
-                  return Object.assign({},s,{commitments:nm,commitment:agg||s.commitment});
-                });
-                // CHANGED: Persist the updated score so Performance/lock views stay consistent with the review.
-                if(isToday&&todayJournalEntry){
-                  try{
-                    var m2=getCommitmentsMap(props.state);var nm2={};
-                    Object.keys(m2).forEach(function(k){nm2[k]=Object.assign({},m2[k],{setupsReviewAffirmed:val,reviewed:true});});
-                    var newAgg=aggregateCommitment(nm2);
-                    var et=todayJournalEntry.trades||[];
-                    var updated=Object.assign({},todayJournalEntry,{commitments:nm2,commitment:newAgg||todayJournalEntry.commitment,disciplineScore:calcDiscipline(et,todayJournalEntry.riskMax,{commitments:nm2})});
-                    localStorage.setItem("journal:"+todayStr().replace(/\//g,"-"),JSON.stringify(updated));
-                    setTodayJournalEntry(updated);
-                    if(props.bumpReloadKey)props.bumpReloadKey();
-                  }catch(e){}
-                }
-              }
-              return (
-                <div style={{marginBottom:14,padding:"12px 14px",background:sc.broke.length>0?"#1c0a0a":"#0f1a14",border:"1px solid "+(sc.broke.length>0?"#7f1d1d":"#166534"),borderRadius:8}}>
-                  <div style={{fontSize:11,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:600,marginBottom:8}}>Commitment Review</div>
-                  {sc.maxTrades!=null&&(
-                    <div style={{fontSize:13,lineHeight:1.6,color:sc.overTrades?"#fca5a5":"#86efac",marginBottom:4}}>
-                      {sc.overTrades?"✗ ":"✓ "}{sc.overTrades?("Took "+sc.actualTrades+" trades — over your "+sc.maxTrades+"-trade commitment"):("Stayed within your "+sc.maxTrades+"-trade cap ("+sc.actualTrades+" taken)")}
-                    </div>
-                  )}
-                  {sc.setups&&(
-                    <div style={{marginTop:8}}>
-                      {/* CHANGED: Prefix with the commitment save time so the user sees WHEN they made this commitment. */}
-                      <div style={{fontSize:12,color:"#94a3b8",marginBottom:6}}>{(function(){var ts=props.state.commitment&&props.state.commitment.committedAt;var t="";if(ts){try{t=new Date(ts).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});}catch(e){}}return t?("At "+t+" you committed to: "):"You committed to: ";})()}<span style={{color:"#cbd5e1"}}>{sc.setups}</span></div>
-                      <div style={{fontSize:12,color:"#94a3b8",marginBottom:6}}>Did you honor your commitment?</div>
-                      <div style={{display:"flex",gap:8}}>
-                        <button onClick={function(){setAff(true);}} style={{flex:1,padding:"8px",background:aff===true?"#14532d":"#0a0a0f",border:"1px solid "+(aff===true?"#22c55e":"#1e293b"),borderRadius:6,color:aff===true?"#86efac":"#94a3b8",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Yes, stuck to plan</button>
-                        <button onClick={function(){setAff(false);}} style={{flex:1,padding:"8px",background:aff===false?"#3a1010":"#0a0a0f",border:"1px solid "+(aff===false?"#ef4444":"#1e293b"),borderRadius:6,color:aff===false?"#fca5a5":"#94a3b8",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>No, I deviated</button>
-                      </div>
-                    </div>
-                  )}
-                  {sc.reviewed&&<div style={{fontSize:12,color:sc.adhered?"#86efac":"#fbbf24",marginTop:10,fontWeight:600,lineHeight:1.5}}>{sc.adhered?"You followed your own plan today. That's the win, regardless of P&L.":"You broke from your plan. Note why below — that reflection is how the plan gets better."}</div>}
-                </div>
-              );
-            })()}
+          <div style={{marginTop:18,padding:"14px 16px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8}}>
             <div style={{fontSize:11,color:"#64748b",letterSpacing:1,textTransform:"uppercase",marginBottom:6,fontWeight:600}}>Daily Note</div>
-            <textarea value={entry.note||""} onChange={function(e){var v=e.target.value;var updated=Object.assign({},entry,{note:v});var dateKey=isToday?todayStr():selectedDate;try{localStorage.setItem("journal:"+dateKey.replace(/\//g,"-"),JSON.stringify(updated));}catch(err){}if(isToday){setTodayJournalEntry(updated);/* CHANGED: also keep App state.dailyNote in sync so the autosave effect doesn't overwrite the note with "" when other state (e.g. commitment Yes/No) changes. */if(props.setState)props.setState(function(s){return Object.assign({},s,{dailyNote:v});});}else{setPastSessions(function(arr){return arr.map(function(x){return x.date===selectedDate?updated:x;});});}if(props.bumpReloadKey)props.bumpReloadKey();}} placeholder="What worked? What didn't? Any rules to remember tomorrow?" style={Object.assign({},fld,{minHeight:80,resize:"vertical",fontFamily:"inherit",lineHeight:1.5})}/>
-            {/* CHANGED: Render the snapshot of economic events that matched the user's filters
-               on this day. Helps re-read past sessions with the macro context they were traded in. */}
-            {(function(){
-              var ev=(entry.events||[]).slice().sort(function(a,b){return (a.ts||0)-(b.ts||0);});
-              if(ev.length===0)return null;
-              function impColor(imp){if(imp==="high")return "#ef4444";if(imp==="medium")return "#fbbf24";return "#64748b";}
-              function fmtTime(ts){if(!ts)return "";var d=new Date(ts);var h=d.getHours();var m=d.getMinutes();var ap=h>=12?"PM":"AM";var hh=h%12||12;return hh+":"+String(m).padStart(2,"0")+" "+ap;}
-              return (
-                <div style={{marginTop:14,paddingTop:12,borderTop:"1px solid #1e293b"}}>
-                  <div style={{fontSize:11,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600,marginBottom:8}}>Economic Events · {ev.length}</div>
-                  <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                    {ev.map(function(e,i){return (
-                      <div key={i} style={{display:"flex",alignItems:"center",gap:8,fontSize:12}}>
-                        <span style={{width:6,height:6,borderRadius:"50%",background:impColor(e.impact),flexShrink:0}}/>
-                        <span style={{color:"#94a3b8",fontVariantNumeric:"tabular-nums",minWidth:60}}>{fmtTime(e.ts)}</span>
-                        <span style={{color:"#64748b",fontSize:10,fontWeight:700,letterSpacing:0.5}}>{e.currency||""}</span>
-                        <span style={{color:"#e2e8f0",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.title||""}</span>
-                      </div>
-                    );})}
-                  </div>
-                </div>
-              );
-            })()}
+            <textarea value={entry.note||""} onChange={function(e){var v=e.target.value;var updated=Object.assign({},entry,{note:v});var dateKey=isToday?todayStr():selectedDate;try{localStorage.setItem("journal:"+dateKey.replace(/\//g,"-"),JSON.stringify(updated));}catch(err){}if(isToday){setTodayJournalEntry(updated);if(props.setState)props.setState(function(s){return Object.assign({},s,{dailyNote:v});});}else{setPastSessions(function(arr){return arr.map(function(x){return x.date===selectedDate?updated:x;});});}if(props.bumpReloadKey)props.bumpReloadKey();}} placeholder="What worked? What didn't? Any rules to remember tomorrow?" style={Object.assign({},fld,{minHeight:80,resize:"vertical",fontFamily:"inherit",lineHeight:1.5})}/>
           </div>
         );
       })()}
