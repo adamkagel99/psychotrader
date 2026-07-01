@@ -4511,7 +4511,7 @@ function TradesTab(props){
     {key:"candlePattern",label:"Candle Pattern",options:opts.candlePattern},
     {key:"grade",label:"Setup Grade",options:["A","B","C"]},
     {key:"emotions",label:"Emotional State",options:opts.emotion},
-    {key:"violations",label:"Rule Violations",options:ALL_VIOLATIONS},
+    {key:"violations",label:"Rule Violations",options:["None"].concat(ALL_VIOLATIONS)},
     {key:"rBucket",label:"R Return",options:["Below -1R","-1R to 0R","Breakeven","0R to 1R","1R to 2R","2R+"]}
   ];
   var activeFilterCount=Object.values(filters).filter(function(v){return v&&v.length>0;}).length;
@@ -4526,7 +4526,7 @@ function TradesTab(props){
     return "2R+";
   }
   var displayTrades=rawTrades.slice().filter(function(t){return t.status!=="open";});
-  filterDefs.forEach(function(fd){var sel=filters[fd.key];if(!sel||!sel.length)return;displayTrades=displayTrades.filter(function(t){if(fd.key==="emotions"||fd.key==="violations")return(t[fd.key]||[]).some(function(e){return sel.indexOf(e)>=0;});if(fd.key==="rBucket")return sel.indexOf(_rBucketOf(t))>=0;return sel.indexOf(t[fd.key])>=0;});});
+  filterDefs.forEach(function(fd){var sel=filters[fd.key];if(!sel||!sel.length)return;displayTrades=displayTrades.filter(function(t){if(fd.key==="emotions")return(t[fd.key]||[]).some(function(e){return sel.indexOf(e)>=0;});if(fd.key==="violations"){var v=t.violations||[];if(sel.indexOf("None")>=0&&v.length===0)return true;return v.some(function(e){return sel.indexOf(e)>=0;});}if(fd.key==="rBucket")return sel.indexOf(_rBucketOf(t))>=0;return sel.indexOf(t[fd.key])>=0;});});
   // CHANGED: Multi-level sort. Each sort id maps to a comparator; the chain applies them in
   // priority order, falling through to the next only when the current one ties. An empty chain
   // (or only "timestamp") defaults to chronological by openedAt.
@@ -4584,7 +4584,7 @@ function TradesTab(props){
       });
       (state.trades||[]).forEach(function(t){if(t.status!=="open")all.push(Object.assign({},t,{date:todayKeyLocal}));});
     }catch(e){}
-    filterDefs.forEach(function(fd){var sel=filters[fd.key];if(!sel||!sel.length)return;all=all.filter(function(t){if(fd.key==="emotions"||fd.key==="violations")return(t[fd.key]||[]).some(function(e){return sel.indexOf(e)>=0;});if(fd.key==="rBucket")return sel.indexOf(_rBucketOf(t))>=0;return sel.indexOf(t[fd.key])>=0;});});
+    filterDefs.forEach(function(fd){var sel=filters[fd.key];if(!sel||!sel.length)return;all=all.filter(function(t){if(fd.key==="emotions")return(t[fd.key]||[]).some(function(e){return sel.indexOf(e)>=0;});if(fd.key==="violations"){var v=t.violations||[];if(sel.indexOf("None")>=0&&v.length===0)return true;return v.some(function(e){return sel.indexOf(e)>=0;});}if(fd.key==="rBucket")return sel.indexOf(_rBucketOf(t))>=0;return sel.indexOf(t[fd.key])>=0;});});
     all.sort(makeChainCmp(sortChain,true));
     return all;
   })();
