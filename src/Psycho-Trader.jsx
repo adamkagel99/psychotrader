@@ -4276,8 +4276,20 @@ function CommitmentPanel(props){
       var dow=getNow().getDay();
       var now=getCurrentMinutesLocal();
       var todays=getSessions(settings||{}).filter(function(s){if(s.enabled===false)return false;var days=s.days||[1,2,3,4,5];return days.indexOf(dow)>=0;});
-      // Only sessions currently in their [start-15min, endMin] window.
-      return todays.filter(function(s){return now>=(s.startMin-15)&&now<s.endMin;});
+      var map=getCommitmentsMap(state);
+      var trades=(state&&state.trades)||[];
+      // Only sessions currently in their [start-15min, endMin] window AND not yet trigger-ended
+      // (i.e. haven't hit their committed or configured trade cap).
+      return todays.filter(function(s){
+        if(!(now>=(s.startMin-15)&&now<s.endMin))return false;
+        var sessClosed=trades.filter(function(t){if(!t||t.status==="open")return false;try{return getSessionForTrade(t)===s.id;}catch(e){return false;}});
+        var c=map[s.id];
+        var commCap=c&&c.committed?parseInt(c.maxTrades):NaN;
+        var sessCap=parseInt(s.maxTrades);
+        if(!isNaN(commCap)&&commCap>0&&sessClosed.length>=commCap)return false;
+        if(!isNaN(sessCap)&&sessCap>0&&sessClosed.length>=sessCap)return false;
+        return true;
+      });
     }catch(e){return [];}
   })();
   if(visible.length===0)return null;
@@ -4722,7 +4734,17 @@ function TradesTab(props){
       })()}
       {/* CHANGED: Conditions banner removed entirely (feature deprecated). */}
       {/* CHANGED: Position/Risk strip removed from journal — shown in the New Trade form instead. */}
-      {phase!=="closed"&&<SessionStrategy phase={phase} preCheckComplete={preCheckComplete} settings={settings} currencyFilter={props.eventCurrencyFilter} impactFilter={props.eventImpactFilter}/>}
+      {phase!=="closed"&&(function(){
+        // CHANGED: Hide current-session banner when session is trigger-ended (its trade cap hit).
+        try{
+          var s=getSessions(settings).find(function(x){return x.id===phase;});
+          if(!s)return true;
+          var cap=parseInt(s.maxTrades);
+          if(isNaN(cap)||cap<=0)return true;
+          var trades=(props.liveTrades||[]).filter(function(t){if(!t||t.status==="open")return false;try{return getSessionForTrade(t)===phase;}catch(e){return false;}});
+          return trades.length<cap;
+        }catch(e){return true;}
+      })()&&<SessionStrategy phase={phase} preCheckComplete={preCheckComplete} settings={settings} currencyFilter={props.eventCurrencyFilter} impactFilter={props.eventImpactFilter}/>}
       {phase!=="closed"&&isToday&&props.liveTrades&&props.liveTrades.length>0&&(
         <div style={CS({marginBottom:16,border:"1px solid #ea580c",background:"#1c1108"})}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
@@ -5199,7 +5221,6 @@ function TradesTab(props){
                 <span style={{fontSize:11,color:"#475569",marginLeft:"auto"}}>{g.items.length===0?((ntSessions[gk]||sessionEnded(gk))?"no-trade":"empty"):g.items.length+" trade"+(g.items.length===1?"":"s")}</span>
               </div>
               {!isCollapsed&&(<>
-              {gk!=="_out"&&<SessionCommitmentReview sessionId={gk} sessionLabel={hdr.label} session={enabledSess.find(function(x){return x.id===gk;})} sessionTrades={g.items.map(function(p){return p.t;})} sessionEnded={sessionEnded(gk)} isToday={isToday} state={props.state} setState={props.setState} todayJournalEntry={todayJournalEntry} setTodayJournalEntry={setTodayJournalEntry} pastSession={pastSession} setPastSessions={setPastSessions} bumpReloadKey={props.bumpReloadKey}/>}
               {!isEmpty&&(
                 <div style={{display:"grid",gridTemplateColumns:props.mobile?"1fr":"1fr 1fr 1fr",gap:12,alignItems:"stretch"}}>
                   {g.items.map(function(pair){
@@ -5217,6 +5238,7 @@ function TradesTab(props){
                   })}
                 </div>
               )}
+              {gk!=="_out"&&<SessionCommitmentReview sessionId={gk} sessionLabel={hdr.label} session={enabledSess.find(function(x){return x.id===gk;})} sessionTrades={g.items.map(function(p){return p.t;})} sessionEnded={sessionEnded(gk)} isToday={isToday} state={props.state} setState={props.setState} todayJournalEntry={todayJournalEntry} setTodayJournalEntry={setTodayJournalEntry} pastSession={pastSession} setPastSessions={setPastSessions} bumpReloadKey={props.bumpReloadKey}/>}
               {isEmpty&&isRelevantSession&&<SessionNoTradePanel sessionId={gk} sessionLabel={hdr.label} data={ntSessions[gk]} sessionEnded={sessionEnded(gk)} onSave={saveSessionNoTrade} onClear={clearSessionNoTrade} setNoTradeViewer={setNoTradeViewer}/>}
               </>)}
             </div>
