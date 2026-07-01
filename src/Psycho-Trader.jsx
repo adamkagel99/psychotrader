@@ -2567,11 +2567,7 @@ function TradeTile(props){
   }
   var setupChain=[t.setup,t.timeframe,t.candlePattern].filter(function(x){return !!x;});
   var hasSetupInfo=setupChain.length>0;
-  // CHANGED: Compute out-of-session tag at render time from the trade's actual start time so
-  // newly-created, edited, and legacy trades all show consistently. Heatmap uses the same
-  // getSessionForTrade derivation.
-  var _isOutOfSession=(function(){try{return getSessionForTrade(t)===null;}catch(e){return false;}})();
-  var hasTags=emos.length>0||effViolations.length>0||_isOutOfSession;
+  var hasTags=emos.length>0||effViolations.length>0;
   var shots=t.screenshots||[];
   var showButtons=!hideControls&&(onEdit||onDelete);
 
@@ -2706,12 +2702,11 @@ function TradeTile(props){
         </div>
       )}
 
-      {/* TAGS: emotions + violations + out-of-session */}
+      {/* TAGS: emotions + violations */}
       {hasTags&&(
         <div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:8}}>
           {emos.map(function(e){return <Tag key={e} label={e} color={emotionTagColor(e)}/>;})}
           {effViolations.map(function(v){return <Tag key={v} label={"⚠ "+v} color="#f87171"/>;})}
-          {_isOutOfSession&&<Tag label="⊘ Out of session" color="#fcd34d"/>}
         </div>
       )}
 
@@ -4514,11 +4509,22 @@ function TradesTab(props){
     {key:"candlePattern",label:"Candle Pattern",options:opts.candlePattern},
     {key:"grade",label:"Setup Grade",options:["A","B","C"]},
     {key:"emotions",label:"Emotional State",options:opts.emotion},
-    {key:"violations",label:"Rule Violations",options:ALL_VIOLATIONS}
+    {key:"violations",label:"Rule Violations",options:ALL_VIOLATIONS},
+    {key:"rBucket",label:"R Return",options:["Below -1R","-1R to 0R","Breakeven","0R to 1R","1R to 2R","2R+"]}
   ];
   var activeFilterCount=Object.values(filters).filter(function(v){return v&&v.length>0;}).length;
+  var _rmForFilter=parseFloat(settings.riskMax)||0;
+  function _rBucketOf(t){
+    var r=tradeR(t,_rmForFilter);if(isNaN(r))return null;
+    if(Math.abs(r)<0.01)return "Breakeven";
+    if(r<-1)return "Below -1R";
+    if(r<0)return "-1R to 0R";
+    if(r<1)return "0R to 1R";
+    if(r<2)return "1R to 2R";
+    return "2R+";
+  }
   var displayTrades=rawTrades.slice().filter(function(t){return t.status!=="open";});
-  filterDefs.forEach(function(fd){var sel=filters[fd.key];if(!sel||!sel.length)return;displayTrades=displayTrades.filter(function(t){if(fd.key==="emotions"||fd.key==="violations")return(t[fd.key]||[]).some(function(e){return sel.indexOf(e)>=0;});return sel.indexOf(t[fd.key])>=0;});});
+  filterDefs.forEach(function(fd){var sel=filters[fd.key];if(!sel||!sel.length)return;displayTrades=displayTrades.filter(function(t){if(fd.key==="emotions"||fd.key==="violations")return(t[fd.key]||[]).some(function(e){return sel.indexOf(e)>=0;});if(fd.key==="rBucket")return sel.indexOf(_rBucketOf(t))>=0;return sel.indexOf(t[fd.key])>=0;});});
   // CHANGED: Multi-level sort. Each sort id maps to a comparator; the chain applies them in
   // priority order, falling through to the next only when the current one ties. An empty chain
   // (or only "timestamp") defaults to chronological by openedAt.
@@ -4576,7 +4582,7 @@ function TradesTab(props){
       });
       (state.trades||[]).forEach(function(t){if(t.status!=="open")all.push(Object.assign({},t,{date:todayKeyLocal}));});
     }catch(e){}
-    filterDefs.forEach(function(fd){var sel=filters[fd.key];if(!sel||!sel.length)return;all=all.filter(function(t){if(fd.key==="emotions"||fd.key==="violations")return(t[fd.key]||[]).some(function(e){return sel.indexOf(e)>=0;});return sel.indexOf(t[fd.key])>=0;});});
+    filterDefs.forEach(function(fd){var sel=filters[fd.key];if(!sel||!sel.length)return;all=all.filter(function(t){if(fd.key==="emotions"||fd.key==="violations")return(t[fd.key]||[]).some(function(e){return sel.indexOf(e)>=0;});if(fd.key==="rBucket")return sel.indexOf(_rBucketOf(t))>=0;return sel.indexOf(t[fd.key])>=0;});});
     all.sort(makeChainCmp(sortChain,true));
     return all;
   })();
