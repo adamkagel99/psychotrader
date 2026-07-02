@@ -1543,7 +1543,18 @@ function dayR(trades,riskMaxSetting){
 // CHANGED: When half-size trading is committed for the rest of the month, daily and weekly P&L
 // targets are halved to match the lower expected output. Monthly target is unchanged — it's
 // the trigger for half-size in the first place and we don't want to retroactively lower it.
-function applyHalfsizeToTarget(target){return isMonthHalfsizeActive()?(parseFloat(target)||0)/2:(parseFloat(target)||0);}
+function applyHalfsizeToTarget(target){
+  var n=parseFloat(target)||0;
+  if(isMonthHalfsizeActive())return n/2;
+  // CHANGED: Discipline-lock half-size (triggered when yesterday's score fell below threshold, or
+  // today's has) also halves the daily/weekly targets to match the enforced sizing.
+  try{
+    var trades=[];try{var st=JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}");trades=st.trades||[];}catch(e){}
+    var lk=checkDisciplineLock(trades,null);
+    if(lk&&lk.locked)return n/2;
+  }catch(e){}
+  return n;
+}
 function setMonthHalfsizeActive(on){try{if(on)localStorage.setItem("tf-month-halfsize-active",getCurrentMonthKey());else localStorage.removeItem("tf-month-halfsize-active");}catch(e){}}
 function isMonthGoalBannerDismissed(){try{return localStorage.getItem("tf-month-goal-banner-dismissed")===getCurrentMonthKey();}catch(e){return false;}}
 function dismissMonthGoalBanner(){try{localStorage.setItem("tf-month-goal-banner-dismissed",getCurrentMonthKey());}catch(e){}}
@@ -2661,7 +2672,24 @@ function TradeTile(props){
           {/* CHANGED: Surface commission/fees when they apply. PnL above is already net of fees;
              this just makes the deduction visible so the math is transparent. Hidden when $ is
              hidden or no fees were charged. */}
-          {!HIDE_DOLLAR_PNL&&parseFloat(t.feesPaid||0)>0&&<div style={{fontSize:11,color:"#64748b",fontWeight:500,fontVariantNumeric:"tabular-nums"}} title="Commission fees deducted from gross P&L">fees −${parseFloat(t.feesPaid).toFixed(2)}</div>}
+          {!HIDE_DOLLAR_PNL&&(function(){
+            // CHANGED: If the stored feesPaid is 0 or missing, derive display fees from current
+            // commission × total contracts (entry+exit legs). Purely display — doesn't rewrite the
+            // stored value; use Settings → Backfill to persist.
+            var stored=parseFloat(t.feesPaid)||0;
+            if(stored>0)return <div style={{fontSize:11,color:"#64748b",fontWeight:500,fontVariantNumeric:"tabular-nums"}} title="Commission fees deducted from gross P&L">fees −${stored.toFixed(2)}</div>;
+            try{
+              var s=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}");
+              var acs=(s.assetClassSettings||{})[t.assetClass]||{};
+              var comm=parseFloat(acs.commissionPerContract)||0;
+              if(comm<=0)return null;
+              var ec=(t.entries||[]).reduce(function(a,e){var n=parseFloat(e&&e.contracts);return a+(isNaN(n)?0:n);},0);
+              var xc=(t.exits||[]).reduce(function(a,e){var n=parseFloat(e&&e.contracts);return a+(isNaN(n)?0:n);},0);
+              var derived=(ec+xc)*comm;
+              if(derived<=0)return null;
+              return <div style={{fontSize:11,color:"#64748b",fontWeight:500,fontVariantNumeric:"tabular-nums",opacity:0.75}} title="Commission fees at current rate (not yet backfilled into P&L)">fees ~−${derived.toFixed(2)}</div>;
+            }catch(e){return null;}
+          })()}
         </div>
       )}
 
@@ -7641,7 +7669,32 @@ function PerformanceTab(props){
               if(selectedMetric==="totalPnl")return <EquityCurve entries={filtered} range={range}/>;
               if(selectedMetric==="trades"){
                 // CHANGED: Trading time scoped to hovered day when hovering, else period total.
-                function ttForRows(rows){var ms=0;rows.forEach(function(r){(r.trades||[]).forEach(function(t){if(t&&t.status!=="open"){var d=tradeDurationMs(t);if(d>0)ms+=d;}});});return ms;}
+                function ttForRows(rows){
+                  // CHANGED: Merge overlapping trade intervals so time in overlapping trades isn't
+                  // double-counted. Each trade contributes [start, end]; we union the intervals
+                  // and sum the union's lengths.
+                  var ints=[];
+                  rows.forEach(function(r){
+                    (r.trades||[]).forEach(function(t){
+                      if(!t||t.status==="open")return;
+                      var start=null,end=null;
+                      try{var ents=t.entries||[];var eArr=ents.map(function(e){return Number(e&&e.time);}).filter(function(n){return !isNaN(n)&&n>0;});if(eArr.length>0)start=Math.min.apply(null,eArr);}catch(e){}
+                      try{var exs=t.exits||[];var xArr=exs.map(function(e){return Number(e&&e.time);}).filter(function(n){return !isNaN(n)&&n>0;});if(xArr.length>0)end=Math.max.apply(null,xArr);}catch(e){}
+                      if(start==null){var op=Number(t.openedAt);if(!isNaN(op)&&op>0)start=op;}
+                      if(end==null){var cl=Number(t.closedAt);if(!isNaN(cl)&&cl>0)end=cl;}
+                      if(start!=null&&end!=null&&end>start)ints.push([start,end]);
+                    });
+                  });
+                  if(ints.length===0)return 0;
+                  ints.sort(function(a,b){return a[0]-b[0];});
+                  var ms=0,curS=ints[0][0],curE=ints[0][1];
+                  for(var i=1;i<ints.length;i++){
+                    if(ints[i][0]<=curE){if(ints[i][1]>curE)curE=ints[i][1];}
+                    else{ms+=curE-curS;curS=ints[i][0];curE=ints[i][1];}
+                  }
+                  ms+=curE-curS;
+                  return ms;
+                }
                 var totalTtMs=ttForRows(filtered);
                 var ttMeta=function(display,hovering){
                   if(hovering&&display&&display.date){
@@ -8643,14 +8696,29 @@ function SettingsTab(props){
                   var changed=false,sumPnl=0;
                   entry.trades=entry.trades.map(function(t){
                     scanned++;
-                    if(t.status==="open"||!t.entries||!t.exits||!t.exits.length){if(t.status!=="open"){sumPnl+=parseFloat(t.pnl)||0;}return t;}
-                    // CHANGED: Always recompute & update — earlier change-detection was unreliable
-                    // (string vs number type comparison), causing the loop to no-op even when the
-                    // gross pnl needed re-deriving for fees.
-                    var r;try{r=doRecalc(t.entries,t.exits,t.assetClass,t.instrument,t.direction);}catch(e){console.error("doRecalc failed",t.id,e);sumPnl+=parseFloat(t.pnl)||0;return t;}
+                    if(t.status==="open"){sumPnl+=parseFloat(t.pnl)||0;return t;}
+                    // CHANGED: Synthesize entries/exits from legacy top-level fields (contracts,
+                    // entryPrice, exitPrice, avgEntry, avgExit) so trades saved under the older
+                    // data model still get recalculated.
+                    var ents=(Array.isArray(t.entries)&&t.entries.length)?t.entries:null;
+                    var exts=(Array.isArray(t.exits)&&t.exits.length)?t.exits:null;
+                    if(!ents||!exts){
+                      var ct=parseFloat(t.contracts)||0;
+                      var ep=parseFloat(t.entryPrice||t.avgEntry||t.entry||"");
+                      var xp=parseFloat(t.exitPrice||t.avgExit||t.exit||"");
+                      if(ct>0&&!isNaN(ep)&&!isNaN(xp)){
+                        ents=ents||[{contracts:String(ct),price:String(ep),time:t.openedAt||null}];
+                        exts=exts||[{contracts:String(ct),price:String(xp),time:t.closedAt||null}];
+                      }
+                    }
+                    if(!ents||!exts||!exts.length){if(t.status!=="open"){sumPnl+=parseFloat(t.pnl)||0;}return t;}
+                    // CHANGED: Coerce a missing/empty assetClass to the user's default so legacy
+                    // trades still resolve to a commission bucket. Without this the fee stays $0.
+                    var effClass=t.assetClass&&String(t.assetClass).trim()?t.assetClass:(settings.defaultAssetClass||"options");
+                    var r;try{r=doRecalc(ents,exts,effClass,t.instrument,t.direction);}catch(e){console.error("doRecalc failed",t.id,e);sumPnl+=parseFloat(t.pnl)||0;return t;}
                     if(r.pnl===""){sumPnl+=parseFloat(t.pnl)||0;return t;}
                     changed=true;updated++;
-                    var nt=Object.assign({},t,{pnl:r.pnl,pctPnl:r.pctPnl,feesPaid:r.feesPaid});
+                    var nt=Object.assign({},t,{assetClass:effClass,entries:r.entries||ents,exits:r.exits||exts,contracts:r.contracts||t.contracts,positionSize:r.positionSize||t.positionSize,pnl:r.pnl,pctPnl:r.pctPnl,feesPaid:r.feesPaid});
                     sumPnl+=parseFloat(nt.pnl)||0;
                     return nt;
                   });
@@ -8668,11 +8736,24 @@ function SettingsTab(props){
                     var stChanged=false;
                     st.trades=st.trades.map(function(t){
                       scanned++;
-                      if(t.status==="open"||!t.entries||!t.exits||!t.exits.length)return t;
-                      var r;try{r=doRecalc(t.entries,t.exits,t.assetClass,t.instrument,t.direction);}catch(e){return t;}
+                      if(t.status==="open")return t;
+                      var ents=(Array.isArray(t.entries)&&t.entries.length)?t.entries:null;
+                      var exts=(Array.isArray(t.exits)&&t.exits.length)?t.exits:null;
+                      if(!ents||!exts){
+                        var ct=parseFloat(t.contracts)||0;
+                        var ep=parseFloat(t.entryPrice||t.avgEntry||t.entry||"");
+                        var xp=parseFloat(t.exitPrice||t.avgExit||t.exit||"");
+                        if(ct>0&&!isNaN(ep)&&!isNaN(xp)){
+                          ents=ents||[{contracts:String(ct),price:String(ep),time:t.openedAt||null}];
+                          exts=exts||[{contracts:String(ct),price:String(xp),time:t.closedAt||null}];
+                        }
+                      }
+                      if(!ents||!exts||!exts.length)return t;
+                      var effClass=t.assetClass&&String(t.assetClass).trim()?t.assetClass:(settings.defaultAssetClass||"options");
+                      var r;try{r=doRecalc(ents,exts,effClass,t.instrument,t.direction);}catch(e){return t;}
                       if(r.pnl==="")return t;
                       stChanged=true;updated++;
-                      return Object.assign({},t,{pnl:r.pnl,pctPnl:r.pctPnl,feesPaid:r.feesPaid});
+                      return Object.assign({},t,{assetClass:effClass,entries:r.entries||ents,exits:r.exits||exts,contracts:r.contracts||t.contracts,positionSize:r.positionSize||t.positionSize,pnl:r.pnl,pctPnl:r.pctPnl,feesPaid:r.feesPaid});
                     });
                     if(stChanged)localStorage.setItem(STORAGE_KEY,JSON.stringify(st));
                   }
