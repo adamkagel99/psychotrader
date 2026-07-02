@@ -5097,6 +5097,7 @@ function TradesTab(props){
           <div style={CS({marginTop:18,marginBottom:14,border:"1px solid "+(isToday?"#16653444":"#1e293b")})}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
               <div style={{fontSize:13,color:isToday?"#86efac":"#a5b4fc",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{isToday?"Saved to Journal ✓":"Day Summary"}</div>
+              {!isToday&&<button onClick={function(){var d=selectedDate||entry.date;if(!confirm("Delete journal entry for "+d+"? This cannot be undone."))return;try{localStorage.removeItem("journal:"+String(d).replace(/\//g,"-"));}catch(e){}if(setPastSessions)setPastSessions(function(arr){return arr.filter(function(x){return x.date!==d;});});if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"3px 9px",background:"transparent",border:"1px solid #7f1d1d",borderRadius:4,color:"#fca5a5",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit",letterSpacing:0.5}}>CLEAR</button>}
             </div>
             {entry.noTradeDay&&<NoTradeDayDetails entry={entry} isToday={isToday} selectedDate={selectedDate} setTodayJournalEntry={setTodayJournalEntry} setPastSessions={setPastSessions} bumpReloadKey={props.bumpReloadKey} setNoTradeViewer={setNoTradeViewer}/>}
             {/* CHANGED: Day was initially saved as no-trade, then trades were taken. Preserve the original sit-out reasons as historical context. */}
