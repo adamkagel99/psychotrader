@@ -31,20 +31,9 @@ function loadEventsWeekStart(){try{var s=localStorage.getItem(EVENTS_KEY);if(!s)
 function getWeekStartStr(){var now=getPT();var dow=now.getDay();var s=new Date(now.getFullYear(),now.getMonth(),now.getDate()-dow);s.setHours(0,0,0,0);return s.toLocaleDateString("en-US");}
 function saveEventsWithMeta(events){var wrapper={weekStart:getWeekStartStr(),importedAt:new Date().toISOString(),events:events};localStorage.setItem(EVENTS_KEY,JSON.stringify(wrapper));try{localStorage.removeItem(EVENT_FILTERS_KEY);}catch(e){}}
 function maybeClearStaleEvents(){
-  var ws=loadEventsWeekStart();
-  if(!ws)return false;
-  // CHANGED: Only clear events if the wrapper's weekStart is more than 7 days in the past.
-  // Previously any weekStart mismatch cleared events, which fired every Monday morning even
-  // when the user had freshly imported new events — deleting them within the same session.
-  try{
-    var wsD=new Date(ws);var cur=new Date(getWeekStartStr());
-    var deltaDays=(cur.getTime()-wsD.getTime())/(1000*60*60*24);
-    if(deltaDays>7){
-      try{localStorage.removeItem(EVENTS_KEY);}catch(e){}
-      try{localStorage.removeItem(EVENT_FILTERS_KEY);}catch(e){}
-      return true;
-    }
-  }catch(e){}
+  // CHANGED: Auto-clear disabled. Events persist across days/weeks until the user manually
+  // imports a new batch (which replaces via saveEventsWithMeta) or clicks Clear in Settings.
+  // Prior time-based logic kept wiping events unexpectedly (possibly compounded by cloud sync).
   return false;
 }
 function parseEventDate(e){if(!e||!e.date)return null;var d=new Date(e.date+(e.time?" "+e.time:""));return isNaN(d.getTime())?null:d;}
@@ -2471,7 +2460,10 @@ function ChecklistPanel(props){
                   if(pick&&pick.sizeFraction!=null){var v=parseFloat(pick.sizeFraction);if(!isNaN(v)&&v>0)sf=v;}
                 }
               }catch(e){}
-              if(isMonthHalfsizeActive())sf=sf*0.5;
+              // CHANGED: Also honor discipline-lock half-size (checkDisciplineLock) not just the
+              // monthly toggle, so this readout matches the enforced sizing.
+              var _hs=false;try{_hs=isMonthHalfsizeActive();if(!_hs){var _tr=[];try{var _st=JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}");_tr=_st.trades||[];}catch(e){}var _lk=checkDisciplineLock(_tr,null);_hs=_lk&&_lk.locked;}}catch(e){}
+              if(_hs)sf=sf*0.5;
               var pMin=Math.round(parseFloat(settings.positionMin)*sf);
               var pMax=Math.round(parseFloat(settings.positionMax)*sf);
               label=label+" ($"+pMin+"-$"+pMax+")";
