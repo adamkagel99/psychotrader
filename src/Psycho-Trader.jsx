@@ -30,7 +30,23 @@ function loadEvents(){try{var s=localStorage.getItem(EVENTS_KEY);if(!s)return[];
 function loadEventsWeekStart(){try{var s=localStorage.getItem(EVENTS_KEY);if(!s)return null;var p=JSON.parse(s);return Array.isArray(p)?null:(p.weekStart||null);}catch(e){return null;}}
 function getWeekStartStr(){var now=getPT();var dow=now.getDay();var s=new Date(now.getFullYear(),now.getMonth(),now.getDate()-dow);s.setHours(0,0,0,0);return s.toLocaleDateString("en-US");}
 function saveEventsWithMeta(events){var wrapper={weekStart:getWeekStartStr(),importedAt:new Date().toISOString(),events:events};localStorage.setItem(EVENTS_KEY,JSON.stringify(wrapper));try{localStorage.removeItem(EVENT_FILTERS_KEY);}catch(e){}}
-function maybeClearStaleEvents(){var ws=loadEventsWeekStart();if(ws&&ws!==getWeekStartStr()){try{localStorage.removeItem(EVENTS_KEY);}catch(e){}try{localStorage.removeItem(EVENT_FILTERS_KEY);}catch(e){}return true;}return false;}
+function maybeClearStaleEvents(){
+  var ws=loadEventsWeekStart();
+  if(!ws)return false;
+  // CHANGED: Only clear events if the wrapper's weekStart is more than 7 days in the past.
+  // Previously any weekStart mismatch cleared events, which fired every Monday morning even
+  // when the user had freshly imported new events — deleting them within the same session.
+  try{
+    var wsD=new Date(ws);var cur=new Date(getWeekStartStr());
+    var deltaDays=(cur.getTime()-wsD.getTime())/(1000*60*60*24);
+    if(deltaDays>7){
+      try{localStorage.removeItem(EVENTS_KEY);}catch(e){}
+      try{localStorage.removeItem(EVENT_FILTERS_KEY);}catch(e){}
+      return true;
+    }
+  }catch(e){}
+  return false;
+}
 function parseEventDate(e){if(!e||!e.date)return null;var d=new Date(e.date+(e.time?" "+e.time:""));return isNaN(d.getTime())?null:d;}
 // CHANGED: Detect currency from various common field names (country, Currency, code, etc.)
 function eventCurrency(e){
@@ -4450,7 +4466,7 @@ function TradesTab(props){
   var [filterOpen,setFilterOpen]=useState(false);
   var [filters,setFilters]=useState(function(){try{var s=localStorage.getItem("pt-trades-filters");return s?JSON.parse(s):{};}catch(e){return {};}});
   useEffect(function(){try{localStorage.setItem("pt-trades-filters",JSON.stringify(filters));}catch(e){}},[filters]);
-  var [collapsedMap,setCollapsedMap]=useState(function(){var m={};try{for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf("pt-sess-collapse:")===0)m[k.slice(17)]=localStorage.getItem(k)==="1";}}catch(e){}return m;});
+  var [collapsedMap,setCollapsedMap]=useState(function(){var m={};try{for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf("pt-sess-collapse:")===0)m[k.slice(17)]=localStorage.getItem(k)!=="0";}}catch(e){}return m;});
   // CHANGED: Screenshot gallery scope — "session" (current date) or "all" (whole journal).
   var [galleryScope,setGalleryScope]=useState("session");
   // CHANGED: No-Trade Day screenshot upload state + a lightbox viewer for those shots.
@@ -5047,7 +5063,7 @@ function TradesTab(props){
           ? parseFloat(entry.disciplineScore)
           : calcDiscipline(sTrades,entry.riskMax,entry.commitments?{commitments:entry.commitments}:(isToday?{commitments:getCommitmentsMap(props.state)}:{commitment:entry.commitment||null})));
         return (
-          <div style={CS({marginTop:18,border:"1px solid "+(isToday?"#16653444":"#1e293b")})}>
+          <div style={CS({marginTop:18,marginBottom:14,border:"1px solid "+(isToday?"#16653444":"#1e293b")})}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
               <div style={{fontSize:13,color:isToday?"#86efac":"#a5b4fc",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{isToday?"Saved to Journal ✓":"Day Summary"}</div>
             </div>
@@ -5135,9 +5151,32 @@ function TradesTab(props){
         var ntSessions=(isToday?(props.state&&props.state.noTradeSessions):((pastSession&&pastSession.noTradeSessions)||(todayJournalEntry&&todayJournalEntry.noTradeSessions)))||{};
         var byGroup={};
         var groupOrder=[];
+        // Sort sessions by start for gap computation.
+        var sortedSess=enabledSess.slice().sort(function(a,b){return (a.startMin||0)-(b.startMin||0);});
+        // For each trade, find its chronological bucket. In-session → session id. Out-of-session →
+        // synthetic id based on which gap it falls into (before first / between sessions / after last).
+        function outBucketFor(t){
+          var ms=null;
+          try{var ents=t.entries||[];var arr=ents.map(function(e){return Number(e&&e.time);}).filter(function(n){return !isNaN(n)&&n>0;});if(arr.length>0)ms=Math.min.apply(null,arr);}catch(e){}
+          if(ms==null){var op=Number(t.openedAt);if(!isNaN(op)&&op>0)ms=op;}
+          if(ms==null)return {id:"_out_after",sortMin:24*60+1};
+          var d=new Date(ms);var mins=d.getHours()*60+d.getMinutes();
+          for(var i=0;i<sortedSess.length;i++){
+            var s=sortedSess[i];
+            if(mins<s.startMin)return {id:"_out_before_"+s.id,sortMin:s.startMin-0.5,nextSid:s.id};
+          }
+          return {id:"_out_after",sortMin:24*60+1};
+        }
+        function sortMinFor(gk){
+          if(gk==="_out_after")return 24*60+1;
+          if(gk.indexOf("_out_before_")===0){var sid=gk.slice(12);var s=sortedSess.find(function(x){return x.id===sid;});return s?s.startMin-0.5:0;}
+          var s2=sortedSess.find(function(x){return x.id===gk;});return s2?s2.startMin:0;
+        }
         displayTrades.forEach(function(t,i){
           var sid=null;try{sid=getSessionForTrade(t);}catch(e){}
-          var key=sid||"_out";
+          var key;
+          if(sid){key=sid;}
+          else{var ob=outBucketFor(t);key=ob.id;}
           if(!byGroup[key]){byGroup[key]={key:key,items:[]};groupOrder.push(key);}
           byGroup[key].items.push({t:t,i:i});
         });
@@ -5149,19 +5188,17 @@ function TradesTab(props){
           if(isToday&&nowMins<(s.startMin-15))return;
           if(!byGroup[s.id]){byGroup[s.id]={key:s.id,items:[]};groupOrder.push(s.id);}
         });
-        groupOrder.sort(function(a,b){
-          if(a==="_out")return 1;if(b==="_out")return -1;
-          var sa=enabledSess.find(function(s){return s.id===a;});
-          var sb=enabledSess.find(function(s){return s.id===b;});
-          return ((sa&&sa.startMin)||0)-((sb&&sb.startMin)||0);
-        });
+        groupOrder.sort(function(a,b){return sortMinFor(a)-sortMinFor(b);});
         function fmtMins(m){var h=Math.floor(m/60),mm=m%60,ap=h>=12?"PM":"AM";var h12=((h+11)%12)+1;return h12+":"+(mm<10?"0":"")+mm+" "+ap;}
         function headerFor(key){
-          if(key==="_out")return {label:"Out of Session",sub:"",color:"#fcd34d",border:"#a1620744"};
+          if(key==="_out_after")return {label:"Out of Session · After",sub:"",color:"#fcd34d",border:"#a1620744"};
+          if(key.indexOf("_out_before_")===0){
+            var sid=key.slice(12);var s=enabledSess.find(function(x){return x.id===sid;});
+            var nm=s?((s.name&&String(s.name).trim())||(s.label&&String(s.label).trim())||(fmtMins(s.startMin)+"–"+fmtMins(s.endMin))):sid;
+            return {label:"Out of Session · Before "+nm,sub:"",color:"#fcd34d",border:"#a1620744"};
+          }
           var s=enabledSess.find(function(x){return x.id===key;});
           if(!s)return {label:key,sub:"",color:"#94a3b8",border:"#33415544"};
-          // CHANGED: Prefer s.name (the user-set label), then s.label (legacy), then a friendly
-          // fallback derived from the session's time window — never the raw id.
           var nm=(s.name&&String(s.name).trim())||(s.label&&String(s.label).trim())||(fmtMins(s.startMin)+"–"+fmtMins(s.endMin));
           return {label:nm,sub:fmtMins(s.startMin)+" – "+fmtMins(s.endMin),color:"#a5b4fc",border:"#4338ca44"};
         }
@@ -5206,11 +5243,12 @@ function TradesTab(props){
           var g=byGroup[gk];
           var hdr=headerFor(gk);
           var isEmpty=g.items.length===0;
-          var isRelevantSession=gk!=="_out"&&relevantSess.some(function(s){return s.id===gk;});
+          var isOutOfSession=gk==="_out_after"||gk.indexOf("_out_before_")===0;
+              var isRelevantSession=!isOutOfSession&&relevantSess.some(function(s){return s.id===gk;});
           var collapseKey="pt-sess-collapse:"+gk;
-          var isCollapsed=collapsedMap[gk]===true;
+          var isCollapsed=collapsedMap[gk]!==false; // default collapsed
           function toggleCollapsed(){
-            setCollapsedMap(function(m){var n=Object.assign({},m);n[gk]=!n[gk];try{localStorage.setItem(collapseKey,n[gk]?"1":"0");}catch(e){}return n;});
+            setCollapsedMap(function(m){var n=Object.assign({},m);var next=!(m[gk]!==false);n[gk]=!next?false:true;try{localStorage.setItem(collapseKey,n[gk]?"1":"0");}catch(e){}return n;});
           }
           return (
             <div key={gk} style={{marginBottom:16}}>
@@ -5238,7 +5276,7 @@ function TradesTab(props){
                   })}
                 </div>
               )}
-              {gk!=="_out"&&<SessionCommitmentReview sessionId={gk} sessionLabel={hdr.label} session={enabledSess.find(function(x){return x.id===gk;})} sessionTrades={g.items.map(function(p){return p.t;})} sessionEnded={sessionEnded(gk)} isToday={isToday} state={props.state} setState={props.setState} todayJournalEntry={todayJournalEntry} setTodayJournalEntry={setTodayJournalEntry} pastSession={pastSession} setPastSessions={setPastSessions} bumpReloadKey={props.bumpReloadKey}/>}
+              {!isOutOfSession&&<SessionCommitmentReview sessionId={gk} sessionLabel={hdr.label} session={enabledSess.find(function(x){return x.id===gk;})} sessionTrades={g.items.map(function(p){return p.t;})} sessionEnded={sessionEnded(gk)} isToday={isToday} state={props.state} setState={props.setState} todayJournalEntry={todayJournalEntry} setTodayJournalEntry={setTodayJournalEntry} pastSession={pastSession} setPastSessions={setPastSessions} bumpReloadKey={props.bumpReloadKey}/>}
               {isEmpty&&isRelevantSession&&<SessionNoTradePanel sessionId={gk} sessionLabel={hdr.label} data={ntSessions[gk]} sessionEnded={sessionEnded(gk)} onSave={saveSessionNoTrade} onClear={clearSessionNoTrade} setNoTradeViewer={setNoTradeViewer}/>}
               </>)}
             </div>
@@ -9509,7 +9547,10 @@ function App(props){
     if(status==="closed"){
       derivedClosedAt=exitTimes.length>0?Math.max.apply(null,exitTimes):(t.closedAt||Date.now());
     }
-    var enriched=autoAddViolations(Object.assign({},t,{openedAt:derivedOpenedAt,closedAt:derivedClosedAt,status:status,sessionId:sessionId}),settings.positionMax);
+    // CHANGED: Always recompute pnl / fees at save time using current per-asset-class commission.
+    // Prevents a stale zero-fee snapshot from persisting if the user set commissions later.
+    var _rc=doRecalc(t.entries||[],t.exits||[],t.assetClass,t.instrument,t.direction);
+    var enriched=autoAddViolations(Object.assign({},t,_rc,{openedAt:derivedOpenedAt,closedAt:derivedClosedAt,status:status,sessionId:sessionId}),settings.positionMax);
     // CHANGED: Compute updated trades list outside setState so we can sync the journal too.
     var existingIdx=state.trades.findIndex(function(x){return x.id===enriched.id;});
     var ut=existingIdx>=0?state.trades.map(function(x){return x.id===enriched.id?enriched:x;}):state.trades.concat([enriched]);
