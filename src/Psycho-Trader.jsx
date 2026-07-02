@@ -4750,17 +4750,7 @@ function TradesTab(props){
       })()}
       {/* CHANGED: Conditions banner removed entirely (feature deprecated). */}
       {/* CHANGED: Position/Risk strip removed from journal — shown in the New Trade form instead. */}
-      {phase!=="closed"&&(function(){
-        // CHANGED: Hide current-session banner when session is trigger-ended (its trade cap hit).
-        try{
-          var s=getSessions(settings).find(function(x){return x.id===phase;});
-          if(!s)return true;
-          var cap=parseInt(s.maxTrades);
-          if(isNaN(cap)||cap<=0)return true;
-          var trades=((props.state&&props.state.trades)||[]).filter(function(t){if(!t||t.status==="open")return false;try{return getSessionForTrade(t)===phase;}catch(e){return false;}});
-          return trades.length<cap;
-        }catch(e){return true;}
-      })()&&<SessionStrategy phase={phase} preCheckComplete={preCheckComplete} settings={settings} currencyFilter={props.eventCurrencyFilter} impactFilter={props.eventImpactFilter}/>}
+      {phase!=="closed"&&<SessionStrategy phase={phase} preCheckComplete={preCheckComplete} settings={settings} currencyFilter={props.eventCurrencyFilter} impactFilter={props.eventImpactFilter}/>}
       {phase!=="closed"&&isToday&&props.liveTrades&&props.liveTrades.length>0&&(
         <div style={CS({marginBottom:16,border:"1px solid #ea580c",background:"#1c1108"})}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
@@ -8332,11 +8322,7 @@ function SettingsTab(props){
   }
   var sessions=getSessions(settings);
   // CHANGED: 2-week strategy lock check. When active, all session mutations are no-ops.
-  function isStrategyLocked(){
-    var LOCK_MS=14*24*60*60*1000;
-    var t=parseFloat(settings.sessionStrategyLockedAt)||0;
-    return t>0&&(Date.now()-t)<LOCK_MS;
-  }
+  function isStrategyLocked(){return false;}
   function updateSession(idx,patch){
     if(isStrategyLocked())return;
     var ns=sessions.slice();ns[idx]=Object.assign({},ns[idx],patch);
@@ -8854,43 +8840,11 @@ function SettingsTab(props){
          so legacy entries with conditionsChecked keys don't crash; new entries simply ignore it. */}
 
       <SettingsSection title="Session Strategy">
-        {(function(){
-          var LOCK_MS=14*24*60*60*1000;
-          var lockedAt=parseFloat(settings.sessionStrategyLockedAt)||0;
-          var now=Date.now();
-          var locked=lockedAt>0&&(now-lockedAt)<LOCK_MS;
-          var daysLeft=locked?Math.ceil((LOCK_MS-(now-lockedAt))/(24*60*60*1000)):0;
-          var unlockDate=locked?new Date(lockedAt+LOCK_MS):null;
-          function lockNow(){setSettings(function(s){return Object.assign({},s,{sessionStrategyLockedAt:Date.now()});});}
-          // Expose lock state to surrounding closure via window-scoped var on settings for input handlers.
-          settings.__strategyLocked=locked;
-          if(locked){
-            return (
-              <div style={{marginBottom:12,padding:"10px 12px",background:"#1e1b4b33",border:"1px solid #4338ca",borderRadius:8,display:"flex",alignItems:"center",gap:10}}>
-                <span style={{fontSize:16}}>🔒</span>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:12,color:"#a5b4fc",fontWeight:700,letterSpacing:0.5}}>Strategy locked · {daysLeft} day{daysLeft===1?"":"s"} remaining</div>
-                  <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>Unlocks {unlockDate.toLocaleDateString([],{weekday:"short",month:"short",day:"numeric"})}. Commit to your plan — no edits until then.</div>
-                </div>
-              </div>
-            );
-          }
-          return (
-            <div style={{marginBottom:12,padding:"10px 12px",background:"#0a0a0f",border:"1px dashed #334155",borderRadius:8,display:"flex",alignItems:"center",gap:10}}>
-              <span style={{fontSize:16}}>🔓</span>
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{fontSize:12,color:"#cbd5e1",fontWeight:600}}>Strategy unlocked</div>
-                <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>Lock your strategy to enforce a 2-week commitment.</div>
-              </div>
-              <button onClick={lockNow} style={{padding:"6px 12px",background:"#4338ca",border:"none",borderRadius:6,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Lock 2 weeks</button>
-            </div>
-          );
-        })()}
         <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Configure each session's hours, sizing, max trades, and active days. Add custom sessions or delete unused ones.</div>
         {sessions.map(function(s,idx){
           var days=s.days||[1,2,3,4,5];
-          var disabled=isStrategyLocked();
-          var dFld=disabled?{opacity:0.55,pointerEvents:"none"}:{};
+          var disabled=false;
+          var dFld={};
           return (
             <div key={s.id} style={{padding:"10px 12px",marginBottom:8,background:"#0a0a0f",border:"1px solid "+(s.enabled?"#1e293b":"#7f1d1d33"),borderRadius:8,opacity:disabled?0.85:1}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,gap:8}}>
