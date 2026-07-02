@@ -1777,7 +1777,14 @@ function getAccountBalance(){
   try{
     var transfers=loadTransfers();
     var rows=loadJournalRows();
-    var totalPnL=rows.reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0);
+    // CHANGED: Recompute lifetime P&L from per-trade pnl directly, not from stored entry.pnl
+    // snapshots. Snapshots can drift if a trade edit or backfill didn't propagate to the row.
+    // Falls back to entry.pnl only when a row has no trades (legacy / imported entries).
+    var totalPnL=rows.reduce(function(s,e){
+      var ts=(e.trades||[]).filter(function(t){return t&&t.status!=="open";});
+      if(ts.length>0)return s+ts.reduce(function(a,t){return a+(parseFloat(t.pnl)||0);},0);
+      return s+(parseFloat(e.pnl)||0);
+    },0);
     return transferTotal(transfers)+totalPnL;
   }catch(e){return 0;}
 }
@@ -2163,13 +2170,23 @@ function CalendarGrid(props){
   function onCellClickCapture(e){if(dragRef.current.suppressClick){e.preventDefault();e.stopPropagation();dragRef.current.suppressClick=false;}}
   var firstDay=new Date(calYear,calMonth,1).getDay();
   var daysInMonth=new Date(calYear,calMonth+1,0).getDate();
+  var prevMonthDays=new Date(calYear,calMonth,0).getDate();
   var weeks=[];var cur=[];
-  for(var i=0;i<firstDay;i++)cur.push(null);
-  for(var d=1;d<=daysInMonth;d++){cur.push(d);if(cur.length===7){weeks.push(cur);cur=[];}}
-  if(cur.length>0){while(cur.length<7)cur.push(null);weeks.push(cur);}
-  // CHANGED: Pre-compute per-week and full-month PnL totals from sessionMap so we can mark
-  // goal-hit weeks (gold ring on each day-cell) and the goal-hit month (🏁 in the header).
-  var weekPnLs=weeks.map(function(wk){return wk.reduce(function(s,day){if(!day)return s;var ds2=(calMonth+1)+"/"+day+"/"+calYear;var dd=sessionMap[ds2];return s+(dd?(parseFloat(dd.pnl)||0):0);},0);});
+  // CHANGED: Leading blanks filled with prev month's trailing days (marked otherMonth).
+  for(var i=0;i<firstDay;i++){
+    var pDay=prevMonthDays-firstDay+1+i;
+    var pY=calMonth===0?calYear-1:calYear,pM=calMonth===0?11:calMonth-1;
+    cur.push({day:pDay,otherMonth:true,y:pY,m:pM,ds:(pM+1)+"/"+pDay+"/"+pY});
+  }
+  for(var d=1;d<=daysInMonth;d++){cur.push({day:d,otherMonth:false,y:calYear,m:calMonth,ds:(calMonth+1)+"/"+d+"/"+calYear});if(cur.length===7){weeks.push(cur);cur=[];}}
+  if(cur.length>0){
+    // CHANGED: Trailing blanks filled with next month's leading days (marked otherMonth).
+    var nd=1;
+    var nY=calMonth===11?calYear+1:calYear,nM=calMonth===11?0:calMonth+1;
+    while(cur.length<7){cur.push({day:nd,otherMonth:true,y:nY,m:nM,ds:(nM+1)+"/"+nd+"/"+nY});nd++;}
+    weeks.push(cur);
+  }
+  var weekPnLs=weeks.map(function(wk){return wk.reduce(function(s,cell){if(!cell||cell.otherMonth)return s;var dd=sessionMap[cell.ds];return s+(dd?(parseFloat(dd.pnl)||0):0);},0);});
   var monthPnLTotal=weekPnLs.reduce(function(s,w){return s+w;},0);
   var monthGoalHit=monthlyTarget>0&&monthPnLTotal>=monthlyTarget;
   return (
@@ -2188,9 +2205,11 @@ function CalendarGrid(props){
         {["S","M","T","W","T","F","S"].map(function(c,i){return <div key={i} style={{textAlign:"center",fontSize:11,color:"#475569",fontWeight:700}}>{c}</div>;})}
       </div>
       <div onMouseDown={function(e){dragStart(e.clientX);}} onMouseMove={function(e){dragMove(e.clientX);}} onMouseUp={function(e){dragEnd(e.clientX);}} onMouseLeave={function(){dragEnd(null);}} onTouchStart={function(e){if(e.touches[0])dragStart(e.touches[0].clientX);}} onTouchMove={function(e){if(e.touches[0])dragMove(e.touches[0].clientX);}} onTouchEnd={function(e){var tx=e.changedTouches&&e.changedTouches[0]?e.changedTouches[0].clientX:null;dragEnd(tx);}} onClickCapture={onCellClickCapture} style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3,cursor:"grab",userSelect:"none"}}>
-        {weeks.flat().map(function(d,i){
-          if(!d)return <div key={i} style={{height:34}}/>;
-          var ds=(calMonth+1)+"/"+d+"/"+calYear;
+        {weeks.flat().map(function(cell,i){
+          if(!cell)return <div key={i} style={{height:34}}/>;
+          var d=cell.day;
+          var ds=cell.ds;
+          var otherMonth=cell.otherMonth;
           var dayData=sessionMap[ds];
           var pnl=dayData?dayData.pnl:null;
           var dayRiskMax=dayData?dayData.riskMax:0;
@@ -2201,25 +2220,18 @@ function CalendarGrid(props){
           var bg="#0a0a0f",bd="#1e293b",col="#94a3b8";
           if(holiday){bg="#2a1d0a";bd="#713f12";col="#fbbf24";}
           if(pnl!=null&&pnl!==0){if(pnl>0){bg="#14532d";bd="#166534";col="#86efac";}else{bg="#7f1d1d";bd="#991b1b";col="#fca5a5";}}
-          // CHANGED: No-Trade Day — explicitly logged. Made visually unmistakable: amber-tinted cell,
-          // dashed border (signals "intentionally skipped"), brighter label, and a ⊘ icon.
           var isNoTrade=!!(dayData&&dayData.noTradeDay&&dayData.tradeCount===0);
           var noTradeBorderStyle="solid";
           if(isNoTrade){bg="#1c1408";bd="#a16207";col="#fcd34d";noTradeBorderStyle="dashed";}
           if(isToday){bg="#1e1b4b";bd="#4338ca";col="#a5b4fc";noTradeBorderStyle="solid";}
           if(isSelected){bd="#818cf8";}
-          // CHANGED: Daily goal-hit marker. Distinguished from the early-close orange dot by
-          // using a checkmark glyph instead of a dot. Weekly border override removed — users
-          // found it looked too similar to other states and added little signal.
-          // CHANGED: Daily goal-hit is R-based. A day's rTotal already sums per-trade R against
-          // each trade's stamped sizeFraction, so a half-size day hitting +3R counts the same as
-          // a full-size day hitting +3R. Threshold = fullDailyTarget / fullRiskMax (the R-equiv
-          // of the dollar target at full size).
           var dailyTargetR=(fullDailyTarget>0&&fullRiskMax>0)?(fullDailyTarget/fullRiskMax):0;
           var dayRTotal=dayData?(dayData.rTotal||0):0;
           var dayGoalHit=dailyTargetR>0&&dayData&&dayData.tradeCount>0&&dayRTotal>=dailyTargetR;
+          // CHANGED: Other-month cells dimmed but clickable — jumps to that month via onSelect.
+          var otherMonthStyle=otherMonth?{opacity:0.35}:{};
           return (
-            <button key={i} onClick={function(){onSelect(ds);}} style={{height:46,background:bg,border:(isNoTrade?"1.5px ":"1px ")+noTradeBorderStyle+" "+bd,borderRadius:5,color:col,fontSize:13,fontWeight:isToday||isSelected||isNoTrade?700:500,cursor:"pointer",fontFamily:"inherit",position:"relative",padding:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2}} title={holiday||(isNoTrade?"No-trade day (deliberately sat out)":(pnl!=null?(pnl>=0?"+":"")+"$"+pnl.toFixed(0):""))}>
+            <button key={i} onClick={function(){onSelect(ds);}} style={Object.assign({height:46,background:bg,border:(isNoTrade?"1.5px ":"1px ")+noTradeBorderStyle+" "+bd,borderRadius:5,color:col,fontSize:13,fontWeight:isToday||isSelected||isNoTrade?700:500,cursor:"pointer",fontFamily:"inherit",position:"relative",padding:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2},otherMonthStyle)} title={holiday||(isNoTrade?"No-trade day (deliberately sat out)":(pnl!=null?(pnl>=0?"+":"")+"$"+pnl.toFixed(0):""))}>
               <span style={{lineHeight:1}}>{d}</span>
               {/* CHANGED: Day cell readout — driven by summaryMode passed from DashboardCalendar.
                  "trades" → show trade count, "pnl" → R when Hide-$ on, $ otherwise. */}
@@ -4657,7 +4669,16 @@ function TradesTab(props){
   return (
     <div style={{paddingTop:16}}>
       {isToday&&<EventWarningBanner windowMin={60}/>}
-      {phase!=="closed"&&<CommitmentPanel state={props.state} setState={props.setState} phase={phase} settings={settings}/>}
+      {(function(){
+        // CHANGED: Render CommitmentPanel from 15 min before any enabled session's start (not just
+        // when phase!=="closed"). The panel's own filter selects the specific session card.
+        if(phase!=="closed")return true;
+        try{
+          var dow=getNow().getDay();
+          var now=getCurrentMinutesLocal();
+          return getSessions(settings||{}).some(function(s){if(s.enabled===false)return false;var days=s.days||[1,2,3,4,5];if(days.indexOf(dow)<0)return false;return now>=(s.startMin-15)&&now<s.endMin;});
+        }catch(e){return false;}
+      })()&&<CommitmentPanel state={props.state} setState={props.setState} phase={phase} settings={settings}/>}
       {/* CHANGED: Discipline lockout banner — date-aware. When viewing today, shows the active lock
           (if any). When viewing a past day that had a lock event saved on its journal row, shows
           the historical lock summary. Otherwise hidden. */}
@@ -6213,7 +6234,7 @@ function GoalsTab(props){
 
       {/* CHANGED: Standard goals organized into categories — Account Activity, Performance, P&L. */}
       {(function(){
-        var hasAccount=(!hidden.account&&accountTarget>0)||(!hidden.withdrawals&&withdrawalTarget>0);
+        var hasAccount=(!hidden.account&&accountTarget>0)||(!hidden.withdrawals&&withdrawalTarget>0)||(!hidden.monthlyWithdrawals&&monthlyWithdrawalTarget>0);
         var hasPerf=(!hidden.winRate&&winRateTarget>0)||(!hidden.discipline&&disciplineTarget>0);
         var hasPnL=(!hidden.daily&&dailyTarget>0)||(!hidden.weekly&&weeklyTarget>0)||(!hidden.monthly&&monthlyTarget>0);
         // CHANGED: Pre-bucket custom goals so they can render inline within their assigned default section.
@@ -6234,7 +6255,7 @@ function GoalsTab(props){
                 <SectionHead icon="🏦" title="Account Activity"/>
                 <div style={gridStyle}>
                   {!hidden.account&&accountTarget>0&&renderStandardCard("account",{label:"Account Balance",value:currentAccount,target:accountTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true})}
-                  {monthlyWithdrawalTarget>0&&renderStandardCard("monthlyWithdrawals",{label:"Monthly Withdrawal",value:monthlyWithdrawn,target:monthlyWithdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true})}
+                  {!hidden.monthlyWithdrawals&&monthlyWithdrawalTarget>0&&renderStandardCard("monthlyWithdrawals",{label:"Monthly Withdrawal",value:monthlyWithdrawn,target:monthlyWithdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true})}
                   {customByBucket.account.map(renderInlineCustom)}
                 </div>
               </div>
@@ -9473,16 +9494,21 @@ function App(props){
     var id=setInterval(checkRollover,60000);
     return function(){clearInterval(id);};
   },[state.date]);
-  // CHANGED: One-time backfill on mount. Scan past trading weekdays (Mon–Fri, non-holiday) from
-  // the earliest existing journal entry up to yesterday. Any missing date becomes an auto
-  // no-trade-day stub the user can retroactively annotate.
   useEffect(function(){
     try{
       var rows=loadJournalRows();
       if(rows.length===0)return;
-      var dates=rows.map(function(r){return r.date;}).filter(Boolean);
+      // CHANGED: Anchor from the earliest ANCHOR entry — a day that has real trades OR a user-entered
+      // no-trade day (autoNoTrade!==true). Auto-generated stubs don't anchor. Prevents an early auto
+      // stub from pulling the start point back and populating months of blank no-trade days.
       var earliest=null;
-      dates.forEach(function(s){var p=s.split("/");if(p.length===3){var d=new Date(+p[2],+p[0]-1,+p[1]);if(!earliest||d<earliest)earliest=d;}});
+      rows.forEach(function(r){
+        var hasTrades=(r.trades||[]).some(function(t){return t&&t.status!=="open";});
+        var userNoTrade=r.noTradeDay&&r.autoNoTrade!==true;
+        if(!hasTrades&&!userNoTrade)return;
+        var p=String(r.date||"").split("/");if(p.length!==3)return;
+        var d=new Date(+p[2],+p[0]-1,+p[1]);if(!earliest||d<earliest)earliest=d;
+      });
       if(!earliest)return;
       var yest=new Date();yest.setHours(0,0,0,0);yest.setDate(yest.getDate()-1);
       var existing={};rows.forEach(function(r){existing[r.date]=true;});
