@@ -9495,6 +9495,34 @@ function App(props){
     return function(){clearInterval(id);};
   },[state.date]);
   useEffect(function(){
+    // CHANGED: One-time cleanup — remove auto-no-trade stubs dated before the earliest "real"
+    // anchor entry (day with trades or user-entered no-trade). Runs once per install.
+    try{
+      if(localStorage.getItem("pt-cleanup-early-auto-nt")==="1")return;
+      var rows=loadJournalRows();
+      var earliest=null;
+      rows.forEach(function(r){
+        var hasTrades=(r.trades||[]).some(function(t){return t&&t.status!=="open";});
+        var userNoTrade=r.noTradeDay&&r.autoNoTrade!==true;
+        if(!hasTrades&&!userNoTrade)return;
+        var p=String(r.date||"").split("/");if(p.length!==3)return;
+        var d=new Date(+p[2],+p[0]-1,+p[1]);if(!earliest||d<earliest)earliest=d;
+      });
+      if(earliest){
+        var removed=0;
+        rows.forEach(function(r){
+          if(r.autoNoTrade!==true)return;
+          var p=String(r.date||"").split("/");if(p.length!==3)return;
+          var d=new Date(+p[2],+p[0]-1,+p[1]);
+          if(d<earliest){try{localStorage.removeItem("journal:"+r.date.replace(/\//g,"-"));removed++;}catch(e){}}
+        });
+        if(removed>0&&bumpReloadKey)bumpReloadKey();
+      }
+      try{localStorage.setItem("pt-cleanup-early-auto-nt","1");}catch(e){}
+    }catch(e){}
+  // eslint-disable-next-line
+  },[]);
+  useEffect(function(){
     try{
       var rows=loadJournalRows();
       if(rows.length===0)return;
