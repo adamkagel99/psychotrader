@@ -4701,6 +4701,9 @@ function TradesTab(props){
           }
         }
         if(!mode)return null;
+        // CHANGED: Suppress the historical banner on past days — the Day Summary already carries a
+        // "⚠ HALF-SIZE TRIGGERED" badge for those. Only the live "active" mode banner still shows.
+        if(mode==="historical")return null;
         var thr=mode==="active"?loadDisciplineLockThreshold():(getJournalEntryField(lock.fromDate,"lockThreshold")||loadDisciplineLockThreshold());
         var openLive=(props.liveTrades||[]);
         var hasOpen=mode==="active"&&openLive.length>0;
