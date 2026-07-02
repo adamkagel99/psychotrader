@@ -5099,6 +5099,7 @@ function TradesTab(props){
           <div style={CS({marginTop:18,marginBottom:14,border:"1px solid "+(isToday?"#16653444":"#1e293b")})}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
               <div style={{fontSize:13,color:isToday?"#86efac":"#a5b4fc",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{isToday?"Saved to Journal ✓":"Day Summary"}</div>
+              {!isToday&&entry.wasLocked&&<span style={{fontSize:10,fontWeight:800,color:"#fca5a5",background:"#3a1010",border:"1px solid #7f1d1d",borderRadius:4,padding:"2px 7px",letterSpacing:0.5}} title="Discipline lock triggered — next day traded at half size">⚠ HALF-SIZE TRIGGERED</span>}
             </div>
             {entry.noTradeDay&&<NoTradeDayDetails entry={entry} isToday={isToday} selectedDate={selectedDate} setTodayJournalEntry={setTodayJournalEntry} setPastSessions={setPastSessions} bumpReloadKey={props.bumpReloadKey} setNoTradeViewer={setNoTradeViewer}/>}
             {/* CHANGED: Day was initially saved as no-trade, then trades were taken. Preserve the original sit-out reasons as historical context. */}
@@ -7242,7 +7243,7 @@ function SessionDayHeatmap(props){
           )}
         </div>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"minmax(0,84px) repeat(5,minmax(0,1fr))",gap:4,flex:1,alignContent:"center"}}>
+      <div style={{display:"grid",gridTemplateColumns:"minmax(0,120px) repeat(5,minmax(0,1fr))",gap:4,flex:1,alignContent:"center"}}>
         <div/>
         {dayLabels.map(function(d,i){return <div key={i} style={{fontSize:9,color:"#64748b",fontWeight:700,textAlign:"center",letterSpacing:0.5,textTransform:"uppercase"}}>{d}</div>;})}
         {rowSessions.map(function(s,si){
