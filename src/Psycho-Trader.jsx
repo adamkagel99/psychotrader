@@ -8605,7 +8605,17 @@ function SettingsTab(props){
           </div>
         )}
         <div style={{fontSize:12,color:"#94a3b8",marginTop:4,padding:"6px 10px",background:"#0a0a0f",borderRadius:6,border:"1px solid #1e293b"}}>
-          Computed: Position ${settings.positionMin}–${settings.positionMax} · Risk ${settings.riskMin}–${settings.riskMax}
+          {(function(){
+            // CHANGED: Compute live from current balance's tier so this readout can't drift from
+            // the Scale Milestones table (stored settings.positionMin/Max was a stale snapshot).
+            var bal=computeAccountBalance(props.liveTotalPnL);
+            var tier=getCurrentTier(bal);
+            var posMax=Math.round(tier*0.06667);
+            var posMin=Math.round(posMax*0.9);
+            var riskMax=Math.round(posMax*0.30);
+            var riskMin=Math.round(riskMax*0.9);
+            return "Computed: Position $"+posMin+"–$"+posMax+" · Risk $"+riskMin+"–$"+riskMax;
+          })()}
         </div>
         {/* CHANGED: Scale milestones table — shows position/risk at each $1k tier with 5% buffer. */}
         {(function(){
