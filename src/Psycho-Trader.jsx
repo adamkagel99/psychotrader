@@ -2237,10 +2237,10 @@ function CalendarGrid(props){
       {/* CHANGED: Hide the day grid + DOW header while the month-year picker is open so the
          picker is the sole focus. */}
       {!showPicker&&<>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3,marginBottom:6}}>
-        {["S","M","T","W","T","F","S"].map(function(c,i){return <div key={i} style={{textAlign:"center",fontSize:11,color:"#475569",fontWeight:700}}>{c}</div>;})}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:5,marginBottom:4}}>
+        {["S","M","T","W","T","F","S"].map(function(c,i){return <div key={i} style={{textAlign:"center",fontSize:10,color:"#64748b",letterSpacing:0.5,fontWeight:600,textTransform:"uppercase"}}>{c}</div>;})}
       </div>
-      <div onMouseDown={function(e){dragStart(e.clientX);}} onMouseMove={function(e){dragMove(e.clientX);}} onMouseUp={function(e){dragEnd(e.clientX);}} onMouseLeave={function(){dragEnd(null);}} onTouchStart={function(e){if(e.touches[0])dragStart(e.touches[0].clientX);}} onTouchMove={function(e){if(e.touches[0])dragMove(e.touches[0].clientX);}} onTouchEnd={function(e){var tx=e.changedTouches&&e.changedTouches[0]?e.changedTouches[0].clientX:null;dragEnd(tx);}} onClickCapture={onCellClickCapture} style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3,cursor:"grab",userSelect:"none"}}>
+      <div onMouseDown={function(e){dragStart(e.clientX);}} onMouseMove={function(e){dragMove(e.clientX);}} onMouseUp={function(e){dragEnd(e.clientX);}} onMouseLeave={function(){dragEnd(null);}} onTouchStart={function(e){if(e.touches[0])dragStart(e.touches[0].clientX);}} onTouchMove={function(e){if(e.touches[0])dragMove(e.touches[0].clientX);}} onTouchEnd={function(e){var tx=e.changedTouches&&e.changedTouches[0]?e.changedTouches[0].clientX:null;dragEnd(tx);}} onClickCapture={onCellClickCapture} style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:5,cursor:"grab",userSelect:"none"}}>
         {weeks.flat().map(function(cell,i){
           if(!cell)return <div key={i} style={{height:34}}/>;
           var d=cell.day;
@@ -2365,21 +2365,21 @@ function DashboardCalendar(props){
   }
   return (
     <div style={CS({marginBottom:16,padding:0,overflow:"hidden"})}>
-      <button onClick={function(){setOpen(function(o){return !o;});}} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",padding:"12px 18px 8px",textAlign:"left"}}>
+      <button onClick={function(){setOpen(function(o){return !o;});}} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",padding:"12px 18px 8px",textAlign:"left",position:"relative"}}>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           <span style={{fontSize:13,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{open?"Calendar":"This Week"}</span>
           {readoutText&&<span onClick={function(e){e.stopPropagation();setSummaryMode(summaryMode==="trades"?"pnl":"trades");}} title={summaryMode==="trades"?"Tap to show P&L":"Tap to show trade count"} style={{fontSize:12,fontWeight:700,color:readoutColor,fontVariantNumeric:"tabular-nums",padding:"2px 7px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:6,cursor:"pointer"}}>{readoutText}</span>}
-          {open&&(function(){
-            function move(delta){var m=calMonth+delta;var y=calYear;if(m<0){m=11;y--;}if(m>11){m=0;y++;}setCalYear(y);setCalMonth(m);}
-            return (
-              <span onClick={function(e){e.stopPropagation();}} style={{display:"flex",alignItems:"center",gap:6,marginLeft:8}}>
-                <button onClick={function(){move(-1);}} style={{background:"none",border:"1px solid #334155",borderRadius:5,color:"#94a3b8",fontSize:12,cursor:"pointer",fontFamily:"inherit",padding:"2px 8px"}}>‹</button>
-                <span style={{fontSize:13,fontWeight:700,color:"#e2e8f0",minWidth:100,textAlign:"center"}}>{MONTH_NAMES[calMonth]} {calYear}</span>
-                <button onClick={function(){move(1);}} style={{background:"none",border:"1px solid #334155",borderRadius:5,color:"#94a3b8",fontSize:12,cursor:"pointer",fontFamily:"inherit",padding:"2px 8px"}}>›</button>
-              </span>
-            );
-          })()}
         </div>
+        {open&&(function(){
+          function move(delta){var m=calMonth+delta;var y=calYear;if(m<0){m=11;y--;}if(m>11){m=0;y++;}setCalYear(y);setCalMonth(m);}
+          return (
+            <span onClick={function(e){e.stopPropagation();}} style={{position:"absolute",left:"50%",top:"50%",transform:"translate(-50%,-50%)",display:"flex",alignItems:"center",gap:6}}>
+              <button onClick={function(){move(-1);}} style={{background:"none",border:"1px solid #334155",borderRadius:5,color:"#94a3b8",fontSize:12,cursor:"pointer",fontFamily:"inherit",padding:"2px 8px"}}>‹</button>
+              <span style={{fontSize:13,fontWeight:700,color:"#e2e8f0",minWidth:100,textAlign:"center"}}>{MONTH_NAMES[calMonth]} {calYear}</span>
+              <button onClick={function(){move(1);}} style={{background:"none",border:"1px solid #334155",borderRadius:5,color:"#94a3b8",fontSize:12,cursor:"pointer",fontFamily:"inherit",padding:"2px 8px"}}>›</button>
+            </span>
+          );
+        })()}
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{display:"inline-block",verticalAlign:"middle",transition:"transform 0.2s",transform:open?"rotate(180deg)":"rotate(0deg)"}}><path d="M2 4l4 4 4-4" stroke="#64748b" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
       </button>
       {/* CHANGED: Week strip hidden when full calendar is expanded (it's redundant). */}
@@ -2427,7 +2427,7 @@ function DashboardCalendar(props){
         </div>
       )}
       {open&&(
-        <div style={{padding:"4px 18px 14px"}}>
+        <div style={{padding:"0 14px 14px"}}>
           <CalendarGrid hideHeader={true} summaryMode={summaryMode} year={calYear} month={calMonth} onMonthChange={function(y,m){setCalYear(y);setCalMonth(m);}} sessionMap={sessionMap} todayDateStr={todayDateStr} selectedDate={null} onSelect={function(d){if(props.onSelectDate)props.onSelectDate(d);}}/>
           <CalendarLegend/>
         </div>
