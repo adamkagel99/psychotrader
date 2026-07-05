@@ -1336,12 +1336,27 @@ function tradingDaysThisMonth(){
   }
   return count||20;
 }
-// CHANGED: Default daily target derived from Monthly P&L goal ÷ trading days this month. Falls
-// back to legacy session-based computeDailyTarget when the monthly goal isn't set.
+function tradingWeeksThisMonth(){return Math.max(1,Math.ceil(tradingDaysThisMonth()/5));}
 function defaultDailyFromMonthly(goals,sp){
   var mp=parseFloat(goals&&goals.monthlyPnL)||0;
   if(mp>0)return mp/tradingDaysThisMonth();
   return computeDailyTarget(sp);
+}
+// CHANGED: Trading days in the CURRENT week (Sun–Sat), excluding weekends and market holidays.
+function tradingDaysThisWeek(){
+  var n=getNow();var d=new Date(n);d.setHours(0,0,0,0);d.setDate(d.getDate()-d.getDay());
+  var count=0;
+  for(var i=0;i<7;i++){
+    var dt=new Date(d);dt.setDate(d.getDate()+i);var dow=dt.getDay();
+    if(dow===0||dow===6)continue;
+    var key=(dt.getMonth()+1)+"/"+dt.getDate()+"/"+dt.getFullYear();
+    if(MARKET_HOLIDAYS[key])continue;
+    count++;
+  }
+  return count||5;
+}
+function defaultWeeklyFromMonthly(goals,sp){
+  return defaultDailyFromMonthly(goals,sp)*tradingDaysThisWeek();
 }
 // Daily target derived from session sizing + gain hard stops. Falls back to 0 if unset.
 function getDailyTarget(){
@@ -2170,7 +2185,7 @@ function CalendarGrid(props){
   var fullDailyTarget=parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(defaultDailyFromMonthly(goals,settingsForTarget)||0);
   var fullRiskMax=parseFloat(settingsForTarget.riskMax)||0;
   var weeklyMultiplier=parseFloat(goals.weeklyMultiplier)||5;
-  var weeklyTarget=applyHalfsizeToTarget(parseFloat(goals.weeklyPnL)>0?parseFloat(goals.weeklyPnL):((parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(defaultDailyFromMonthly(goals,settingsForTarget)||0))*weeklyMultiplier));
+  var weeklyTarget=applyHalfsizeToTarget(parseFloat(goals.weeklyPnL)>0?parseFloat(goals.weeklyPnL):defaultWeeklyFromMonthly(goals,settingsForTarget));
   var monthlyTarget=parseFloat(goals.monthlyPnL)||0;
   var now=getPT();
   // CHANGED: When parent provides controlled year/month/onMonthChange, use those instead of
@@ -2252,29 +2267,24 @@ function CalendarGrid(props){
           // CHANGED: Other-month cells dimmed but clickable — jumps to that month via onSelect.
           var otherMonthStyle=otherMonth?{opacity:0.35}:{};
           return (
-            <button key={i} onClick={function(){onSelect(ds);}} style={Object.assign({height:46,background:bg,border:(isNoTrade?"1.5px ":"1px ")+noTradeBorderStyle+" "+bd,borderRadius:5,color:col,fontSize:13,fontWeight:isToday||isSelected||isNoTrade?700:500,cursor:"pointer",fontFamily:"inherit",position:"relative",padding:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2},otherMonthStyle)} title={holiday||(isNoTrade?"No-trade day (deliberately sat out)":(pnl!=null?(pnl>=0?"+":"")+"$"+pnl.toFixed(0):""))}>
-              <span style={{lineHeight:1}}>{d}</span>
+            <button key={i} onClick={function(){onSelect(ds);}} style={Object.assign({padding:"9px 0 6px",background:bg,border:(isNoTrade?"1.5px ":"1px ")+noTradeBorderStyle+" "+bd,borderRadius:6,color:col,fontWeight:isToday||isSelected||isNoTrade?700:500,cursor:"pointer",fontFamily:"inherit",position:"relative",display:"flex",flexDirection:"column",alignItems:"center",gap:2,minHeight:50},otherMonthStyle)} title={holiday||(isNoTrade?"No-trade day (deliberately sat out)":(pnl!=null?(pnl>=0?"+":"")+"$"+pnl.toFixed(0):""))}>
+              <span style={{fontSize:17,color:col,fontWeight:isToday||isSelected||isNoTrade?700:600,lineHeight:1}}>{d}</span>
               {/* CHANGED: Day cell readout — driven by summaryMode passed from DashboardCalendar.
                  "trades" → show trade count, "pnl" → R when Hide-$ on, $ otherwise. */}
               {dayData&&dayData.tradeCount>0&&(function(){
-                if(props.summaryMode==="trades")return <span style={{fontSize:9,color:col,fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1}}>{dayData.tradeCount}t</span>;
+                if(props.summaryMode==="trades")return <span style={{fontSize:10,color:col,fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1,marginTop:2}}>{dayData.tradeCount}t</span>;
                 if(pnl==null)return null;
                 if(HIDE_DOLLAR_PNL){
-                  // CHANGED: Per-trade-stamped R total (sums each trade's R against its own
-                  // sizeFraction). Matches the journal's per-trade R.
                   var rT=dayData.rTotal||0;
                   if(rT===0&&dayRiskMax<=0)return null;
-                  return <span style={{fontSize:9,color:col,fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1}}>{(rT>=0?"+":"")+rT.toFixed(1)}R</span>;
+                  return <span style={{fontSize:10,color:col,fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1,marginTop:2}}>{(rT>=0?"+":"")+rT.toFixed(1)}R</span>;
                 }
-                return <span style={{fontSize:9,color:col,fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1}}>{(pnl>=0?"+$":"-$")+Math.abs(pnl).toFixed(0)}</span>;
+                return <span style={{fontSize:10,color:col,fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1,marginTop:2}}>{(pnl>=0?"+$":"-$")+Math.abs(pnl).toFixed(0)}</span>;
               })()}
-              {isNoTrade&&!isToday&&<span style={{fontSize:9,color:"#fbbf24",fontWeight:800,letterSpacing:0.3,lineHeight:1}}>⊘ NT</span>}
-              {earlyClose&&<div style={{position:"absolute",top:1,right:2,width:4,height:4,borderRadius:"50%",background:"#f59e0b"}}/>}
-              {/* CHANGED: Daily goal-hit checkmark in the bottom-right — clearly a glyph, not a dot,
-                 so it can't be confused with the early-close indicator. */}
-              {dayGoalHit&&<div style={{position:"absolute",bottom:0,right:3,fontSize:11,color:"#facc15",fontWeight:900,lineHeight:1,textShadow:"0 0 3px rgba(250,204,21,0.6)"}} title={"Daily goal hit (+"+dayRTotal.toFixed(1)+"R / "+dailyTargetR.toFixed(1)+"R)"}>✓</div>}
-              {/* CHANGED: Discipline-lock marker — small "D" badge in top-left corner when day's discipline score fell below threshold. */}
-              {dayData&&dayData.wasLocked&&<div style={{position:"absolute",top:1,left:2,fontSize:8,fontWeight:800,color:"#fff",background:"#ef4444",borderRadius:3,padding:"0 3px",lineHeight:"11px",letterSpacing:0.3}} title="Discipline lock triggered">D</div>}
+              {isNoTrade&&!isToday&&<span style={{fontSize:10,color:"#fbbf24",fontWeight:800,letterSpacing:0.3,lineHeight:1,marginTop:2}}>⊘ NT</span>}
+              {earlyClose&&<div style={{position:"absolute",top:2,right:3,width:4,height:4,borderRadius:"50%",background:"#f59e0b"}}/>}
+              {dayGoalHit&&<div style={{position:"absolute",bottom:1,right:4,fontSize:11,color:"#facc15",fontWeight:900,lineHeight:1,textShadow:"0 0 3px rgba(250,204,21,0.6)"}} title={"Daily goal hit (+"+dayRTotal.toFixed(1)+"R / "+dailyTargetR.toFixed(1)+"R)"}>✓</div>}
+              {dayData&&dayData.wasLocked&&<div style={{position:"absolute",top:2,left:3,fontSize:8,fontWeight:800,color:"#fff",background:"#ef4444",borderRadius:3,padding:"0 3px",lineHeight:"11px",letterSpacing:0.3}} title="Discipline lock triggered">D</div>}
             </button>
           );
         })}
@@ -2409,7 +2419,7 @@ function DashboardCalendar(props){
         </div>
       )}
       {open&&(
-        <div style={{padding:"4px 18px 14px",borderTop:"1px solid #1e293b"}}>
+        <div style={{padding:"4px 18px 14px"}}>
           <CalendarGrid summaryMode={summaryMode} year={calYear} month={calMonth} onMonthChange={function(y,m){setCalYear(y);setCalMonth(m);}} sessionMap={sessionMap} todayDateStr={todayDateStr} selectedDate={null} onSelect={function(d){if(props.onSelectDate)props.onSelectDate(d);}}/>
           <CalendarLegend/>
         </div>
@@ -4057,7 +4067,7 @@ function GoalsSnapshot(props){
   var _userDaily=parseFloat(goals.dailyPnL)||0;
   var _userWeekly=parseFloat(goals.weeklyPnL)||0;
   var dailyTarget=applyHalfsizeToTarget(_userDaily>0?_userDaily:autoDaily);
-  var weeklyTarget=applyHalfsizeToTarget(_userWeekly>0?_userWeekly:((_userDaily>0?_userDaily:autoDaily)*weeklyMultiplier));
+  var weeklyTarget=applyHalfsizeToTarget(_userWeekly>0?_userWeekly:defaultWeeklyFromMonthly(goals,settings));
   var winRateTarget=parseFloat(goals.winRate)||0;
   var disciplineTarget=loadDisciplineLockThreshold();
   var accountTarget=parseFloat(goals.accountTarget)||0;
@@ -5972,7 +5982,7 @@ function GoalsTab(props){
   function gtRFmt(v){var r=gtRiskMax>0?v/gtRiskMax:0;return (r>=0?"+":"")+r.toFixed(1)+"R";}
   var pnlFmt=HIDE_DOLLAR_PNL?{formatValue:gtRFmt,formatTarget:gtRFmt}:{};
   var weeklyMultiplier=parseFloat(goals.weeklyMultiplier)||5;
-  var weeklyTarget=applyHalfsizeToTarget(_userWeekly>0?_userWeekly:((_userDaily>0?_userDaily:autoDaily)*weeklyMultiplier));
+  var weeklyTarget=applyHalfsizeToTarget(_userWeekly>0?_userWeekly:defaultWeeklyFromMonthly(goals,settings));
   var winRateTarget=parseFloat(goals.winRate)||0;
   // CHANGED: Discipline Score goal is tied directly to the discipline LOCK THRESHOLD setting and
   // is no longer user-editable in Goals. The goal is simply: keep your score above the lock bar.
@@ -6056,14 +6066,20 @@ function GoalsTab(props){
           <div style={{fontSize:18,fontWeight:700,color:"#e2e8f0"}}>Edit Goals</div>
           <button onClick={function(){setEditing(false);}} style={{background:"none",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:14,cursor:"pointer",fontFamily:"inherit",padding:"6px 14px"}}>Cancel</button>
         </div>
-        <div style={{padding:"10px 12px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:8,marginBottom:12,fontSize:13,color:"#94a3b8",lineHeight:1.5}}>Daily P&L target is auto-calculated from the first enabled session's position size and gain hard stop: <span style={{color:"#22c55e",fontWeight:700}}>${Math.round(autoDaily)}</span> (hitting the first session's gain stop is a hard stop for the day, sized by risk max ${(parseFloat(settings.riskMax)||0)}). Adjust sessions and gain stops in Settings.</div>
+        {(function(){
+          var mp=parseFloat(draft.monthlyPnL)||0;
+          var td=tradingDaysThisMonth();var tw=tradingDaysThisWeek();
+          var ad=mp>0?mp/td:computeDailyTarget(settings);
+          var aw=ad*tw;
+          var src=mp>0?("Monthly $"+Math.round(mp).toLocaleString()+" ÷ "+td+" days · weekly = daily × "+tw+" trading days this week"):"session size × gain-stop";
+          return <div style={{padding:"10px 12px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:8,marginBottom:12,fontSize:13,color:"#94a3b8",lineHeight:1.5}}>Auto: Daily <span style={{color:"#22c55e",fontWeight:700}}>${Math.round(ad).toLocaleString()}</span> · Weekly <span style={{color:"#22c55e",fontWeight:700}}>${Math.round(aw).toLocaleString()}</span> ({src}). Override either below; empty falls back to auto.</div>;
+        })()}
         {/* CHANGED: Daily/Weekly P&L. Empty = auto-computed from Monthly ÷ trading days & daily × multiplier.
             User can override with an explicit number; the Reset button clears the override. */}
         {(function(){
           var monthlyN=parseFloat(draft.monthlyPnL)||0;
           var autoDaily=monthlyN>0?monthlyN/tradingDaysThisMonth():computeDailyTarget(settings);
-          var mult=parseFloat(draft.weeklyMultiplier)||5;
-          var autoWeekly=(parseFloat(draft.dailyPnL)>0?parseFloat(draft.dailyPnL):autoDaily)*mult;
+          var autoWeekly=autoDaily*tradingDaysThisWeek();
           function row(k,label,autoVal){
             var override=parseFloat(draft[k])>0;
             return (
@@ -6081,7 +6097,7 @@ function GoalsTab(props){
           }
           return <>{row("dailyPnL","Daily P&L Target ($)",autoDaily)}{row("weeklyPnL","Weekly P&L Target ($)",autoWeekly)}</>;
         })()}
-        {[{key:"weeklyMultiplier",label:"Weekly P&L Multiplier (× Daily Target)",ph:"e.g. 5"},{key:"monthlyPnL",label:"Monthly P&L Target ($)",ph:"e.g. 3000"},{key:"winRate",label:"Win Rate Target (%)",ph:"e.g. 60"},{key:"accountTarget",label:"Account Milestone ($)",ph:"e.g. 5000"},{key:"monthlyWithdrawals",label:"Monthly Withdrawal Target ($)",ph:"e.g. 1000"}].map(function(f){
+        {[{key:"monthlyPnL",label:"Monthly P&L Target ($)",ph:"e.g. 3000"},{key:"winRate",label:"Win Rate Target (%)",ph:"e.g. 60"},{key:"accountTarget",label:"Account Milestone ($)",ph:"e.g. 5000"},{key:"monthlyWithdrawals",label:"Monthly Withdrawal Target ($)",ph:"e.g. 1000"}].map(function(f){
           return <div key={f.key} style={{marginBottom:12}}><label style={lbl}>{f.label}</label><input type="number" value={draft[f.key]||""} onChange={function(e){var v=e.target.value;setDraft(function(g){return Object.assign({},g,{[f.key]:v});});}} placeholder={f.ph} style={fld}/></div>;
         })}
         <button onClick={saveStandardGoals} style={{width:"100%",padding:"13px",background:"linear-gradient(135deg,#4f46e5,#6366f1)",color:"#fff",border:"none",borderRadius:10,fontSize:16,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginTop:4}}>Save Goals</button>
