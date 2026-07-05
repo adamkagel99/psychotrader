@@ -8537,22 +8537,7 @@ function SettingsTab(props){
                   <div style={{fontSize:16,fontWeight:700,color:"#e2e8f0",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{fmtUSD(totalWdr)}</div>
                 </div>
               </div>
-              {/* CHANGED: Manual half-size toggle. Auto-engages when weekly or monthly goal is hit
-                 — this toggle lets users opt in early. When locked by a goal hit, the toggle
-                 becomes a read-only indicator. */}
-              {(function(){
-                var locked=isWeeklyGoalHit(props.liveTotalPnL||0)||isMonthlyGoalHit(props.liveTotalPnL||0);
-                var on=isMonthHalfsizeActive();
-                return (
-                  <div style={{marginBottom:12,padding:"10px 12px",background:"#0a0a0f",border:"1px solid "+(on?"#facc15":"#334155"),borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
-                    <div style={{minWidth:0}}>
-                      <div style={{fontSize:12,color:"#e2e8f0",fontWeight:700}}>{on?"🔒 Half-size active":"Half-size trading"}</div>
-                      <div style={{fontSize:10,color:"#64748b",marginTop:2}}>{locked?"Locked on — weekly/monthly goal hit":on?"Manual opt-in — tap to turn off":"All sizing/risk halves for the rest of the month"}</div>
-                    </div>
-                    <button disabled={locked} onClick={function(){if(locked)return;setMonthHalfsizeActive(!on);if(!on===false){try{localStorage.removeItem("tf-month-goal-banner-dismissed");}catch(e){}}if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"5px 12px",background:on?"#facc15":"#1e293b",border:"1px solid "+(on?"#facc15":"#475569"),borderRadius:5,color:on?"#422006":"#cbd5e1",fontSize:11,fontWeight:700,cursor:locked?"not-allowed":"pointer",fontFamily:"inherit",opacity:locked?0.7:1,flexShrink:0}}>{on?"On":"Off"}</button>
-                  </div>
-                );
-              })()}
+              {/* CHANGED: Half-size trading toggle moved to Position Sizing Parameters section. */}
             </>
           );
         })()}
@@ -8630,8 +8615,22 @@ function SettingsTab(props){
         })}
       </SettingsSection>
 
-      <SettingsSection title="Auto-Sizing Parameters">
+      <SettingsSection title="Position Sizing Parameters">
         <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Risk Max % of Balance is the most you'll lose on a single trade as a % of your account. Stop Loss Max % is the largest stop distance from entry as a % of position size. Together they determine your position size: Position Size % = Risk / Stop × 100. Slippage % sets a minimum lower bound.</div>
+        {/* CHANGED: Half-size trading toggle relocated from Balance to Position Sizing Parameters. */}
+        {(function(){
+          var locked=isWeeklyGoalHit(props.liveTotalPnL||0)||isMonthlyGoalHit(props.liveTotalPnL||0);
+          var on=isMonthHalfsizeActive();
+          return (
+            <div style={{marginBottom:12,padding:"10px 12px",background:"#0a0a0f",border:"1px solid "+(on?"#facc15":"#334155"),borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+              <div style={{minWidth:0}}>
+                <div style={{fontSize:12,color:"#e2e8f0",fontWeight:700}}>{on?"🔒 Half-size active":"Half-size trading"}</div>
+                <div style={{fontSize:10,color:"#64748b",marginTop:2}}>{locked?"Locked on — weekly/monthly goal hit":on?"Manual opt-in — tap to turn off":"All sizing/risk halves for the rest of the month"}</div>
+              </div>
+              <button disabled={locked} onClick={function(){if(locked)return;setMonthHalfsizeActive(!on);if(!on===false){try{localStorage.removeItem("tf-month-goal-banner-dismissed");}catch(e){}}if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"5px 12px",background:on?"#facc15":"#1e293b",border:"1px solid "+(on?"#facc15":"#475569"),borderRadius:5,color:on?"#422006":"#cbd5e1",fontSize:11,fontWeight:700,cursor:locked?"not-allowed":"pointer",fontFamily:"inherit",opacity:locked?0.7:1,flexShrink:0}}>{on?"On":"Off"}</button>
+            </div>
+          );
+        })()}
         {/* CHANGED: $ / % mode toggle. */}
         <div style={{display:"flex",gap:6,marginBottom:12}}>
           {[{id:"pct",label:"% of Balance"},{id:"dollar",label:"Fixed $"}].map(function(o){
