@@ -1322,6 +1322,27 @@ function computeDailyTarget(sp){
   if(isNaN(f))f=1;if(isNaN(g))g=2.5;
   return rm*f*g;
 }
+// CHANGED: Count Mon–Fri trading days in the current month (excludes holidays). Used to derive
+// today/weekly P&L targets from the monthly P&L goal.
+function tradingDaysThisMonth(){
+  var n=getNow();var y=n.getFullYear(),m=n.getMonth();
+  var last=new Date(y,m+1,0).getDate();var count=0;
+  for(var d=1;d<=last;d++){
+    var dt=new Date(y,m,d);var dow=dt.getDay();
+    if(dow===0||dow===6)continue;
+    var key=(m+1)+"/"+d+"/"+y;
+    if(MARKET_HOLIDAYS[key])continue;
+    count++;
+  }
+  return count||20;
+}
+// CHANGED: Default daily target derived from Monthly P&L goal ÷ trading days this month. Falls
+// back to legacy session-based computeDailyTarget when the monthly goal isn't set.
+function defaultDailyFromMonthly(goals,sp){
+  var mp=parseFloat(goals&&goals.monthlyPnL)||0;
+  if(mp>0)return mp/tradingDaysThisMonth();
+  return computeDailyTarget(sp);
+}
 // Daily target derived from session sizing + gain hard stops. Falls back to 0 if unset.
 function getDailyTarget(){
   try{var s=localStorage.getItem(SETTINGS_KEY);if(!s)return 0;return computeDailyTarget(JSON.parse(s));}catch(e){return 0;}
@@ -2146,10 +2167,10 @@ function CalendarGrid(props){
   // CHANGED: Per-day daily target scales by that day's stamped riskMax relative to the current
   // full risk setting. Prevents past full-size days from being marked "target met" against a
   // halved threshold (or vice-versa) when half-size mode is toggled later.
-  var fullDailyTarget=parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(computeDailyTarget(settingsForTarget)||0);
+  var fullDailyTarget=parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(defaultDailyFromMonthly(goals,settingsForTarget)||0);
   var fullRiskMax=parseFloat(settingsForTarget.riskMax)||0;
-  var weeklyMultiplier=parseFloat(goals.weeklyMultiplier)||4;
-  var weeklyTarget=applyHalfsizeToTarget(parseFloat(goals.weeklyPnL)>0?parseFloat(goals.weeklyPnL):((parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(computeDailyTarget(settingsForTarget)||0))*weeklyMultiplier));
+  var weeklyMultiplier=parseFloat(goals.weeklyMultiplier)||5;
+  var weeklyTarget=applyHalfsizeToTarget(parseFloat(goals.weeklyPnL)>0?parseFloat(goals.weeklyPnL):((parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(defaultDailyFromMonthly(goals,settingsForTarget)||0))*weeklyMultiplier));
   var monthlyTarget=parseFloat(goals.monthlyPnL)||0;
   var now=getPT();
   // CHANGED: When parent provides controlled year/month/onMonthChange, use those instead of
@@ -4028,12 +4049,15 @@ function GoalsSnapshot(props){
   var allW=allT.filter(function(t){return parseFloat(t.pnl)>0;});
   var oWR=allT.length>0?allW.length/allT.length*100:0;
   var aDisc=rows.length>0?rows.reduce(function(s,e){return s+calcDiscipline(e.trades||[],e.riskMax,e.commitments?{commitments:e.commitments}:{commitment:e.commitment||null});},0)/rows.length:0;
-  var autoDaily=computeDailyTarget(settings);
-  var weeklyMultiplier=parseFloat(goals.weeklyMultiplier)||4;
-  // CHANGED: Daily and weekly targets honor half-size mode — halved when committed for the
-  // rest of the month so progress rings reflect the realistic ceiling.
-  var dailyTarget=applyHalfsizeToTarget(autoDaily),weeklyTarget=applyHalfsizeToTarget(autoDaily*weeklyMultiplier);
   var monthlyTarget=parseFloat(goals.monthlyPnL)||0;
+  // CHANGED: Daily/weekly default to monthly ÷ trading-days-this-month and daily × 5 respectively.
+  // User overrides in goals.dailyPnL / goals.weeklyPnL take precedence when > 0.
+  var autoDaily=defaultDailyFromMonthly(goals,settings);
+  var weeklyMultiplier=parseFloat(goals.weeklyMultiplier)||5;
+  var _userDaily=parseFloat(goals.dailyPnL)||0;
+  var _userWeekly=parseFloat(goals.weeklyPnL)||0;
+  var dailyTarget=applyHalfsizeToTarget(_userDaily>0?_userDaily:autoDaily);
+  var weeklyTarget=applyHalfsizeToTarget(_userWeekly>0?_userWeekly:((_userDaily>0?_userDaily:autoDaily)*weeklyMultiplier));
   var winRateTarget=parseFloat(goals.winRate)||0;
   var disciplineTarget=loadDisciplineLockThreshold();
   var accountTarget=parseFloat(goals.accountTarget)||0;
@@ -5801,7 +5825,7 @@ function GoalRing(props){
 
 function GoalsTab(props){
   var settings=props.settings,liveTotalPnL=props.liveTotalPnL||0;
-  var EMPTY_GOALS={weeklyMultiplier:"4",monthlyPnL:"",winRate:"",disciplineScore:"",accountTarget:"",withdrawals:"",monthlyWithdrawals:"",custom:[],hidden:{}};
+  var EMPTY_GOALS={weeklyMultiplier:"5",dailyPnL:"",weeklyPnL:"",monthlyPnL:"",winRate:"",disciplineScore:"",accountTarget:"",withdrawals:"",monthlyWithdrawals:"",custom:[],hidden:{}};
   // Defensive load that handles legacy or new formats and arrays
   function normalizeStored(p){
     if(!p)return Object.assign({},EMPTY_GOALS);
@@ -5939,16 +5963,16 @@ function GoalsTab(props){
   var weekWins=weekTrades.filter(function(t){return parseFloat(t.pnl)>0;}).length;
   var wWR=weekTrades.length>0?weekWins/weekTrades.length*100:0;
 
-  var autoDaily=computeDailyTarget(settings);
-  // CHANGED: Daily and weekly targets respect half-size mode for the rest of the month.
-  var dailyTarget=applyHalfsizeToTarget(autoDaily);
-  // CHANGED: when $ is hidden, P&L goal cards display in R (value ÷ risk-per-trade).
+  var monthlyTarget=parseFloat(goals.monthlyPnL)||0;
+  var autoDaily=defaultDailyFromMonthly(goals,settings);
+  var _userDaily=parseFloat(goals.dailyPnL)||0;
+  var _userWeekly=parseFloat(goals.weeklyPnL)||0;
+  var dailyTarget=applyHalfsizeToTarget(_userDaily>0?_userDaily:autoDaily);
   var gtRiskMax=parseFloat(settings.riskMax)||0;
   function gtRFmt(v){var r=gtRiskMax>0?v/gtRiskMax:0;return (r>=0?"+":"")+r.toFixed(1)+"R";}
   var pnlFmt=HIDE_DOLLAR_PNL?{formatValue:gtRFmt,formatTarget:gtRFmt}:{};
-  var weeklyMultiplier=parseFloat(goals.weeklyMultiplier)||4;
-  var weeklyTarget=applyHalfsizeToTarget(autoDaily*weeklyMultiplier);
-  var monthlyTarget=parseFloat(goals.monthlyPnL)||0;
+  var weeklyMultiplier=parseFloat(goals.weeklyMultiplier)||5;
+  var weeklyTarget=applyHalfsizeToTarget(_userWeekly>0?_userWeekly:((_userDaily>0?_userDaily:autoDaily)*weeklyMultiplier));
   var winRateTarget=parseFloat(goals.winRate)||0;
   // CHANGED: Discipline Score goal is tied directly to the discipline LOCK THRESHOLD setting and
   // is no longer user-editable in Goals. The goal is simply: keep your score above the lock bar.
@@ -6033,7 +6057,31 @@ function GoalsTab(props){
           <button onClick={function(){setEditing(false);}} style={{background:"none",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:14,cursor:"pointer",fontFamily:"inherit",padding:"6px 14px"}}>Cancel</button>
         </div>
         <div style={{padding:"10px 12px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:8,marginBottom:12,fontSize:13,color:"#94a3b8",lineHeight:1.5}}>Daily P&L target is auto-calculated from the first enabled session's position size and gain hard stop: <span style={{color:"#22c55e",fontWeight:700}}>${Math.round(autoDaily)}</span> (hitting the first session's gain stop is a hard stop for the day, sized by risk max ${(parseFloat(settings.riskMax)||0)}). Adjust sessions and gain stops in Settings.</div>
-        {[{key:"weeklyMultiplier",label:"Weekly P&L Multiplier (× Daily Target)",ph:"e.g. 4"},{key:"monthlyPnL",label:"Monthly P&L Target ($)",ph:"e.g. 3000"},{key:"winRate",label:"Win Rate Target (%)",ph:"e.g. 60"},{key:"accountTarget",label:"Account Milestone ($)",ph:"e.g. 5000"},{key:"monthlyWithdrawals",label:"Monthly Withdrawal Target ($)",ph:"e.g. 1000"}].map(function(f){
+        {/* CHANGED: Daily/Weekly P&L. Empty = auto-computed from Monthly ÷ trading days & daily × multiplier.
+            User can override with an explicit number; the Reset button clears the override. */}
+        {(function(){
+          var monthlyN=parseFloat(draft.monthlyPnL)||0;
+          var autoDaily=monthlyN>0?monthlyN/tradingDaysThisMonth():computeDailyTarget(settings);
+          var mult=parseFloat(draft.weeklyMultiplier)||5;
+          var autoWeekly=(parseFloat(draft.dailyPnL)>0?parseFloat(draft.dailyPnL):autoDaily)*mult;
+          function row(k,label,autoVal){
+            var override=parseFloat(draft[k])>0;
+            return (
+              <div key={k} style={{marginBottom:12}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4}}>
+                  <label style={lbl}>{label}</label>
+                  <span style={{fontSize:11,color:"#64748b"}}>auto: ${Math.round(autoVal||0).toLocaleString()}{override?" (overridden)":""}</span>
+                </div>
+                <div style={{display:"flex",gap:6}}>
+                  <input type="number" value={draft[k]||""} onChange={function(e){var v=e.target.value;setDraft(function(g){return Object.assign({},g,{[k]:v});});}} placeholder={"auto: $"+Math.round(autoVal||0)} style={Object.assign({},fld,{flex:1})}/>
+                  {override&&<button onClick={function(){setDraft(function(g){return Object.assign({},g,{[k]:""});});}} style={{padding:"0 12px",background:"transparent",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>Reset</button>}
+                </div>
+              </div>
+            );
+          }
+          return <>{row("dailyPnL","Daily P&L Target ($)",autoDaily)}{row("weeklyPnL","Weekly P&L Target ($)",autoWeekly)}</>;
+        })()}
+        {[{key:"weeklyMultiplier",label:"Weekly P&L Multiplier (× Daily Target)",ph:"e.g. 5"},{key:"monthlyPnL",label:"Monthly P&L Target ($)",ph:"e.g. 3000"},{key:"winRate",label:"Win Rate Target (%)",ph:"e.g. 60"},{key:"accountTarget",label:"Account Milestone ($)",ph:"e.g. 5000"},{key:"monthlyWithdrawals",label:"Monthly Withdrawal Target ($)",ph:"e.g. 1000"}].map(function(f){
           return <div key={f.key} style={{marginBottom:12}}><label style={lbl}>{f.label}</label><input type="number" value={draft[f.key]||""} onChange={function(e){var v=e.target.value;setDraft(function(g){return Object.assign({},g,{[f.key]:v});});}} placeholder={f.ph} style={fld}/></div>;
         })}
         <button onClick={saveStandardGoals} style={{width:"100%",padding:"13px",background:"linear-gradient(135deg,#4f46e5,#6366f1)",color:"#fff",border:"none",borderRadius:10,fontSize:16,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginTop:4}}>Save Goals</button>
@@ -7976,10 +8024,10 @@ function PerformanceTab(props){
             // losing P&L into the "avg loss" column for consistency with the other rows.
             var lockedDays=filtered.filter(function(r){return !!r.wasLocked;});
             if(lockedDays.length>0){
-              var grp={n:lockedDays.length,lossN:0,lossPnl:0,lossPcts:[]};
+              var grp={n:lockedDays.length,lossN:0,lossPnl:0,lossPcts:[],worstPnl:0};
               lockedDays.forEach(function(r){
                 var dayPnl=(r.trades||[]).reduce(function(s,t){return s+(t&&t.status!=="open"?(parseFloat(t.pnl)||0):0);},0);
-                if(dayPnl<0){grp.lossN++;grp.lossPnl+=dayPnl;}
+                if(dayPnl<0){grp.lossN++;grp.lossPnl+=dayPnl;if(dayPnl<grp.worstPnl)grp.worstPnl=dayPnl;}
               });
               groups["Discipline threshold broken"]=grp;
             }
@@ -8000,7 +8048,10 @@ function PerformanceTab(props){
                   var lossRate=g.n>0?Math.round((g.lossN/g.n)*100):0;
                   var avgLoss=g.lossN>0?g.lossPnl/g.lossN:0;
                   var avgLossPct=g.lossPcts.length>0?(g.lossPcts.reduce(function(s,v){return s+v;},0)/g.lossPcts.length):0;
-                  var lossStr=g.lossN>0?(HIDE_DOLLAR_PNL?(avgLossPct.toFixed(2)+"%"):("-$"+Math.abs(avgLoss).toFixed(2))):"—";
+                  // CHANGED: For discipline-lock row, show worst red day $, not average.
+                  var lossStr=isLock
+                    ? (g.worstPnl<0?"-$"+Math.abs(g.worstPnl).toFixed(2):"—")
+                    : (g.lossN>0?(HIDE_DOLLAR_PNL?(avgLossPct.toFixed(2)+"%"):("-$"+Math.abs(avgLoss).toFixed(2))):"—");
                   var unit=isLock?"day":"trade";
                   return (
                     <div key={k} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:i<keys.length-1?"1px solid #1e293b":"none",gap:8}}>
