@@ -2228,7 +2228,7 @@ function CalendarGrid(props){
   return (
     <div>
       {/* CHANGED: Hide the month-nav row while the picker is open so it's the sole focus. */}
-      {!showPicker&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+      {!props.hideHeader&&!showPicker&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
         <button onClick={function(){moveMonth(-1);}} style={{background:"none",border:"1px solid #334155",borderRadius:5,color:"#94a3b8",fontSize:13,cursor:"pointer",fontFamily:"inherit",padding:"4px 10px"}}>‹</button>
         <button onClick={function(){setShowPicker(function(o){return !o;});}} style={{background:"none",border:"none",fontSize:15,fontWeight:700,color:"#e2e8f0",cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:6}}>{MONTH_NAMES[calMonth]} {calYear}{monthGoalHit&&<span style={{fontSize:12,color:"#fbbf24",fontWeight:800}} title={"Monthly P&L goal met ($"+monthPnLTotal.toFixed(0)+" / $"+monthlyTarget.toFixed(0)+")"}>🏁</span>}</button>
         <button onClick={function(){moveMonth(1);}} style={{background:"none",border:"1px solid #334155",borderRadius:5,color:"#94a3b8",fontSize:13,cursor:"pointer",fontFamily:"inherit",padding:"4px 10px"}}>›</button>
@@ -2368,9 +2368,17 @@ function DashboardCalendar(props){
       <button onClick={function(){setOpen(function(o){return !o;});}} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",padding:"12px 18px 8px",textAlign:"left"}}>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           <span style={{fontSize:13,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{open?"Calendar":"This Week"}</span>
-          {/* CHANGED: Always-visible readout (week-or-month scope) — clickable to swap between
-             pnl ($/R) and trade-count modes. The mode also drives the per-day cell readout. */}
           {readoutText&&<span onClick={function(e){e.stopPropagation();setSummaryMode(summaryMode==="trades"?"pnl":"trades");}} title={summaryMode==="trades"?"Tap to show P&L":"Tap to show trade count"} style={{fontSize:12,fontWeight:700,color:readoutColor,fontVariantNumeric:"tabular-nums",padding:"2px 7px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:6,cursor:"pointer"}}>{readoutText}</span>}
+          {open&&(function(){
+            function move(delta){var m=calMonth+delta;var y=calYear;if(m<0){m=11;y--;}if(m>11){m=0;y++;}setCalYear(y);setCalMonth(m);}
+            return (
+              <span onClick={function(e){e.stopPropagation();}} style={{display:"flex",alignItems:"center",gap:6,marginLeft:8}}>
+                <button onClick={function(){move(-1);}} style={{background:"none",border:"1px solid #334155",borderRadius:5,color:"#94a3b8",fontSize:12,cursor:"pointer",fontFamily:"inherit",padding:"2px 8px"}}>‹</button>
+                <span style={{fontSize:13,fontWeight:700,color:"#e2e8f0",minWidth:100,textAlign:"center"}}>{MONTH_NAMES[calMonth]} {calYear}</span>
+                <button onClick={function(){move(1);}} style={{background:"none",border:"1px solid #334155",borderRadius:5,color:"#94a3b8",fontSize:12,cursor:"pointer",fontFamily:"inherit",padding:"2px 8px"}}>›</button>
+              </span>
+            );
+          })()}
         </div>
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{display:"inline-block",verticalAlign:"middle",transition:"transform 0.2s",transform:open?"rotate(180deg)":"rotate(0deg)"}}><path d="M2 4l4 4 4-4" stroke="#64748b" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
       </button>
@@ -2420,7 +2428,7 @@ function DashboardCalendar(props){
       )}
       {open&&(
         <div style={{padding:"4px 18px 14px"}}>
-          <CalendarGrid summaryMode={summaryMode} year={calYear} month={calMonth} onMonthChange={function(y,m){setCalYear(y);setCalMonth(m);}} sessionMap={sessionMap} todayDateStr={todayDateStr} selectedDate={null} onSelect={function(d){if(props.onSelectDate)props.onSelectDate(d);}}/>
+          <CalendarGrid hideHeader={true} summaryMode={summaryMode} year={calYear} month={calMonth} onMonthChange={function(y,m){setCalYear(y);setCalMonth(m);}} sessionMap={sessionMap} todayDateStr={todayDateStr} selectedDate={null} onSelect={function(d){if(props.onSelectDate)props.onSelectDate(d);}}/>
           <CalendarLegend/>
         </div>
       )}
