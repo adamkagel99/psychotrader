@@ -8684,10 +8684,8 @@ function SettingsTab(props){
             // the Scale Milestones table (stored settings.positionMin/Max was a stale snapshot).
             var bal=computeAccountBalance(props.liveTotalPnL);
             var tier=getCurrentTier(bal);
-            var posMax=Math.round(tier*0.06667);
-            var posMin=Math.round(posMax*0.9);
-            var riskMax=Math.round(posMax*0.30);
-            var riskMin=Math.round(riskMax*0.9);
+            var s=calcPosSizes(tier,{useDirect:true,sizingMode:settings.sizingMode,slippagePct:settings.slippagePct,positionMaxPct:settings.positionMaxPct,riskMaxPct:settings.riskMaxPct,positionMaxDollar:settings.positionMaxDollar,riskMaxDollar:settings.riskMaxDollar});
+            var posMin=s.positionMin,posMax=s.positionMax,riskMin=s.riskMin,riskMax=s.riskMax;
             var hs=false;try{hs=isMonthHalfsizeActive();if(!hs){var _tr=[];try{var _st=JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}");_tr=_st.trades||[];}catch(e){}var _lk=checkDisciplineLock(_tr,null);hs=_lk&&_lk.locked;}}catch(e){}
             if(hs){posMax=Math.round(posMax/2);posMin=Math.round(posMin/2);riskMax=Math.round(riskMax/2);riskMin=Math.round(riskMin/2);}
             return "Computed: Position $"+posMin+"–$"+posMax+" · Risk $"+riskMin+"–$"+riskMax+(hs?" (½ size)":"");
