@@ -8688,7 +8688,9 @@ function SettingsTab(props){
             var posMin=Math.round(posMax*0.9);
             var riskMax=Math.round(posMax*0.30);
             var riskMin=Math.round(riskMax*0.9);
-            return "Computed: Position $"+posMin+"–$"+posMax+" · Risk $"+riskMin+"–$"+riskMax;
+            var hs=false;try{hs=isMonthHalfsizeActive();if(!hs){var _tr=[];try{var _st=JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}");_tr=_st.trades||[];}catch(e){}var _lk=checkDisciplineLock(_tr,null);hs=_lk&&_lk.locked;}}catch(e){}
+            if(hs){posMax=Math.round(posMax/2);posMin=Math.round(posMin/2);riskMax=Math.round(riskMax/2);riskMin=Math.round(riskMin/2);}
+            return "Computed: Position $"+posMin+"–$"+posMax+" · Risk $"+riskMin+"–$"+riskMax+(hs?" (½ size)":"");
           })()}
         </div>
         {/* CHANGED: Scale milestones table — shows position/risk at each $1k tier with 5% buffer. */}
