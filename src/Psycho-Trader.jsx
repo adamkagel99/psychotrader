@@ -29,11 +29,18 @@ function transferTotal(transfers){
 function loadEvents(){try{var s=localStorage.getItem(EVENTS_KEY);if(!s)return[];var p=JSON.parse(s);return Array.isArray(p)?p:(p.events||[]);}catch(e){return[];}}
 function loadEventsWeekStart(){try{var s=localStorage.getItem(EVENTS_KEY);if(!s)return null;var p=JSON.parse(s);return Array.isArray(p)?null:(p.weekStart||null);}catch(e){return null;}}
 function getWeekStartStr(){var now=getPT();var dow=now.getDay();var s=new Date(now.getFullYear(),now.getMonth(),now.getDate()-dow);s.setHours(0,0,0,0);return s.toLocaleDateString("en-US");}
-function saveEventsWithMeta(events){var wrapper={weekStart:getWeekStartStr(),importedAt:new Date().toISOString(),events:events};localStorage.setItem(EVENTS_KEY,JSON.stringify(wrapper));try{localStorage.removeItem(EVENT_FILTERS_KEY);}catch(e){}}
+function saveEventsWithMeta(events){var wrapper={weekStart:getWeekStartStr(),importedAt:new Date().toISOString(),events:events};localStorage.setItem(EVENTS_KEY,JSON.stringify(wrapper));}
 function maybeClearStaleEvents(){
-  // CHANGED: Auto-clear disabled. Events persist across days/weeks until the user manually
-  // imports a new batch (which replaces via saveEventsWithMeta) or clicks Clear in Settings.
-  // Prior time-based logic kept wiping events unexpectedly (possibly compounded by cloud sync).
+  // Events cover Sun–Sat of the wrapper's weekStart. Clear when today's week (its Sunday) is a
+  // different Sunday than the wrapper's — i.e. it's now the next week.
+  try{
+    var ws=loadEventsWeekStart();
+    if(!ws)return false;
+    if(ws!==getWeekStartStr()){
+      try{localStorage.removeItem(EVENTS_KEY);}catch(e){}
+      return true;
+    }
+  }catch(e){}
   return false;
 }
 function parseEventDate(e){if(!e||!e.date)return null;var d=new Date(e.date+(e.time?" "+e.time:""));return isNaN(d.getTime())?null:d;}
