@@ -4794,14 +4794,14 @@ function TradesTab(props){
         // CHANGED: Match the gate's effective size fraction so banner R reads against the
         // same (potentially halved) risk unit. Without this, a half-size day showed half the
         // R the gate was measuring.
-        var bEffSF=rule.sizeFraction!=null?parseFloat(rule.sizeFraction)||1:1;
-        var bLock=checkDisciplineLock(state.trades,state.commitment,getCommitmentsMap(state));
-        if(bLock.locked)bEffSF=Math.min(bEffSF,0.5);
-        if(isMonthHalfsizeActive())bEffSF=Math.min(bEffSF,0.5);
-        var riskMaxNum=(parseFloat(settings.riskMax)||0)*bEffSF;
-        if(riskMaxNum<=0)return null;
+        var riskMaxBase=parseFloat(settings.riskMax)||0;
+        if(riskMaxBase<=0)return null;
         var rStops=getSessionRStops(rule);
-        var dayR=totalPnL/riskMaxNum;
+        // CHANGED: Use canonical dayR (sums per-trade R against each trade's stamped sizeFraction)
+        // so the banner matches the Today strip. Previous "totalPnL / (riskMax × session SF)" gave
+        // mixed-sizeFraction days the wrong scale.
+        var _dayR=dayR(state.trades,riskMaxBase);
+        var dayR=_dayR;
         // Loss approaching
         if(dayR<0&&dayR<=rStops.lossR*0.8&&dayR>rStops.lossR){
           var pct=Math.round(dayR/rStops.lossR*100);
@@ -4844,7 +4844,7 @@ function TradesTab(props){
       {/* CHANGED: Conditions banner removed entirely (feature deprecated). */}
       {/* CHANGED: Position/Risk strip removed from journal — shown in the New Trade form instead. */}
       {phase!=="closed"&&<SessionStrategy phase={phase} preCheckComplete={preCheckComplete} settings={settings} currencyFilter={props.eventCurrencyFilter} impactFilter={props.eventImpactFilter}/>}
-      {phase!=="closed"&&isToday&&props.liveTrades&&props.liveTrades.length>0&&(
+      {isToday&&props.liveTrades&&props.liveTrades.length>0&&(
         <div style={CS({marginBottom:16,border:"1px solid #ea580c",background:"#1c1108"})}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
             <div style={{width:8,height:8,borderRadius:"50%",background:"#fb923c",boxShadow:"0 0 8px #fb923c"}}/>
@@ -9592,7 +9592,23 @@ function App(props){
     return function(){clearInterval(id);};
   },[state.date]);
   useEffect(function(){
-    // CHANGED: One-time cleanup — remove auto-no-trade stubs dated before the earliest "real"
+    // CHANGED: One-time reset — clear discipline lock + today's disciplineScore so a stuck lock
+    // from earlier state doesn't linger. Runs once per install.
+    try{
+      if(localStorage.getItem("pt-reset-today-disc-v1")==="1")return;
+      var k="journal:"+todayStr().replace(/\//g,"-");
+      var raw=localStorage.getItem(k);
+      if(raw){
+        var e=JSON.parse(raw);
+        e.disciplineScore=100;e.wasLocked=false;
+        localStorage.setItem(k,JSON.stringify(e));
+      }
+      localStorage.setItem("pt-reset-today-disc-v1","1");
+      if(bumpReloadKey)bumpReloadKey();
+    }catch(e){}
+  // eslint-disable-next-line
+  },[]);
+  useEffect(function(){
     // anchor entry (day with trades or user-entered no-trade). Runs once per install.
     try{
       if(localStorage.getItem("pt-cleanup-early-auto-nt")==="1")return;
@@ -9948,12 +9964,17 @@ function App(props){
           </div>
         </div>
         {(function(){
-          // CHANGED: Reuse effSF computed above (session sizeFraction × discipline-lock half) so display + hard-stops agree.
+          // CHANGED: Derive from the SAME live-tier calcPosSizes used by Settings → Computed, so
+          // trade form pos/risk always align with the milestone table. Stored settings.positionMin/Max
+          // was a stale snapshot that drifted after tier changes.
           var sf=effSF;
-          var dPosMin=Math.round((settings.positionMin||0)*sf);
-          var dPosMax=Math.round((settings.positionMax||0)*sf);
-          var dRiskMin=Math.round((settings.riskMin||0)*sf);
-          var dRiskMax=Math.round((settings.riskMax||0)*sf);
+          var bal=computeAccountBalance(totalPnL);
+          var tier=getCurrentTier(bal);
+          var s=calcPosSizes(tier,{useDirect:true,sizingMode:settings.sizingMode,slippagePct:settings.slippagePct,positionMaxPct:settings.positionMaxPct,riskMaxPct:settings.riskMaxPct,positionMaxDollar:settings.positionMaxDollar,riskMaxDollar:settings.riskMaxDollar});
+          var dPosMin=Math.round(s.positionMin*sf);
+          var dPosMax=Math.round(s.positionMax*sf);
+          var dRiskMin=Math.round(s.riskMin*sf);
+          var dRiskMax=Math.round(s.riskMax*sf);
           return (<>
             {/* CHANGED: On laptop the monthly target banner lives in the sticky header (between
                the date and the session readout) so it persists across tabs without taking
