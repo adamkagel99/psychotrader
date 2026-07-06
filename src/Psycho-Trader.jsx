@@ -4222,7 +4222,7 @@ function PerfProgressCard(props){
   return (
     <div style={CS({marginBottom:18,padding:0,overflow:"hidden"})}>
       <div style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"13px 16px",background:"linear-gradient(135deg,#1e1b4b 0%,#15151f 70%)",borderBottom:"1px solid #312e81"}}>
-        <button onClick={function(){setOpen(function(o){return !o;});}} style={{background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",textAlign:"left",padding:0,flexShrink:0}}>
+        <button onClick={function(){if(props.onNavigate)props.onNavigate();}} style={{background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",textAlign:"left",padding:0,flexShrink:0}}>
           <span style={{fontSize:13,color:"#c7d2fe",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700}}>Performance &amp; Progress</span>
         </button>
         {/* CHANGED: Dropdown shrinks to its content width — no flex:1, no stretch. */}
