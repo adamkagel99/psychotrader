@@ -1048,6 +1048,27 @@ function todayCleanStatus(todayTrades,todayRiskMax){
 function SessionCommitmentReview(props){
   var sid=props.sessionId;
   var stateSrc=props.isToday?props.state:props.pastSession;
+  // CHANGED: Auto-decide the review once per commitment when session has ended (or cap hit).
+  // Must live above early-returns to satisfy rules of hooks.
+  useEffect(function(){
+    if(!stateSrc)return;
+    var m=stateSrc.commitments&&typeof stateSrc.commitments==="object"?stateSrc.commitments:(stateSrc.commitment&&stateSrc.commitment.committed?{_legacy:stateSrc.commitment}:{});
+    var cx=m[sid];
+    if(!cx||!cx.committed||cx.reviewed)return;
+    var closed=(props.sessionTrades||[]).filter(function(t){return !t||t.status!=="open";});
+    var mx=parseInt(cx.maxTrades);var hm=!isNaN(mx)&&mx>0;
+    var sc=props.session&&parseInt(props.session.maxTrades);var hsc=!isNaN(sc)&&sc>0;
+    var hit=(hm&&closed.length>=mx)||(hsc&&closed.length>=sc);
+    if(!props.sessionEnded&&!hit)return;
+    var ov=hm&&closed.length>mx;
+    var nm=Object.assign({},m);nm[sid]=Object.assign({},cx,{setupsReviewAffirmed:hm?!ov:null,reviewed:true});
+    var agg=aggregateCommitment(nm);
+    if(props.isToday){
+      props.setState(function(s){return Object.assign({},s,{commitments:nm,commitment:agg||s.commitment});});
+      if(props.todayJournalEntry){try{var et=props.todayJournalEntry.trades||[];var up=Object.assign({},props.todayJournalEntry,{commitments:nm,commitment:agg||props.todayJournalEntry.commitment,disciplineScore:calcDiscipline(et,props.todayJournalEntry.riskMax,{commitments:nm})});localStorage.setItem("journal:"+todayStr().replace(/\//g,"-"),JSON.stringify(up));props.setTodayJournalEntry(up);if(props.bumpReloadKey)props.bumpReloadKey();}catch(e){}}
+    }else if(props.pastSession){var et=props.pastSession.trades||[];var up=Object.assign({},props.pastSession,{commitments:nm,commitment:agg||props.pastSession.commitment,disciplineScore:calcDiscipline(et,props.pastSession.riskMax,{commitments:nm})});try{localStorage.setItem("journal:"+String(props.pastSession.date).replace(/\//g,"-"),JSON.stringify(up));}catch(e){}if(props.setPastSessions)props.setPastSessions(function(arr){return arr.map(function(x){return x.date===props.pastSession.date?up:x;});});if(props.bumpReloadKey)props.bumpReloadKey();}
+  // eslint-disable-next-line
+  },[sid,props.sessionEnded,props.sessionTrades?props.sessionTrades.length:0]);
   if(!stateSrc)return null;
   var map=(function(){
     if(!stateSrc)return {};
@@ -1094,15 +1115,6 @@ function SessionCommitmentReview(props){
   return (
     <div style={{marginBottom:12,padding:"10px 12px",background:over||aff===false?"#1c0a0a":"#0f1a14",border:"1px solid "+(over||aff===false?"#7f1d1d":"#166534"),borderRadius:8}}>
       <div style={{fontSize:10,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:600,marginBottom:6}}>Commitment Review</div>
-      {(function(){
-        // CHANGED: Auto-decide the review — if not yet reviewed, mark reviewed=true and set
-        // setupsReviewAffirmed based on whether the cap held. Runs once per commitment.
-        if(!c.reviewed){
-          var autoAff=hasMax?!over:null;
-          setTimeout(function(){persist({setupsReviewAffirmed:autoAff});},0);
-        }
-        return null;
-      })()}
       {hasMax&&(
         <div style={{fontSize:12,lineHeight:1.5,color:over?"#fca5a5":"#86efac",marginBottom:c.setups?6:0}}>
           {over?"✗ ":"✓ "}{over?("Took "+closedInSession.length+" — over "+maxT+"-trade cap"):("Stayed within "+maxT+"-trade cap ("+closedInSession.length+")")}
@@ -5839,8 +5851,8 @@ function GoalRing(props){
       {/* CHANGED: Keep the original "target X%" / "of $Y" footer text when over target — don't
          replace with "Goal reached". The ring color shift already conveys completion. */}
       {isPercent?(
-        HIDE_DOLLAR_PNL?null:<div style={{fontSize:cmp?8:10,color:"#475569",marginTop:1,textAlign:"center"}}>target {(typeof tgt==="number"?Math.round(tgt):tgt)}%</div>
-      ):HIDE_DOLLAR_PNL?null:(<>
+        <div style={{fontSize:cmp?8:10,color:"#475569",marginTop:1,textAlign:"center"}}>target {(typeof tgt==="number"?Math.round(tgt):tgt)}%</div>
+      ):(<>
         <div style={{fontSize:cmp?15:21,fontWeight:800,color:valColor,fontVariantNumeric:"tabular-nums",lineHeight:1.1,textAlign:"center"}}>{fv}</div>
         <div style={{fontSize:cmp?9:11,color:"#64748b",marginTop:3,textAlign:"center"}}>of {ft}</div>
       </>)}
