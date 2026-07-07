@@ -2651,23 +2651,24 @@ function TradeTile(props){
   var emos=filterEmotions(t.emotions||[]);
   var effViolations=(t.violations||[]).slice();
   var pos=parseFloat(t.positionSize)||0;
-  // CHANGED: Take the HIGHER of the stamped-at-entry cap and the current live cap (scaled by
-  // the trade's own sizeFraction). Prevents false "Oversized" flags on trades whose stamped
-  // posMaxAtEntry is a stale low value from an older tier.
   var stampedPosMax=parseFloat(t.posMaxAtEntry)||0;
   var liveSF=parseFloat(t.sizeFraction)||1;
   var livePosMax=(props.posMax||0)*liveSF;
   var posMax=Math.max(stampedPosMax,livePosMax);
-  if(posMax>0&&pos>posMax&&effViolations.indexOf("Oversized entry")<0){effViolations.push("Oversized entry");}
-  // CHANGED: "Max risk exceeded" is now dollar-based: flag iff loss $ exceeds the stamped
-  // dollar risk cap (riskMax × sizeFraction at entry). Falls back to the legacy %-based check
-  // only for older trades that pre-date the dollar cap stamp.
+  // CHANGED: Symmetric — remove stale "Oversized entry" flag when current check says the trade
+  // is within cap (e.g. tier moved up so a previously oversized trade now fits).
+  var _overIdx=effViolations.indexOf("Oversized entry");
+  if(posMax>0&&pos>posMax){if(_overIdx<0)effViolations.push("Oversized entry");}
+  else if(_overIdx>=0){effViolations.splice(_overIdx,1);}
   var riskCapDollars=parseFloat(t.riskCapDollarsAtEntry)||0;
+  var _mrIdx=effViolations.indexOf("Max risk exceeded");
   if(riskCapDollars>0){
-    if(!isNaN(pnl)&&pnl<-riskCapDollars&&effViolations.indexOf("Max risk exceeded")<0){effViolations.push("Max risk exceeded");}
+    if(!isNaN(pnl)&&pnl<-riskCapDollars){if(_mrIdx<0)effViolations.push("Max risk exceeded");}
+    else if(_mrIdx>=0){effViolations.splice(_mrIdx,1);}
   }else{
     var slThresh=parseFloat(t.stopThreshPctAtEntry)||0;
-    if(slThresh>0&&!isNaN(pnl)&&pnl<0&&!isNaN(pctPnl)&&pctPnl<-slThresh&&effViolations.indexOf("Max risk exceeded")<0){effViolations.push("Max risk exceeded");}
+    if(slThresh>0&&!isNaN(pnl)&&pnl<0&&!isNaN(pctPnl)&&pctPnl<-slThresh){if(_mrIdx<0)effViolations.push("Max risk exceeded");}
+    else if(_mrIdx>=0){effViolations.splice(_mrIdx,1);}
   }
   var setupChain=[t.setup,t.timeframe,t.candlePattern].filter(function(x){return !!x;});
   var hasSetupInfo=setupChain.length>0;
@@ -8679,13 +8680,14 @@ function SettingsTab(props){
         {(function(){
           var locked=isWeeklyGoalHit(props.liveTotalPnL||0)||isMonthlyGoalHit(props.liveTotalPnL||0);
           var on=isMonthHalfsizeActive();
+          function toggle(){if(locked)return;setMonthHalfsizeActive(!on);if(!on===false){try{localStorage.removeItem("tf-month-goal-banner-dismissed");}catch(e){}}if(props.bumpReloadKey)props.bumpReloadKey();}
           return (
-            <div style={{marginBottom:12,padding:"10px 12px",background:"#0a0a0f",border:"1px solid "+(on?"#facc15":"#334155"),borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+            <div onClick={toggle} style={{marginBottom:12,padding:"10px 12px",background:"#0a0a0f",border:"1px solid "+(on?"#facc15":"#334155"),borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,cursor:locked?"not-allowed":"pointer"}}>
               <div style={{minWidth:0}}>
                 <div style={{fontSize:12,color:"#e2e8f0",fontWeight:700}}>{on?"🔒 Half-size active":"Half-size trading"}</div>
                 <div style={{fontSize:10,color:"#64748b",marginTop:2}}>{locked?"Locked on — weekly/monthly goal hit":on?"Manual opt-in — tap to turn off":"All sizing/risk halves for the rest of the month"}</div>
               </div>
-              <button disabled={locked} onClick={function(){if(locked)return;setMonthHalfsizeActive(!on);if(!on===false){try{localStorage.removeItem("tf-month-goal-banner-dismissed");}catch(e){}}if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"5px 12px",background:on?"#facc15":"#1e293b",border:"1px solid "+(on?"#facc15":"#475569"),borderRadius:5,color:on?"#422006":"#cbd5e1",fontSize:11,fontWeight:700,cursor:locked?"not-allowed":"pointer",fontFamily:"inherit",opacity:locked?0.7:1,flexShrink:0}}>{on?"On":"Off"}</button>
+              <div style={{padding:"5px 12px",background:on?"#facc15":"#1e293b",border:"1px solid "+(on?"#facc15":"#475569"),borderRadius:5,color:on?"#422006":"#cbd5e1",fontSize:11,fontWeight:700,fontFamily:"inherit",opacity:locked?0.7:1,flexShrink:0,pointerEvents:"none"}}>{on?"On":"Off"}</div>
             </div>
           );
         })()}
