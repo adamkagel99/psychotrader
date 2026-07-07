@@ -451,7 +451,7 @@ function wrColor(rate){return rate>=60?"#22c55e":rate>=40?"#f59e0b":"#ef4444";}
 // rOutcomeCap: hard ceiling/floor on the R term (±) so outcome can NUDGE but never DOMINATE process.
 // rOutcomeCleanOnly: when true, the positive R bonus is suppressed on days with any violation —
 //   a lucky win does not get to paper over rule-breaking. Losing-R always counts (small penalty).
-var DEFAULT_DISCIPLINE_SCORING={violationPenalty:15,negEmotionPenalty:10,posEmotionBonus:3,aGradeBonus:5,cGradePenalty:5,rOutcomeWeight:2,rOutcomeCap:10,rOutcomeCleanOnly:true,overTradePenalty:10,setupDeviationPenalty:10};
+var DEFAULT_DISCIPLINE_SCORING={violationPenalty:15,negEmotionPenalty:10,posEmotionBonus:3,aGradeBonus:5,cGradePenalty:5,rOutcomeWeight:2,rOutcomeCap:10,rOutcomeCleanOnly:true,overTradePenalty:10,setupDeviationPenalty:10,setupAdherenceBonus:5};
 // CHANGED: Discipline lock threshold — editable, persisted. If a day's score falls below this, trading locks.
 var DISCIPLINE_LOCK_KEY="tf-discipline-lock-threshold";
 function loadDisciplineLockThreshold(){try{var s=localStorage.getItem(DISCIPLINE_LOCK_KEY);if(s!=null){var v=parseFloat(s);if(!isNaN(v))return v;}}catch(e){}return 60;}
@@ -569,12 +569,14 @@ function calcDiscipline(trades,riskMaxArg,opts){
       var maxT=parseInt(sc.maxTrades);
       if(!isNaN(maxT)&&maxT>0&&sessTrades.length>maxT){processScore-=(ds.overTradePenalty!=null?ds.overTradePenalty:10);anyViolation=true;}
       if(sc.setupsReviewAffirmed===false){processScore-=(ds.setupDeviationPenalty!=null?ds.setupDeviationPenalty:10);anyViolation=true;}
+      if(sc.setupsReviewAffirmed===true){processScore+=(ds.setupAdherenceBonus!=null?ds.setupAdherenceBonus:5);}
     });
   }else if(com&&com.committed){
     var maxT=parseInt(com.maxTrades);
     var closedN=trades.filter(function(t){return t&&t.status!=="open";}).length;
     if(!isNaN(maxT)&&maxT>0&&closedN>maxT){processScore-=(ds.overTradePenalty!=null?ds.overTradePenalty:10);anyViolation=true;}
     if(com.setupsReviewAffirmed===false){processScore-=(ds.setupDeviationPenalty!=null?ds.setupDeviationPenalty:10);anyViolation=true;}
+    if(com.setupsReviewAffirmed===true){processScore+=(ds.setupAdherenceBonus!=null?ds.setupAdherenceBonus:5);}
   }
   processScore=Math.min(100,Math.max(0,processScore));
   // --- R-outcome term (secondary, bounded) ---
@@ -1092,6 +1094,15 @@ function SessionCommitmentReview(props){
   return (
     <div style={{marginBottom:12,padding:"10px 12px",background:over||aff===false?"#1c0a0a":"#0f1a14",border:"1px solid "+(over||aff===false?"#7f1d1d":"#166534"),borderRadius:8}}>
       <div style={{fontSize:10,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:600,marginBottom:6}}>Commitment Review</div>
+      {(function(){
+        // CHANGED: Auto-decide the review — if not yet reviewed, mark reviewed=true and set
+        // setupsReviewAffirmed based on whether the cap held. Runs once per commitment.
+        if(!c.reviewed){
+          var autoAff=hasMax?!over:null;
+          setTimeout(function(){persist({setupsReviewAffirmed:autoAff});},0);
+        }
+        return null;
+      })()}
       {hasMax&&(
         <div style={{fontSize:12,lineHeight:1.5,color:over?"#fca5a5":"#86efac",marginBottom:c.setups?6:0}}>
           {over?"✗ ":"✓ "}{over?("Took "+closedInSession.length+" — over "+maxT+"-trade cap"):("Stayed within "+maxT+"-trade cap ("+closedInSession.length+")")}
@@ -2193,7 +2204,7 @@ function CalendarGrid(props){
   var fullRiskMax=parseFloat(settingsForTarget.riskMax)||0;
   var weeklyMultiplier=parseFloat(goals.weeklyMultiplier)||5;
   var weeklyTarget=applyHalfsizeToTarget(parseFloat(goals.weeklyPnL)>0?parseFloat(goals.weeklyPnL):defaultWeeklyFromMonthly(goals,settingsForTarget));
-  var monthlyTarget=parseFloat(goals.monthlyPnL)||0;
+  var monthlyTarget=(parseFloat(goals.monthlyPnL)||0)||((parseFloat(goals.weeklyPnL)||0)*tradingWeeksThisMonth());
   var now=getPT();
   // CHANGED: When parent provides controlled year/month/onMonthChange, use those instead of
   // local state so a parent (DashboardCalendar) can drive the header readout to match.
@@ -4074,7 +4085,7 @@ function GoalsSnapshot(props){
   var allW=allT.filter(function(t){return parseFloat(t.pnl)>0;});
   var oWR=allT.length>0?allW.length/allT.length*100:0;
   var aDisc=rows.length>0?rows.reduce(function(s,e){return s+calcDiscipline(e.trades||[],e.riskMax,e.commitments?{commitments:e.commitments}:{commitment:e.commitment||null});},0)/rows.length:0;
-  var monthlyTarget=parseFloat(goals.monthlyPnL)||0;
+  var monthlyTarget=(parseFloat(goals.monthlyPnL)||0)||((parseFloat(goals.weeklyPnL)||0)*tradingWeeksThisMonth());
   // CHANGED: Daily/weekly default to monthly ÷ trading-days-this-month and daily × 5 respectively.
   // User overrides in goals.dailyPnL / goals.weeklyPnL take precedence when > 0.
   var autoDaily=defaultDailyFromMonthly(goals,settings);
@@ -4109,9 +4120,9 @@ function GoalsSnapshot(props){
   var pnlTgt=HIDE_DOLLAR_PNL?rFmt:money;
   // CHANGED: build GoalRing tiles grouped by category to mirror the Goals tab.
   var account=[],perf=[],pnl=[];
-  if(!hidden.account&&accountTarget>0)account.push({key:"account",label:"Account Balance",value:props.currentAccount||0,target:accountTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:money,formatTarget:money,compact:true});
+  if(!hidden.account&&accountTarget>0)account.push({key:"account",label:"Account Balance",value:props.currentAccount||0,target:accountTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
   // CHANGED: Total Withdrawn card removed — no editable goal field for it, and Monthly Withdrawal already covers cash-out cadence.
-  if(!hidden.monthlyWithdrawals&&monthlyWithdrawalTarget>0)account.push({key:"monthlyWithdrawals",label:"Monthly Withdrawal",value:monthlyWithdrawn,target:monthlyWithdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:money,formatTarget:money,compact:true});
+  if(!hidden.monthlyWithdrawals&&monthlyWithdrawalTarget>0)account.push({key:"monthlyWithdrawals",label:"Monthly Withdrawal",value:monthlyWithdrawn,target:monthlyWithdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
   if(!hidden.winRate&&winRateTarget>0)perf.push({key:"winRate",label:"Win Rate",value:oWR,target:winRateTarget,suffix:"%",decimals:0,targetDecimals:0,wrColor:true,compact:true});
   if(!hidden.discipline&&disciplineTarget>0)perf.push({key:"discipline",label:"Discipline",value:aDisc,target:disciplineTarget,suffix:"%",decimals:0,targetDecimals:0,discColor:true,compact:true});
   if(!hidden.daily&&dailyTarget>0)pnl.push({key:"daily",label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
@@ -5985,7 +5996,7 @@ function GoalsTab(props){
   var weekWins=weekTrades.filter(function(t){return parseFloat(t.pnl)>0;}).length;
   var wWR=weekTrades.length>0?weekWins/weekTrades.length*100:0;
 
-  var monthlyTarget=parseFloat(goals.monthlyPnL)||0;
+  var monthlyTarget=(parseFloat(goals.monthlyPnL)||0)||((parseFloat(goals.weeklyPnL)||0)*tradingWeeksThisMonth());
   var autoDaily=defaultDailyFromMonthly(goals,settings);
   var _userDaily=parseFloat(goals.dailyPnL)||0;
   var _userWeekly=parseFloat(goals.weeklyPnL)||0;
@@ -6336,8 +6347,8 @@ function GoalsTab(props){
               <div style={{marginBottom:20}}>
                 <SectionHead icon="🏦" title="Account Activity"/>
                 <div style={gridStyle}>
-                  {!hidden.account&&accountTarget>0&&renderStandardCard("account",{label:"Account Balance",value:currentAccount,target:accountTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true})}
-                  {!hidden.monthlyWithdrawals&&monthlyWithdrawalTarget>0&&renderStandardCard("monthlyWithdrawals",{label:"Monthly Withdrawal",value:monthlyWithdrawn,target:monthlyWithdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true})}
+                  {!hidden.account&&accountTarget>0&&renderStandardCard("account",Object.assign({label:"Account Balance",value:currentAccount,target:accountTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true},pnlFmt))}
+                  {!hidden.monthlyWithdrawals&&monthlyWithdrawalTarget>0&&renderStandardCard("monthlyWithdrawals",Object.assign({label:"Monthly Withdrawal",value:monthlyWithdrawn,target:monthlyWithdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true},pnlFmt))}
                   {customByBucket.account.map(renderInlineCustom)}
                 </div>
               </div>
@@ -8801,6 +8812,7 @@ function SettingsTab(props){
           <div><label style={lbl}>C-Grade Penalty</label><input type="number" value={discScoring.cGradePenalty} onChange={function(e){persistDiscScoring(Object.assign({},discScoring,{cGradePenalty:parseFloat(e.target.value)||0}));}} style={fld}/></div>
           <div><label style={lbl}>Over-Commitment Penalty</label><input type="number" value={discScoring.overTradePenalty!=null?discScoring.overTradePenalty:10} onChange={function(e){persistDiscScoring(Object.assign({},discScoring,{overTradePenalty:parseFloat(e.target.value)||0}));}} style={fld}/></div>
           <div><label style={lbl}>Setup Deviation Penalty</label><input type="number" value={discScoring.setupDeviationPenalty!=null?discScoring.setupDeviationPenalty:10} onChange={function(e){persistDiscScoring(Object.assign({},discScoring,{setupDeviationPenalty:parseFloat(e.target.value)||0}));}} style={fld}/></div>
+          <div><label style={lbl}>Setup Adherence Bonus</label><input type="number" value={discScoring.setupAdherenceBonus!=null?discScoring.setupAdherenceBonus:5} onChange={function(e){persistDiscScoring(Object.assign({},discScoring,{setupAdherenceBonus:parseFloat(e.target.value)||0}));}} style={fld}/></div>
         </div>
         <div style={{fontSize:11,color:"#64748b",marginTop:8,lineHeight:1.5}}>Over-Commitment applies when you exceed your committed max trades; Setup Deviation applies when you mark "No, I deviated" in the day's Commitment Review. Both also forfeit the winning-day bonus.</div>
         {resetConfirm==="discScoring"?(
