@@ -1048,27 +1048,6 @@ function todayCleanStatus(todayTrades,todayRiskMax){
 function SessionCommitmentReview(props){
   var sid=props.sessionId;
   var stateSrc=props.isToday?props.state:props.pastSession;
-  // CHANGED: Auto-decide the review once per commitment when session has ended (or cap hit).
-  // Must live above early-returns to satisfy rules of hooks.
-  useEffect(function(){
-    if(!stateSrc)return;
-    var m=stateSrc.commitments&&typeof stateSrc.commitments==="object"?stateSrc.commitments:(stateSrc.commitment&&stateSrc.commitment.committed?{_legacy:stateSrc.commitment}:{});
-    var cx=m[sid];
-    if(!cx||!cx.committed||cx.reviewed)return;
-    var closed=(props.sessionTrades||[]).filter(function(t){return !t||t.status!=="open";});
-    var mx=parseInt(cx.maxTrades);var hm=!isNaN(mx)&&mx>0;
-    var sc=props.session&&parseInt(props.session.maxTrades);var hsc=!isNaN(sc)&&sc>0;
-    var hit=(hm&&closed.length>=mx)||(hsc&&closed.length>=sc);
-    if(!props.sessionEnded&&!hit)return;
-    var ov=hm&&closed.length>mx;
-    var nm=Object.assign({},m);nm[sid]=Object.assign({},cx,{setupsReviewAffirmed:hm?!ov:null,reviewed:true});
-    var agg=aggregateCommitment(nm);
-    if(props.isToday){
-      props.setState(function(s){return Object.assign({},s,{commitments:nm,commitment:agg||s.commitment});});
-      if(props.todayJournalEntry){try{var et=props.todayJournalEntry.trades||[];var up=Object.assign({},props.todayJournalEntry,{commitments:nm,commitment:agg||props.todayJournalEntry.commitment,disciplineScore:calcDiscipline(et,props.todayJournalEntry.riskMax,{commitments:nm})});localStorage.setItem("journal:"+todayStr().replace(/\//g,"-"),JSON.stringify(up));props.setTodayJournalEntry(up);if(props.bumpReloadKey)props.bumpReloadKey();}catch(e){}}
-    }else if(props.pastSession){var et=props.pastSession.trades||[];var up=Object.assign({},props.pastSession,{commitments:nm,commitment:agg||props.pastSession.commitment,disciplineScore:calcDiscipline(et,props.pastSession.riskMax,{commitments:nm})});try{localStorage.setItem("journal:"+String(props.pastSession.date).replace(/\//g,"-"),JSON.stringify(up));}catch(e){}if(props.setPastSessions)props.setPastSessions(function(arr){return arr.map(function(x){return x.date===props.pastSession.date?up:x;});});if(props.bumpReloadKey)props.bumpReloadKey();}
-  // eslint-disable-next-line
-  },[sid,props.sessionEnded,props.sessionTrades?props.sessionTrades.length:0]);
   if(!stateSrc)return null;
   var map=(function(){
     if(!stateSrc)return {};
