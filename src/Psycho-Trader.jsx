@@ -512,7 +512,20 @@ function calcDiscipline(trades,riskMaxArg,opts){
   var ds=loadDisciplineScoring();
   var posMax=0;
   var riskMaxPctSetting=33;
-  try{var st=localStorage.getItem(SETTINGS_KEY);if(st){var sp=JSON.parse(st);posMax=parseFloat(sp.positionMax)||0;if(sp.riskMaxPct!=null)riskMaxPctSetting=parseFloat(sp.riskMaxPct)||0;}}catch(e){}
+  try{
+    var st=localStorage.getItem(SETTINGS_KEY);
+    if(st){
+      var sp=JSON.parse(st);
+      if(sp.riskMaxPct!=null)riskMaxPctSetting=parseFloat(sp.riskMaxPct)||0;
+      // CHANGED: posMax from live tier via calcPosSizes, not the stale sp.positionMax snapshot.
+      try{
+        var _bal=getAccountBalance();
+        var _tier=getCurrentTier(_bal);
+        var _c=calcPosSizes(_tier,{useDirect:true,sizingMode:sp.sizingMode,slippagePct:sp.slippagePct,positionMaxPct:sp.positionMaxPct,riskMaxPct:sp.riskMaxPct,positionMaxDollar:sp.positionMaxDollar,riskMaxDollar:sp.riskMaxDollar});
+        posMax=_c.positionMax||parseFloat(sp.positionMax)||0;
+      }catch(e){posMax=parseFloat(sp.positionMax)||0;}
+    }
+  }catch(e){}
   // CHANGED: riskMax for the R-outcome term. Prefer the explicit arg (so historical journal
   // rows can pass their own saved riskMax); fall back to current settings for live callers.
   var riskMax=parseFloat(riskMaxArg)||0;
@@ -524,8 +537,9 @@ function calcDiscipline(trades,riskMaxArg,opts){
   trades.forEach(function(t){
     var vs=(t.violations||[]).slice();
     var pos=parseFloat(t.positionSize)||0;
-    // CHANGED: Prefer the position max stamped on the trade at save time; fall back to current settings.
-    var effPosMax=(parseFloat(t.posMaxAtEntry)>0)?parseFloat(t.posMaxAtEntry):posMax;
+    var stampedMax=parseFloat(t.posMaxAtEntry)||0;
+    var liveMax=posMax*(parseFloat(t.sizeFraction)||1);
+    var effPosMax=Math.max(stampedMax,liveMax);
     // CHANGED: Symmetric add/remove — stale "Oversized entry" violations from before an edit get
     // dropped here too, not just by autoAddViolations. Same idea for "Max risk exceeded" below.
     var overIdx=vs.indexOf("Oversized entry");
@@ -2637,8 +2651,13 @@ function TradeTile(props){
   var emos=filterEmotions(t.emotions||[]);
   var effViolations=(t.violations||[]).slice();
   var pos=parseFloat(t.positionSize)||0;
-  // CHANGED: Prefer the position max stamped on the trade at save time; fall back to the current setting.
-  var posMax=(parseFloat(t.posMaxAtEntry)>0)?parseFloat(t.posMaxAtEntry):(props.posMax||0);
+  // CHANGED: Take the HIGHER of the stamped-at-entry cap and the current live cap (scaled by
+  // the trade's own sizeFraction). Prevents false "Oversized" flags on trades whose stamped
+  // posMaxAtEntry is a stale low value from an older tier.
+  var stampedPosMax=parseFloat(t.posMaxAtEntry)||0;
+  var liveSF=parseFloat(t.sizeFraction)||1;
+  var livePosMax=(props.posMax||0)*liveSF;
+  var posMax=Math.max(stampedPosMax,livePosMax);
   if(posMax>0&&pos>posMax&&effViolations.indexOf("Oversized entry")<0){effViolations.push("Oversized entry");}
   // CHANGED: "Max risk exceeded" is now dollar-based: flag iff loss $ exceeds the stamped
   // dollar risk cap (riskMax × sizeFraction at entry). Falls back to the legacy %-based check
