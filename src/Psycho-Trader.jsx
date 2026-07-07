@@ -4889,7 +4889,7 @@ function TradesTab(props){
         <div style={{display:"flex",alignItems:"center",gap:props.mobile?8:10,minWidth:0,flexWrap:"wrap"}}>
           <div style={{fontSize:18,fontWeight:700,color:"#e2e8f0"}}>Journal</div>
           <button onClick={function(){var p=String(selectedDate).split("/");if(p.length!==3)return;var d=new Date(+p[2],+p[0]-1,+p[1]);d.setDate(d.getDate()-1);setSelectedDate((d.getMonth()+1)+"/"+d.getDate()+"/"+d.getFullYear());setGalleryScope("session");}} style={{padding:"6px 9px",background:"#111118",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>‹</button>
-          <button onClick={function(){setGalleryScope("session");setPickerOpen(function(o){return !o;});}} style={{padding:"6px 12px",background:galleryScope==="session"?"#1e1b4b":"#111118",border:"1px solid "+(galleryScope==="session"?"#4338ca":"#334155"),borderRadius:6,color:galleryScope==="session"?"#a5b4fc":"#cbd5e1",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:6,whiteSpace:"nowrap"}}>📅 {isToday?"Today":selectedDate}<span style={{fontSize:11,opacity:0.7}}>▾</span></button>
+          <button onClick={function(){setGalleryScope("session");setPickerOpen(function(o){return !o;});}} style={{padding:"6px 12px",background:galleryScope==="session"?"#1e1b4b":"#111118",border:"1px solid "+(galleryScope==="session"?"#4338ca":"#334155"),borderRadius:6,color:galleryScope==="session"?"#a5b4fc":"#cbd5e1",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:6,whiteSpace:"nowrap"}}>📅 {isToday?"Today":selectedDate}</button>
           <button onClick={function(){var p=String(selectedDate).split("/");if(p.length!==3)return;var d=new Date(+p[2],+p[0]-1,+p[1]);d.setDate(d.getDate()+1);var ts=new Date(todayStr());if(d>ts)return;setSelectedDate((d.getMonth()+1)+"/"+d.getDate()+"/"+d.getFullYear());setGalleryScope("session");}} style={{padding:"6px 9px",background:"#111118",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>›</button>
           <button onClick={function(){setGalleryScope("all");}} style={{padding:"6px 12px",background:galleryScope==="all"?"#1e1b4b":"#111118",border:"1px solid "+(galleryScope==="all"?"#4338ca":"#334155"),borderRadius:6,color:galleryScope==="all"?"#a5b4fc":"#cbd5e1",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>All trades</button>
         </div>
@@ -9473,7 +9473,10 @@ function App(props){
   useEffect(function(){
     try{
       if(localStorage.getItem("tf-oversize-migrated-v4"))return;
-      var rawMax=parseFloat(settings.positionMax)||0;
+      // CHANGED: Use live-tier position cap (matches saveTrade + Computed) instead of stale settings snapshot.
+      var _lt=getCurrentTier(computeAccountBalance(0));
+      var _lc=calcPosSizes(_lt,{useDirect:true,sizingMode:settings.sizingMode,slippagePct:settings.slippagePct,positionMaxPct:settings.positionMaxPct,riskMaxPct:settings.riskMaxPct,positionMaxDollar:settings.positionMaxDollar,riskMaxDollar:settings.riskMaxDollar});
+      var rawMax=_lc.positionMax||parseFloat(settings.positionMax)||0;
       if(rawMax<=0)return;
       var sessions=getSessions(settings);
       function sfFor(t){
@@ -9774,10 +9777,12 @@ function App(props){
     if(status==="closed"){
       derivedClosedAt=exitTimes.length>0?Math.max.apply(null,exitTimes):(t.closedAt||Date.now());
     }
-    // CHANGED: Always recompute pnl / fees at save time using current per-asset-class commission.
-    // Prevents a stale zero-fee snapshot from persisting if the user set commissions later.
     var _rc=doRecalc(t.entries||[],t.exits||[],t.assetClass,t.instrument,t.direction);
-    var enriched=autoAddViolations(Object.assign({},t,_rc,{openedAt:derivedOpenedAt,closedAt:derivedClosedAt,status:status,sessionId:sessionId}),settings.positionMax);
+    // CHANGED: Compute live-tier positionMax so "Oversized entry" measures against the CURRENT
+    // account tier's cap, not a stale settings snapshot. Aligns with Computed and trade form.
+    var _liveTier=getCurrentTier(computeAccountBalance(totalPnL));
+    var _liveCaps=calcPosSizes(_liveTier,{useDirect:true,sizingMode:settings.sizingMode,slippagePct:settings.slippagePct,positionMaxPct:settings.positionMaxPct,riskMaxPct:settings.riskMaxPct,positionMaxDollar:settings.positionMaxDollar,riskMaxDollar:settings.riskMaxDollar});
+    var enriched=autoAddViolations(Object.assign({},t,_rc,{openedAt:derivedOpenedAt,closedAt:derivedClosedAt,status:status,sessionId:sessionId}),_liveCaps.positionMax);
     // CHANGED: Compute updated trades list outside setState so we can sync the journal too.
     var existingIdx=state.trades.findIndex(function(x){return x.id===enriched.id;});
     var ut=existingIdx>=0?state.trades.map(function(x){return x.id===enriched.id?enriched:x;}):state.trades.concat([enriched]);
