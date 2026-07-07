@@ -9733,17 +9733,16 @@ function App(props){
     var pnlNum=parseFloat(t.pnl);
     var pctNum=parseFloat(t.pctPnl);
     var riskMaxPct=(settings&&settings.riskMaxPct!=null)?parseFloat(settings.riskMaxPct):33;
-    // Session size fraction — always recompute from the trade's session (don't trust a previously
-    // stamped sizeFraction, which may be a legacy compounded value baked in by older code).
-    var sf=1;
-    if(t.sessionId){try{var sess=getSessions(settings).find(function(s){return s.id===t.sessionId;});if(sess&&sess.sizeFraction!=null)sf=parseFloat(sess.sizeFraction)||1;}catch(e){}}
-    // CHANGED: Half-size lock means "at most half of full size", not "half of whatever the
-    // session already shrank you to". Without this floor, a session with sf=0.5 combined with the
-    // lock's ×0.5 produced 0.25 — way more restrictive than the user expects from "half-size".
-    try{var lk=checkDisciplineLock(state.trades,state.commitment,getCommitmentsMap(state));if(lk&&lk.locked)sf=Math.min(sf,0.5);}catch(e){}
-    // CHANGED: Month-halfsize mode caps SF at 0.5 too (same floor as the lock), so the trade is
-    // measured against the half-size threshold and oversized-entry flags fire correctly.
-    if(isMonthHalfsizeActive())sf=Math.min(sf,0.5);
+    // CHANGED: Use the trade's stamped sizeFraction as-is if present — it reflects the effective SF
+    // in force at trade time. Re-applying half-size / lock floors here retroactively flagged
+    // pre-lock trades as oversized after a mid-day lock trigger.
+    var sf=parseFloat(t.sizeFraction);
+    if(isNaN(sf)||sf<=0){
+      sf=1;
+      if(t.sessionId){try{var sess=getSessions(settings).find(function(s){return s.id===t.sessionId;});if(sess&&sess.sizeFraction!=null)sf=parseFloat(sess.sizeFraction)||1;}catch(e){}}
+      try{var lk=checkDisciplineLock(state.trades,state.commitment,getCommitmentsMap(state));if(lk&&lk.locked)sf=Math.min(sf,0.5);}catch(e){}
+      if(isMonthHalfsizeActive())sf=Math.min(sf,0.5);
+    }
     var effPosMax=posMax>0?posMax*sf:0;
     // CHANGED: Auto-violations must be REMOVABLE — if a re-save brings the trade within the cap,
     // the previous "Oversized entry" flag should clear. Same for "Max risk exceeded".
