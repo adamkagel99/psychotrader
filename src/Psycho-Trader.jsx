@@ -4796,45 +4796,44 @@ function TradesTab(props){
         var riskMaxBase=parseFloat(settings.riskMax)||0;
         if(riskMaxBase<=0)return null;
         var rStops=getSessionRStops(rule);
-        // CHANGED: Use canonical dayR (sums per-trade R against each trade's stamped sizeFraction)
+        // CHANGED: Use canonical dayRVal (sums per-trade R against each trade's stamped sizeFraction)
         // so the banner matches the Today strip. Previous "totalPnL / (riskMax × session SF)" gave
         // mixed-sizeFraction days the wrong scale.
-        var _dayR=dayR(state.trades,riskMaxBase);
-        var dayR=_dayR;
+        var dayRVal=dayR(state.trades,riskMaxBase);
         // Loss approaching
-        if(dayR<0&&dayR<=rStops.lossR*0.8&&dayR>rStops.lossR){
-          var pct=Math.round(dayR/rStops.lossR*100);
+        if(dayRVal<0&&dayRVal<=rStops.lossR*0.8&&dayRVal>rStops.lossR){
+          var pct=Math.round(dayRVal/rStops.lossR*100);
           return (
             <div style={{marginBottom:10,padding:"6px 10px",background:"#1c0a0a66",border:"1px solid #b91c1c",borderRadius:6,display:"flex",alignItems:"center",gap:8}}>
               <span style={{fontSize:14}}>⚠</span>
-              <span style={{fontSize:11,color:"#fca5a5",fontWeight:600}}>Approaching loss stop · {dayR.toFixed(2)}R / {rStops.lossR.toFixed(1)}R ({pct}%)</span>
+              <span style={{fontSize:11,color:"#fca5a5",fontWeight:600}}>Approaching loss stop · {dayRVal.toFixed(2)}R / {rStops.lossR.toFixed(1)}R ({pct}%)</span>
             </div>
           );
         }
         // Gain approaching
-        if(dayR>0&&dayR>=rStops.gainR*0.8&&dayR<rStops.gainR){
-          var gpct=Math.round(dayR/rStops.gainR*100);
+        if(dayRVal>0&&dayRVal>=rStops.gainR*0.8&&dayRVal<rStops.gainR){
+          var gpct=Math.round(dayRVal/rStops.gainR*100);
           return (
             <div style={{marginBottom:10,padding:"6px 10px",background:"#0a1f1066",border:"1px solid #15803d",borderRadius:6,display:"flex",alignItems:"center",gap:8}}>
               <span style={{fontSize:14}}>✓</span>
-              <span style={{fontSize:11,color:"#86efac",fontWeight:600}}>Approaching gain stop · +{dayR.toFixed(2)}R / +{rStops.gainR.toFixed(1)}R ({gpct}%)</span>
+              <span style={{fontSize:11,color:"#86efac",fontWeight:600}}>Approaching gain stop · +{dayRVal.toFixed(2)}R / +{rStops.gainR.toFixed(1)}R ({gpct}%)</span>
             </div>
           );
         }
         // Hit hard stop — show the locked state explicitly
-        if(dayR<=rStops.lossR){
+        if(dayRVal<=rStops.lossR){
           return (
             <div style={{marginBottom:10,padding:"8px 12px",background:"#1c0a0a",border:"1px solid #ef4444",borderRadius:8}}>
               <div style={{fontSize:11,color:"#fca5a5",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Loss Stop Hit · Trading Locked</div>
-              <div style={{fontSize:12,color:"#fecaca",marginTop:2}}>Day at {dayR.toFixed(2)}R · stop {rStops.lossR.toFixed(1)}R. Step away.</div>
+              <div style={{fontSize:12,color:"#fecaca",marginTop:2}}>Day at {dayRVal.toFixed(2)}R · stop {rStops.lossR.toFixed(1)}R. Step away.</div>
             </div>
           );
         }
-        if(dayR>=rStops.gainR){
+        if(dayRVal>=rStops.gainR){
           return (
             <div style={{marginBottom:10,padding:"8px 12px",background:"#0a1f10",border:"1px solid #22c55e",borderRadius:8}}>
               <div style={{fontSize:11,color:"#86efac",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Gain Stop Hit · Take the Win</div>
-              <div style={{fontSize:12,color:"#bbf7d0",marginTop:2}}>Day at +{dayR.toFixed(2)}R · target +{rStops.gainR.toFixed(1)}R. Done for the day.</div>
+              <div style={{fontSize:12,color:"#bbf7d0",marginTop:2}}>Day at +{dayRVal.toFixed(2)}R · target +{rStops.gainR.toFixed(1)}R. Done for the day.</div>
             </div>
           );
         }
