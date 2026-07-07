@@ -4221,15 +4221,12 @@ function PerfProgressCard(props){
   var [open,setOpen]=useState(false);
   return (
     <div style={CS({marginBottom:18,padding:0,overflow:"hidden"})}>
-      <div style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"13px 16px",background:"linear-gradient(135deg,#1e1b4b 0%,#15151f 70%)",borderBottom:"1px solid #312e81"}}>
-        <button onClick={function(){if(props.onNavigate)props.onNavigate();}} style={{background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",textAlign:"left",padding:0,flexShrink:0}}>
-          <span style={{fontSize:13,color:"#c7d2fe",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700}}>Performance &amp; Progress</span>
-        </button>
-        {/* CHANGED: Dropdown shrinks to its content width — no flex:1, no stretch. */}
+      <div onClick={function(){if(props.onNavigate)props.onNavigate();}} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"13px 16px",background:"linear-gradient(135deg,#1e1b4b 0%,#15151f 70%)",borderBottom:"1px solid #312e81",cursor:"pointer"}}>
+        <span style={{fontSize:13,color:"#c7d2fe",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,flexShrink:0}}>Performance &amp; Progress</span>
         <div onClick={function(e){e.stopPropagation();}} style={{display:"flex",marginLeft:12,marginRight:"auto"}}>
           <Dropdown variant="pill" value={range} onChange={function(v){setRange(v);}} options={[{v:"week",l:"This Week"},{v:"month",l:"Month to Date"},{v:"year",l:"Year to Date"},{v:"all",l:"All Time"}]} style={{padding:"4px 10px",fontSize:11}}/>
         </div>
-        <button onClick={function(){setOpen(function(o){return !o;});}} aria-label={open?"Collapse":"Expand"} style={{background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",padding:4,display:"flex",alignItems:"center",flexShrink:0}}>
+        <button onClick={function(e){e.stopPropagation();setOpen(function(o){return !o;});}} aria-label={open?"Collapse":"Expand"} style={{background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",padding:4,display:"flex",alignItems:"center",flexShrink:0}}>
           <svg width="13" height="13" viewBox="0 0 12 12" fill="none" style={{transition:"transform 0.2s",transform:open?"rotate(180deg)":"rotate(0deg)"}}><path d="M2 4l4 4 4-4" stroke="#a5b4fc" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
         </button>
       </div>
@@ -8273,50 +8270,84 @@ function OptionsEditor(props){
 // CHANGED: In-app help guide — a plain-language walkthrough of how the app works, grouped by tab
 // plus the core discipline mechanics. Rendered as the first (collapsible) section of Settings.
 function HelpGuide(){
-  var h={fontSize:13,fontWeight:700,color:"#e2e8f0",margin:"14px 0 6px"};
-  var p={fontSize:13,color:"#94a3b8",lineHeight:1.6,margin:"0 0 8px"};
-  var em={color:"#cbd5e1",fontWeight:600};
-  var li={fontSize:13,color:"#94a3b8",lineHeight:1.6,margin:"0 0 6px",paddingLeft:14,position:"relative"};
-  var dot={position:"absolute",left:0,top:0,color:"#6366f1"};
-  function L(props){return <div style={li}><span style={dot}>•</span>{props.children}</div>;}
+  var section={margin:"20px 0 10px",fontSize:12,fontWeight:800,color:"#a5b4fc",letterSpacing:1.2,textTransform:"uppercase"};
+  var p={fontSize:13,color:"#94a3b8",lineHeight:1.55,margin:"0 0 10px"};
+  var em={color:"#e2e8f0",fontWeight:600};
+  function Card(props){return <div style={{padding:"12px 14px",background:"#0a0a0f",border:"1px solid "+(props.color||"#1e293b"),borderRadius:8,marginBottom:8}}>{props.children}</div>;}
+  function Row(props){return <div style={{display:"flex",alignItems:"flex-start",gap:10,marginBottom:8}}>
+    <div style={{width:28,height:28,borderRadius:6,background:props.bg||"#1e1b4b",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,flexShrink:0}}>{props.icon}</div>
+    <div style={{flex:1,minWidth:0}}>
+      <div style={{fontSize:13,fontWeight:700,color:"#e2e8f0",marginBottom:2}}>{props.title}</div>
+      <div style={{fontSize:12,color:"#94a3b8",lineHeight:1.5}}>{props.children}</div>
+    </div>
+  </div>;}
+  function Chip(props){return <span style={{display:"inline-block",padding:"2px 8px",background:props.bg||"#1e1b4b",border:"1px solid "+(props.br||"#4338ca"),borderRadius:12,color:props.c||"#a5b4fc",fontSize:11,fontWeight:600,marginRight:5,marginBottom:4}}>{props.children}</span>;}
+  function Flow(props){return <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:10}}>{props.steps.map(function(s,i){return <React.Fragment key={i}>
+    <div style={{padding:"6px 10px",background:"#111118",border:"1px solid #334155",borderRadius:6,fontSize:12,color:"#cbd5e1",fontWeight:600}}>{s}</div>
+    {i<props.steps.length-1&&<span style={{color:"#475569",fontSize:14}}>→</span>}
+  </React.Fragment>;})}</div>;}
   return (
     <div>
-      <p style={Object.assign({},p,{color:"#cbd5e1"})}>Psycho-Trader is a trading journal built to enforce discipline, not just record trades. The core idea: it actively pushes back on the behaviors that blow up accounts — overtrading, revenge trading, sizing up too fast, and trading on tilt. Here's how each part works.</p>
+      <p style={Object.assign({},p,{color:"#cbd5e1",fontSize:14})}>
+        <span style={{color:"#a5b4fc",fontWeight:700}}>Psycho Trader</span> is a discipline-first trading journal. It records your trades — and pushes back on the behaviors that blow up accounts: overtrading, revenge, sizing up too fast, tilt.
+      </p>
 
-      <div style={h}>The five tabs</div>
-      <L><span style={em}>Dashboard</span> — your daily home base. Account balance, today's focus, calendar of past days, and your clean-day streak.</L>
-      <L><span style={em}>Trades</span> — log trades for the day. Start here each morning: complete the pre-market checklist, commit to a plan, then log entries as you take them. Editable trade cards with screenshots, indicators, candle patterns, emotional state, and grade.</L>
-      <L><span style={em}>Goals</span> — your targets for P&L, win rate, account milestones, and discipline. Custom goals can be filed under default sections (Performance / P&L / Account) or your own named sections.</L>
-      <L><span style={em}>Performance</span> — your stats and patterns: win rate, profit factor, expectancy, Session×Day heatmap, R-multiple distribution, discipline-vs-R scatter, and per-tag breakdowns for Setups / Candle Patterns / Indicators. Use the dropdown to scope by this week (Sun–today), last week (Sun–Sat), month, 3-month, year, or all time.</L>
-      <L><span style={em}>Settings</span> — balance, sizing parameters, sessions, checklists, discipline scoring, backup/restore, and sign-out.</L>
+      <div style={section}>The Five Tabs</div>
+      <Row icon="🏠" title="Dashboard">Account balance, Today strip, Performance & Progress, calendar. Tap any header to jump to that tab.</Row>
+      <Row icon="📓" title="Journal">Log trades. Per-session grouping, per-session commitments, per-session no-trade logging. Prev/next date arrows or calendar pill.</Row>
+      <Row icon="🎯" title="Goals">Daily / weekly / monthly P&L, win rate, account milestone, monthly withdrawal, plus custom goals.</Row>
+      <Row icon="📊" title="Performance">Range-scoped stats: equity curve, R distribution, Session×Day heatmap, breakeven & no-trade activity, discipline-vs-R scatter, tag breakdowns.</Row>
+      <Row icon="⚙️" title="Settings">Balance, Position Sizing, sessions, checklists, discipline scoring, backup, sign-out.</Row>
 
-      <div style={h}>Starting your trading day</div>
-      <p style={p}>On the Trades tab, first work through the <span style={em}>Pre-Market Checklist</span>. Until it's complete, position and risk sizing stay hidden so you can't jump in unprepared. Then set your <span style={em}>commitment</span>: max trades for the day (derived automatically from your Session Strategy) and which setups you'll take. Once committed, it locks — you can't quietly rewrite the plan mid-day when you're tempted.</p>
+      <div style={section}>Daily Flow</div>
+      <Flow steps={["Pre-market checklist","Commit (per session)","Log trades","Session review","Day summary"]}/>
+      <p style={p}>Complete the checklist first — position & risk stay hidden until it's done. Commit to <span style={em}>this session's</span> max trades + setups; it appears 15 min before session start and locks once committed. Cards render in chronological order, grouped by session. Session ends when its window closes OR trade cap is hit; commitment review appears then.</p>
 
-      <div style={h}>The half-size lock (the heart of the app)</div>
-      <p style={p}>Every day gets a <span style={em}>discipline score</span> out of 100. You start at 100 and lose points for rule violations, negative emotions, exceeding your commitment, and ignoring the setup review; you gain a little for A-grades and positive emotional state. If your score drops below your <span style={em}>lock threshold</span> (default 85), the app <span style={em}>auto-halves your position and risk caps</span> rather than blocking trades outright — half-size trading stays active for one full trading day (a weekend serves as cooldown, so a Friday lock clears Monday). The lock is immutable once triggered — later score recomputes can't make it disappear.</p>
-      <p style={p}>Hard stops (session daily-loss / daily-gain limits) and the "Oversized entry" violation also scale to the half-size cap, so the entire risk profile shrinks together. The banner shows when the lock was triggered (today, yesterday, or N days ago).</p>
+      <div style={section}>The Half-Size Lock</div>
+      <Card color="#7f1d1d">
+        <div style={{fontSize:13,color:"#fca5a5",fontWeight:700,marginBottom:6}}>⚠ Discipline score below threshold</div>
+        <div style={{fontSize:12,color:"#94a3b8",lineHeight:1.55}}>Every day gets scored /100. Rules violated, negative emotions, exceeding commitment → deductions. Fall below the lock threshold (default 85) and <span style={em}>position + risk auto-halve for the next full trading day</span>. Weekend serves as cooldown. Lock is immutable — later recomputes can't undo it. Past days that triggered a lock carry a <span style={em}>⚠ HALF-SIZE TRIGGERED</span> badge in the Day Summary.</div>
+      </Card>
+      <p style={p}>Hard stops (session daily loss/gain limits) and the "Oversized entry" violation scale to the half-size cap. Half-size can also be manually toggled or auto-engaged on weekly/monthly goal hit.</p>
 
-      <div style={h}>How the discipline score works</div>
-      <p style={p}>The score is mostly about <span style={em}>process</span>, not profit — deliberately. A disciplined losing day can still score well; a reckless winning day won't. There's a small outcome term based on your R-multiple (day P&L ÷ your max risk), but it's capped and can't rescue a day that broke the rules: a profitable day with violations gets no outcome bonus, and the lock decision uses the process-only score. Tune penalties and the R-term in the Discipline Scoring section.</p>
+      <div style={section}>Position Sizing</div>
+      <p style={p}>Set <span style={em}>Risk Max % of Balance</span> and <span style={em}>Stop Loss Max %</span>; the app derives position and risk caps at every account tier. Caps then scale by:</p>
+      <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:10}}>
+        <Chip bg="#0a0a0f" br="#334155" c="#cbd5e1">Tier size</Chip>
+        <span style={{color:"#475569"}}>×</span>
+        <Chip bg="#1e1b4b" br="#4338ca" c="#a5b4fc">Session SF</Chip>
+        <span style={{color:"#475569"}}>×</span>
+        <Chip bg="#3a1010" br="#7f1d1d" c="#fca5a5">½ if locked</Chip>
+      </div>
+      <p style={p}>The <span style={em}>Computed</span> readout in Settings, the trade form's Position/Risk display, and the Pre-Market Checklist sizing hint all use the same live calc — no drift.</p>
 
-      <div style={h}>Position sizing &amp; scaling</div>
-      <p style={p}>Position and risk caps are read from <span style={em}>Auto-Sizing Parameters</span> in Settings. They're then scaled by the active session's <span style={em}>sizeFraction</span> (e.g., a 0.7 size fraction for an aggressive session yields 70% of base), and halved again if you're in a half-size lock.</p>
+      <div style={section}>Session Strategy</div>
+      <p style={p}>Define sessions (e.g. Options Morning, Options Afternoon) with times, size fraction, max trades, R stops, days-of-week. Each trade auto-attributes by its <span style={em}>actual start time</span>. Off-hours trades bucket into <Chip bg="#1c1408" br="#a16207" c="#fcd34d">Out of Session · Before ⟨session⟩</Chip> or <Chip bg="#1c1408" br="#a16207" c="#fcd34d">Out of Session · After</Chip> — chronologically placed in the journal.</p>
 
-      <div style={h}>Session Strategy</div>
-      <p style={p}>Define your trading sessions in Settings (pre-market, opening, midday, closing, etc.) with start/end times, size fractions, max trades, daily R loss/gain stops, and days-of-week. Each trade is automatically attributed to its session based on when you entered. Off-hours trades get attributed to the nearest enabled session so they still show in the heatmap and breakdowns.</p>
+      <div style={section}>Per-Session Commitments &amp; Reviews</div>
+      <Row icon="✍️" title="Commit" bg="#1e1b4b">15 min before each session, a card asks for max trades + setups. Cap comes from the session's config; setups you type in. Locks once committed.</Row>
+      <Row icon="✓" title="Review" bg="#14532d">Appears once the session ends by time or trade cap. Shows "stayed within cap" and lets you affirm "stuck to plan" vs "deviated."</Row>
+      <Row icon="⊘" title="No-Trade Session" bg="#1c1408">Empty sessions that have ended auto-log as no-trade (auto). Add notes retroactively — reasons + free text + screenshots.</Row>
 
-      <div style={h}>Streaks &amp; commitment review</div>
-      <L><span style={em}>Clean-day streak</span> — consecutive trading days where your discipline stayed above the lock threshold, win or lose. Only trading days count; weekends and days off don't break it. Your personal best is saved.</L>
-      <L><span style={em}>Commitment review</span> — at day's end, the app checks your stated plan against what actually happened: did you stay within your trade cap, did you stick to your committed setups. Following your own plan is the win, regardless of P&L.</L>
+      <div style={section}>Goals — Auto-Calculated Targets</div>
+      <Flow steps={["Monthly P&L","÷ trading days this month","= Daily","× trading days this week","= Weekly"]}/>
+      <p style={p}>Enter Monthly P&L; Daily and Weekly derive automatically (accounting for weekends + market holidays). Override either explicitly — <Chip bg="#0a0a0f" br="#334155" c="#94a3b8">Reset</Chip> clears the override. Total Withdrawn card is auto-hidden; Monthly Withdrawal is separately hideable.</p>
 
-      <div style={h}>Withdrawals</div>
-      <p style={p}>Your withdrawal allowance is <span style={em}>30% of the profit you've earned since your last withdrawal</span> — so cashing out is tied directly to growth. Deposits and withdrawals (with running totals) live in Settings → Balance.</p>
+      <div style={section}>Journal Views</div>
+      <Row icon="📅" title="Date navigation">Prev/next arrows or the calendar pill. Calendar collapsed = current week strip; expanded = full month with adjacent-month days dimmed.</Row>
+      <Row icon="🔍" title="Sort &amp; Filter">Persist across reloads. Filter by direction, setup, timeframe, grade, emotion, violations (including <Chip bg="#111118" br="#334155" c="#cbd5e1">None</Chip>), and R-return buckets.</Row>
+      <Row icon="🗂" title="All Trades">Cross-day view grouped by session under each date. Filter chip shows result count + summed P&L.</Row>
 
-      <div style={h}>Your data &amp; sync</div>
-      <p style={p}>Data syncs to Supabase under your account so it follows you across devices. On sign-in to a new device, the app pulls your cloud history. Use <span style={em}>Import / Export</span> in Settings to export a JSON snapshot you can keep offline or migrate. Sign out from the bottom of Settings.</p>
+      <div style={section}>Economic Events</div>
+      <p style={p}>Import a batch (Investing.com CSV) once a week; events persist <span style={em}>Sunday through Saturday</span> and auto-clear on the next Sunday. Filter by currency + impact — both persist independently across imports.</p>
 
-      <p style={Object.assign({},p,{marginTop:14,color:"#64748b",fontSize:12})}>The philosophy: make the disciplined choice the easy one and the reckless choice harder. The friction is the feature.</p>
+      <div style={section}>Withdrawals</div>
+      <p style={p}>Allowance = <span style={em}>configurable %</span> of profit since last withdrawal (default 30%). Toggle allowance suggestions on/off in Balance settings. Transfers list all deposits and withdrawals with running totals.</p>
+
+      <div style={section}>Data &amp; Sync</div>
+      <p style={p}>Cloud-synced via Supabase — signs you in across devices. Import / Export JSON snapshots in Settings. Some UI state (filters, collapse) stays device-local.</p>
+
+      <p style={Object.assign({},p,{marginTop:16,color:"#64748b",fontSize:12,fontStyle:"italic"})}>Philosophy: make the disciplined choice the easy one. The friction is the feature.</p>
     </div>
   );
 }
