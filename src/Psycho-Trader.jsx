@@ -222,8 +222,14 @@ function fmtDurationMs(ms){
 // Day-of-week comes from openedAt so a back-entered trade gets the right weekday.
 function getSessionForTrade(t){
   if(!t)return null;
-  // CHANGED: Canonical start = earliest leg timestamp (matches the time the card displays and
-  // the Sort comparator). Falls back to openedAt, then to legacy time strings.
+  // CHANGED: Preserve the trade's stamped sessionId if one exists. A session that was enabled
+  // when the trade was placed but has since been disabled should still keep its attribution —
+  // only truly off-hours trades (no stamped session) fall through to a time-based derivation.
+  if(t.sessionId){
+    for(var _i=0;_i<CACHED_SESSIONS.length;_i++){if(CACHED_SESSIONS[_i].id===t.sessionId)return t.sessionId;}
+    // Session no longer configured at all — still trust the stamp (heatmap will bucket generically).
+    return t.sessionId;
+  }
   var ms=null;
   try{
     var ents=t.entries||[];
@@ -4136,8 +4142,16 @@ function GoalsSnapshot(props){
   if(!hidden.monthlyWithdrawals&&monthlyWithdrawalTarget>0)account.push({key:"monthlyWithdrawals",label:"Monthly Withdrawal",value:monthlyWithdrawn,target:monthlyWithdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
   if(!hidden.winRate&&winRateTarget>0)perf.push({key:"winRate",label:"Win Rate",value:oWR,target:winRateTarget,suffix:"%",decimals:0,targetDecimals:0,wrColor:true,compact:true});
   if(!hidden.discipline&&disciplineTarget>0)perf.push({key:"discipline",label:"Discipline",value:aDisc,target:disciplineTarget,suffix:"%",decimals:0,targetDecimals:0,discColor:true,compact:true});
-  if(!hidden.daily&&dailyTarget>0)pnl.push({key:"daily",label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
-  if(!hidden.weekly&&weeklyTarget>0)pnl.push({key:"weekly",label:"Week P&L",value:weekPnL,target:weeklyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
+  // CHANGED: Auto-hide daily/weekly PnL cards once the goal is hit at FULL size AND half-size is
+  // active — the target is stale (halved) so the ring conveys nothing meaningful. Uses fullDailyTarget
+  // (pre-halfsize) to detect goal hit against original target.
+  var _fullDaily=parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(defaultDailyFromMonthly(goals,settings)||0);
+  var _fullWeekly=parseFloat(goals.weeklyPnL)>0?parseFloat(goals.weeklyPnL):defaultWeeklyFromMonthly(goals,settings);
+  var _hsNow=false;try{_hsNow=isMonthHalfsizeActive();}catch(e){}
+  var _hideDaily=_hsNow&&_fullDaily>0&&dailyPnL>=_fullDaily;
+  var _hideWeekly=_hsNow&&_fullWeekly>0&&weekPnL>=_fullWeekly;
+  if(!hidden.daily&&dailyTarget>0&&!_hideDaily)pnl.push({key:"daily",label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
+  if(!hidden.weekly&&weeklyTarget>0&&!_hideWeekly)pnl.push({key:"weekly",label:"Week P&L",value:weekPnL,target:weeklyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
   if(!hidden.monthly&&monthlyTarget>0)pnl.push({key:"monthly",label:"Month P&L",value:monthPnL,target:monthlyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
   // CHANGED: Inject custom goals into the appropriate default section so they show on Home alongside built-ins.
   var customList=Array.isArray(goals.custom)?goals.custom:[];
@@ -6377,8 +6391,17 @@ function GoalsTab(props){
               <div style={{marginBottom:20}}>
                 <SectionHead icon="💰" title="P&L"/>
                 <div style={gridStyle}>
-                  {dailyTarget>0&&renderStandardCard("daily",Object.assign({label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true},pnlFmt))}
-                  {weeklyTarget>0&&renderStandardCard("weekly",Object.assign({label:"Week P&L",value:weekPnL,target:weeklyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true},pnlFmt))}
+                  {(function(){
+                    var fD=parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(defaultDailyFromMonthly(goals,settings)||0);
+                    var fW=parseFloat(goals.weeklyPnL)>0?parseFloat(goals.weeklyPnL):defaultWeeklyFromMonthly(goals,settings);
+                    var hs=false;try{hs=isMonthHalfsizeActive();}catch(e){}
+                    var hideD=hs&&fD>0&&dailyPnL>=fD;
+                    var hideW=hs&&fW>0&&weekPnL>=fW;
+                    return <>
+                      {dailyTarget>0&&!hideD&&renderStandardCard("daily",Object.assign({label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true},pnlFmt))}
+                      {weeklyTarget>0&&!hideW&&renderStandardCard("weekly",Object.assign({label:"Week P&L",value:weekPnL,target:weeklyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true},pnlFmt))}
+                    </>;
+                  })()}
                   {monthlyTarget>0&&renderStandardCard("monthly",Object.assign({label:"Month P&L",value:monthPnL,target:monthlyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true},pnlFmt))}
                   {customByBucket.pnl.map(renderInlineCustom)}
                 </div>
