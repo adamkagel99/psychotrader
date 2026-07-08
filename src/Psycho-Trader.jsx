@@ -680,6 +680,24 @@ function getAssetClass(id){return ASSET_CLASSES[id]||ASSET_CLASSES.options;}
 function getDirectionColor(dir){if(!dir)return "#64748b";if(dir==="CALL"||dir==="LONG"||dir==="BUY")return "#22c55e";if(dir==="PUT"||dir==="SHORT"||dir==="SELL")return "#ef4444";return "#64748b";}
 function defaultEnabledAssetClasses(){return {options:true,stocks:false,futures:false,forex:false,crypto:false};}
 function defaultFormSections(){return {timeframe:true,candlePattern:true,indicators:true};}
+// CHANGED: Local draft-string input for "Risk Max % of Balance" so typed decimals ("2.", "0.5")
+// don't get clobbered by parent re-renders while the user is mid-typing.
+function RiskMaxBalanceInput(props){
+  var settings=props.settings;
+  var derived=(function(){var pm=parseFloat(settings.positionMaxPct)||0;var rm=parseFloat(settings.riskMaxPct)||0;return (pm*rm/100).toFixed(2);})();
+  var [draft,setDraft]=useState(derived);
+  var [focused,setFocused]=useState(false);
+  useEffect(function(){if(!focused)setDraft(derived);},[derived,focused]);
+  function commit(v){
+    var b=parseFloat(v);if(isNaN(b))b=0;
+    props.setSettings(function(s){
+      var stop=parseFloat(s.riskMaxPct)||33;
+      var pos=stop>0?(b/stop*100):0;
+      return Object.assign({},s,{positionMaxPct:Math.round(pos*1000)/1000});
+    });
+  }
+  return <input type="number" step="0.01" min="0" value={draft} onFocus={function(){setFocused(true);}} onBlur={function(){setFocused(false);commit(draft);}} onChange={function(e){setDraft(e.target.value);commit(e.target.value);}} style={props.style}/>;
+}
 function defaultAssetClassSettings(){var out={};ASSET_CLASS_ORDER.forEach(function(id){out[id]={positionMinPct:null,positionMaxPct:null,riskMinPct:null,riskMaxPct:null,formSections:defaultFormSections()};});return out;}
 function getFormSectionsForClass(settings,classId){var acs=(settings&&settings.assetClassSettings)||{};var c=acs[classId]||{};return Object.assign({},defaultFormSections(),c.formSections||{});}
 var INSTRUMENTS_KEY="tf-instruments";
@@ -1572,9 +1590,9 @@ function isWeeklyGoalHit(todayLivePnL){
 }
 function isMonthHalfsizeActive(){
   try{
-    // CHANGED: Half-size auto-engages when EITHER the monthly OR the weekly P&L goal is hit.
-    // Weekly lasts until end of week; monthly lasts until end of month. Manual opt-in toggle
-    // still works for early activation.
+    // CHANGED: Manual OFF override — if user explicitly turned half-size off this month, respect
+    // that even if weekly/monthly goal is hit.
+    if(localStorage.getItem("tf-month-halfsize-manual-off")===getCurrentMonthKey())return false;
     if(isMonthlyGoalHit(0))return true;
     if(isWeeklyGoalHit(0))return true;
     return localStorage.getItem("tf-month-halfsize-active")===getCurrentMonthKey();
@@ -1609,7 +1627,7 @@ function applyHalfsizeToTarget(target){
   }catch(e){}
   return n;
 }
-function setMonthHalfsizeActive(on){try{if(on)localStorage.setItem("tf-month-halfsize-active",getCurrentMonthKey());else localStorage.removeItem("tf-month-halfsize-active");}catch(e){}}
+function setMonthHalfsizeActive(on){try{if(on){localStorage.setItem("tf-month-halfsize-active",getCurrentMonthKey());localStorage.removeItem("tf-month-halfsize-manual-off");}else{localStorage.removeItem("tf-month-halfsize-active");localStorage.setItem("tf-month-halfsize-manual-off",getCurrentMonthKey());}}catch(e){}}
 function isMonthGoalBannerDismissed(){try{return localStorage.getItem("tf-month-goal-banner-dismissed")===getCurrentMonthKey();}catch(e){return false;}}
 function dismissMonthGoalBanner(){try{localStorage.setItem("tf-month-goal-banner-dismissed",getCurrentMonthKey());}catch(e){}}
 // CHANGED: Monthly target banner extracted as a component so it can render globally (above the
@@ -8702,14 +8720,7 @@ function SettingsTab(props){
                 positionMaxPct is now a DERIVED value (= risk/stop × 100), persisted to settings so
                 all downstream sizing logic continues to work unchanged. */}
             <div><label style={lbl}>Risk Max % of Balance</label>
-              <input type="number" step="0.01" min="0" value={(function(){var pm=parseFloat(settings.positionMaxPct)||0;var rm=parseFloat(settings.riskMaxPct)||0;return (pm*rm/100).toFixed(2);})()} onChange={function(e){
-                var b=parseFloat(e.target.value)||0;
-                setSettings(function(s){
-                  var stop=parseFloat(s.riskMaxPct)||33;
-                  var pos=stop>0?(b/stop*100):0;
-                  return Object.assign({},s,{positionMaxPct:Math.round(pos*1000)/1000});
-                });
-              }} style={fld}/>
+              <RiskMaxBalanceInput settings={settings} setSettings={setSettings} style={fld}/>
             </div>
             <div><label style={lbl}>Stop Loss Max %</label>
               <input type="number" step="0.1" value={settings.riskMaxPct!=null?settings.riskMaxPct:33} onChange={function(e){
