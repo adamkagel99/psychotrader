@@ -2214,7 +2214,7 @@ function CalendarGrid(props){
   var fullDailyTarget=parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(defaultDailyFromMonthly(goals,settingsForTarget)||0);
   var fullRiskMax=parseFloat(settingsForTarget.riskMax)||0;
   var weeklyMultiplier=parseFloat(goals.weeklyMultiplier)||5;
-  var weeklyTarget=applyHalfsizeToTarget(parseFloat(goals.weeklyPnL)>0?parseFloat(goals.weeklyPnL):defaultWeeklyFromMonthly(goals,settingsForTarget));
+  var weeklyTarget=parseFloat(goals.weeklyPnL)>0?parseFloat(goals.weeklyPnL):defaultWeeklyFromMonthly(goals,settingsForTarget);
   var monthlyTarget=(parseFloat(goals.monthlyPnL)||0)||((parseFloat(goals.weeklyPnL)||0)*tradingWeeksThisMonth());
   var now=getPT();
   // CHANGED: When parent provides controlled year/month/onMonthChange, use those instead of
@@ -2522,31 +2522,20 @@ function ChecklistPanel(props){
             // Substitute position max in label if applicable. Scale by the day's effective sizing:
             // first enabled session's sizeFraction × half-size mode (if active for the month).
             var label=item.label;
-            if(item.key==="positionSized"&&settings&&settings.positionMin&&settings.positionMax){
-              var sf=1;
+            if(item.key==="positionSized"&&settings){
+              // CHANGED: Use the SAME live-tier calcPosSizes that Settings → Computed uses so this
+              // readout can't drift. Only half-size (manual + lock) applies; session sizeFraction
+              // is deliberately NOT applied here — user asked for it to mirror Computed.
+              var pMin=0,pMax=0;
               try{
-                // CHANGED: Match the CURRENT session's sizing if we're inside one; otherwise the
-                // next upcoming session today; fallback to the first enabled session of the day.
-                var sess=getSessions(settings).filter(function(s){return s.enabled!==false;});
-                if(sess.length>0){
-                  var nowMins=getCurrentMinutesLocal();
-                  var pick=null;
-                  for(var si=0;si<sess.length;si++){var s=sess[si];if(nowMins>=s.startMin&&nowMins<s.endMin){pick=s;break;}}
-                  if(!pick){
-                    var upcoming=sess.filter(function(s){return s.startMin>nowMins;});
-                    upcoming.sort(function(a,b){return a.startMin-b.startMin;});
-                    pick=upcoming[0]||sess[0];
-                  }
-                  if(pick&&pick.sizeFraction!=null){var v=parseFloat(pick.sizeFraction);if(!isNaN(v)&&v>0)sf=v;}
-                }
+                var _bal=computeAccountBalance(props.liveTotalPnL||0);
+                var _tier=getCurrentTier(_bal);
+                var _c=calcPosSizes(_tier,{useDirect:true,sizingMode:settings.sizingMode,slippagePct:settings.slippagePct,positionMaxPct:settings.positionMaxPct,riskMaxPct:settings.riskMaxPct,positionMaxDollar:settings.positionMaxDollar,riskMaxDollar:settings.riskMaxDollar});
+                pMin=_c.positionMin;pMax=_c.positionMax;
               }catch(e){}
-              // CHANGED: Also honor discipline-lock half-size (checkDisciplineLock) not just the
-              // monthly toggle, so this readout matches the enforced sizing.
               var _hs=false;try{_hs=isMonthHalfsizeActive();if(!_hs){var _tr=[];try{var _st=JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}");_tr=_st.trades||[];}catch(e){}var _lk=checkDisciplineLock(_tr,null);_hs=_lk&&_lk.locked;}}catch(e){}
-              if(_hs)sf=sf*0.5;
-              var pMin=Math.round(parseFloat(settings.positionMin)*sf);
-              var pMax=Math.round(parseFloat(settings.positionMax)*sf);
-              label=label+" ($"+pMin+"-$"+pMax+")";
+              if(_hs){pMin=Math.round(pMin/2);pMax=Math.round(pMax/2);}
+              if(pMin>0&&pMax>0)label=label+" ($"+pMin+"-$"+pMax+")";
             }
             return (
               <div key={item.key+":"+i}>
@@ -4110,7 +4099,7 @@ function GoalsSnapshot(props){
   var _userDaily=parseFloat(goals.dailyPnL)||0;
   var _userWeekly=parseFloat(goals.weeklyPnL)||0;
   var dailyTarget=applyHalfsizeToTarget(_userDaily>0?_userDaily:autoDaily);
-  var weeklyTarget=applyHalfsizeToTarget(_userWeekly>0?_userWeekly:defaultWeeklyFromMonthly(goals,settings));
+  var weeklyTarget=_userWeekly>0?_userWeekly:defaultWeeklyFromMonthly(goals,settings);
   var winRateTarget=parseFloat(goals.winRate)||0;
   var disciplineTarget=loadDisciplineLockThreshold();
   var accountTarget=parseFloat(goals.accountTarget)||0;
@@ -4142,16 +4131,8 @@ function GoalsSnapshot(props){
   if(!hidden.monthlyWithdrawals&&monthlyWithdrawalTarget>0)account.push({key:"monthlyWithdrawals",label:"Monthly Withdrawal",value:monthlyWithdrawn,target:monthlyWithdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
   if(!hidden.winRate&&winRateTarget>0)perf.push({key:"winRate",label:"Win Rate",value:oWR,target:winRateTarget,suffix:"%",decimals:0,targetDecimals:0,wrColor:true,compact:true});
   if(!hidden.discipline&&disciplineTarget>0)perf.push({key:"discipline",label:"Discipline",value:aDisc,target:disciplineTarget,suffix:"%",decimals:0,targetDecimals:0,discColor:true,compact:true});
-  // CHANGED: Auto-hide daily/weekly PnL cards once the goal is hit at FULL size AND half-size is
-  // active — the target is stale (halved) so the ring conveys nothing meaningful. Uses fullDailyTarget
-  // (pre-halfsize) to detect goal hit against original target.
-  var _fullDaily=parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(defaultDailyFromMonthly(goals,settings)||0);
-  var _fullWeekly=parseFloat(goals.weeklyPnL)>0?parseFloat(goals.weeklyPnL):defaultWeeklyFromMonthly(goals,settings);
-  var _hsNow=false;try{_hsNow=isMonthHalfsizeActive();}catch(e){}
-  var _hideDaily=_hsNow&&_fullDaily>0&&dailyPnL>=_fullDaily;
-  var _hideWeekly=_hsNow&&_fullWeekly>0&&weekPnL>=_fullWeekly;
-  if(!hidden.daily&&dailyTarget>0&&!_hideDaily)pnl.push({key:"daily",label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
-  if(!hidden.weekly&&weeklyTarget>0&&!_hideWeekly)pnl.push({key:"weekly",label:"Week P&L",value:weekPnL,target:weeklyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
+  if(!hidden.daily&&dailyTarget>0)pnl.push({key:"daily",label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
+  if(!hidden.weekly&&weeklyTarget>0)pnl.push({key:"weekly",label:"Week P&L",value:weekPnL,target:weeklyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
   if(!hidden.monthly&&monthlyTarget>0)pnl.push({key:"monthly",label:"Month P&L",value:monthPnL,target:monthlyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
   // CHANGED: Inject custom goals into the appropriate default section so they show on Home alongside built-ins.
   var customList=Array.isArray(goals.custom)?goals.custom:[];
@@ -6029,7 +6010,7 @@ function GoalsTab(props){
   function gtRFmt(v){var r=gtRiskMax>0?v/gtRiskMax:0;return (r>=0?"+":"")+r.toFixed(1)+"R";}
   var pnlFmt=HIDE_DOLLAR_PNL?{formatValue:gtRFmt,formatTarget:gtRFmt}:{};
   var weeklyMultiplier=parseFloat(goals.weeklyMultiplier)||5;
-  var weeklyTarget=applyHalfsizeToTarget(_userWeekly>0?_userWeekly:defaultWeeklyFromMonthly(goals,settings));
+  var weeklyTarget=_userWeekly>0?_userWeekly:defaultWeeklyFromMonthly(goals,settings);
   var winRateTarget=parseFloat(goals.winRate)||0;
   // CHANGED: Discipline Score goal is tied directly to the discipline LOCK THRESHOLD setting and
   // is no longer user-editable in Goals. The goal is simply: keep your score above the lock bar.
@@ -6391,17 +6372,8 @@ function GoalsTab(props){
               <div style={{marginBottom:20}}>
                 <SectionHead icon="💰" title="P&L"/>
                 <div style={gridStyle}>
-                  {(function(){
-                    var fD=parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(defaultDailyFromMonthly(goals,settings)||0);
-                    var fW=parseFloat(goals.weeklyPnL)>0?parseFloat(goals.weeklyPnL):defaultWeeklyFromMonthly(goals,settings);
-                    var hs=false;try{hs=isMonthHalfsizeActive();}catch(e){}
-                    var hideD=hs&&fD>0&&dailyPnL>=fD;
-                    var hideW=hs&&fW>0&&weekPnL>=fW;
-                    return <>
-                      {dailyTarget>0&&!hideD&&renderStandardCard("daily",Object.assign({label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true},pnlFmt))}
-                      {weeklyTarget>0&&!hideW&&renderStandardCard("weekly",Object.assign({label:"Week P&L",value:weekPnL,target:weeklyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true},pnlFmt))}
-                    </>;
-                  })()}
+                  {dailyTarget>0&&renderStandardCard("daily",Object.assign({label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true},pnlFmt))}
+                  {weeklyTarget>0&&renderStandardCard("weekly",Object.assign({label:"Week P&L",value:weekPnL,target:weeklyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true},pnlFmt))}
                   {monthlyTarget>0&&renderStandardCard("monthly",Object.assign({label:"Month P&L",value:monthPnL,target:monthlyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true},pnlFmt))}
                   {customByBucket.pnl.map(renderInlineCustom)}
                 </div>
