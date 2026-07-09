@@ -8220,7 +8220,7 @@ function PerformanceTab(props){
             {/* CHANGED: No-trade activity lives in its own section, separate from trade breakevens. */}
             <StatSec title="No-Trade Activity">
             <StatRow label="No-Trade Days" value={noTradeDays.length+" day"+(noTradeDays.length===1?"":"s")} color={noTradeDays.length>0?"#fcd34d":"#64748b"}/>
-            <StatRow label="No-Trade Sessions" value={noTradeSessionsTally.total+" session"+(noTradeSessionsTally.total===1?"":"s")+(noTradeSessionsTally.explicit>0?" ("+noTradeSessionsTally.explicit+" logged)":"")} last={noTradeDays.length===0&&noTradeSessionsTally.explicit===0} color={noTradeSessionsTally.total>0?"#fcd34d":"#64748b"}/>
+            <StatRow label="No-Trade Sessions" value={noTradeSessionsTally.total+" session"+(noTradeSessionsTally.total===1?"":"s")+(noTradeSessionsTally.explicit>0?" · "+noTradeSessionsTally.explicit+" with notes":"")} last={noTradeDays.length===0&&noTradeSessionsTally.explicit===0} color={noTradeSessionsTally.total>0?"#fcd34d":"#64748b"}/>
             {(noTradeDays.length>0||noTradeSessionsTally.explicit>0)&&(function(){
               var counts={};
               noTradeDays.forEach(function(d){
@@ -8252,7 +8252,18 @@ function PerformanceTab(props){
             })()}
             </StatSec>
             <StatSec title="Out-of-Session Trades">
-            <StatRow label="Total" value={outOfSessionTrades+" trade"+(outOfSessionTrades===1?"":"s")} last color={outOfSessionTrades>0?"#fcd34d":"#64748b"}/>
+            {(function(){
+              // Compute WR + total P&L for out-of-session trades in range.
+              var wins=0,losses=0,total=0,pnlSum=0;
+              filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(!t||t.status==="open")return;var sid=null;try{sid=getSessionForTrade(t);}catch(e){}if(sid)return;total++;var pv=parseFloat(t.pnl)||0;pnlSum+=pv;if(pv>0)wins++;else if(pv<0)losses++;});});
+              var wr=total>0?Math.round((wins/total)*100):0;
+              var pnlFmt=HIDE_DOLLAR_PNL?"":((pnlSum>=0?"+$":"-$")+Math.abs(Math.round(pnlSum)).toLocaleString());
+              return (<>
+                <StatRow label="Total" value={total+" trade"+(total===1?"":"s")} color={total>0?"#fcd34d":"#64748b"}/>
+                {total>0&&<StatRow label="Win Rate" value={wr+"% ("+wins+"W / "+losses+"L)"} color={wr>=50?"#86efac":"#fca5a5"}/>}
+                {total>0&&!HIDE_DOLLAR_PNL&&<StatRow label="Total P&L" value={pnlFmt} last color={pnlSum>=0?"#86efac":"#fca5a5"}/>}
+              </>);
+            })()}
             </StatSec>
             </>;
           })()}
