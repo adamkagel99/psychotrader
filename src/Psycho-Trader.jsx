@@ -1606,7 +1606,12 @@ function tradeR(t,riskMaxSetting){
   if(!t||t.status==="open")return 0;
   var pnl=parseFloat(t.pnl);if(isNaN(pnl))return 0;
   var sf=(t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))?parseFloat(t.sizeFraction):1;
-  var rm=(parseFloat(riskMaxSetting)||0)*sf;
+  // CHANGED: Prefer riskMaxAtEntry stamped on the trade. Falls back to riskCapDollarsAtEntry/sf
+  // (older stamp), then to the current riskMax setting for legacy trades.
+  var base=parseFloat(t.riskMaxAtEntry);
+  if(isNaN(base)||base<=0){var cap=parseFloat(t.riskCapDollarsAtEntry);if(!isNaN(cap)&&cap>0&&sf>0)base=cap/sf;}
+  if(isNaN(base)||base<=0)base=parseFloat(riskMaxSetting)||0;
+  var rm=base*sf;
   return rm>0?pnl/rm:0;
 }
 function dayR(trades,riskMaxSetting){
@@ -9797,6 +9802,9 @@ function App(props){
     if(effPosMax>0)patch.posMaxAtEntry=effPosMax;
     if(stopThreshPct>0)patch.stopThreshPctAtEntry=stopThreshPct;
     if(riskCapDollars>0)patch.riskCapDollarsAtEntry=riskCapDollars;
+    // CHANGED: Stamp riskMax base (unscaled) so tradeR can compute a time-stable R that survives
+    // future changes to settings.riskMax.
+    if(rmDollar>0)patch.riskMaxAtEntry=rmDollar;
     return Object.assign({},t,patch);
   }
   function saveTrade(t){
