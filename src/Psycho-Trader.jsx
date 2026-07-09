@@ -9678,6 +9678,33 @@ function App(props){
     return function(){clearInterval(id);};
   },[state.date]);
   useEffect(function(){
+    // CHANGED: One-time backfill — stamp riskMaxAtEntry on historical trades (derived from
+    // riskCapDollarsAtEntry / sizeFraction). Makes R calcs across the app stable if settings.riskMax
+    // changes later. Runs once per install.
+    try{
+      if(localStorage.getItem("pt-backfill-riskmax-v1")==="1")return;
+      var updated=0;
+      for(var i=0;i<localStorage.length;i++){
+        var k=localStorage.key(i);if(!k||k.indexOf("journal:")!==0)continue;
+        try{
+          var raw=localStorage.getItem(k);if(!raw)continue;
+          var e=JSON.parse(raw);if(!e||!e.trades)continue;
+          var changed=false;
+          e.trades=e.trades.map(function(t){
+            if(!t||parseFloat(t.riskMaxAtEntry)>0)return t;
+            var sf=parseFloat(t.sizeFraction);var cap=parseFloat(t.riskCapDollarsAtEntry);
+            if(!isNaN(sf)&&sf>0&&!isNaN(cap)&&cap>0){changed=true;updated++;return Object.assign({},t,{riskMaxAtEntry:cap/sf});}
+            return t;
+          });
+          if(changed)localStorage.setItem(k,JSON.stringify(e));
+        }catch(err){}
+      }
+      localStorage.setItem("pt-backfill-riskmax-v1","1");
+      if(updated>0&&bumpReloadKey)bumpReloadKey();
+    }catch(e){}
+  // eslint-disable-next-line
+  },[]);
+  useEffect(function(){
     // CHANGED: One-time reset — clear discipline lock + today's disciplineScore so a stuck lock
     // from earlier state doesn't linger. Runs once per install.
     try{
