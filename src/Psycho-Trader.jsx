@@ -6117,7 +6117,7 @@ function GoalsTab(props){
           var td=tradingDaysThisMonth();var tw=tradingDaysThisWeek();
           var ad=mp>0?mp/td:computeDailyTarget(settings);
           var aw=ad*tw;
-          var src=mp>0?("Monthly $"+Math.round(mp).toLocaleString()+" ÷ "+td+" days · weekly = daily × "+tw+" trading days this week"):"session size × gain-stop";
+          var src=mp>0?("Monthly $"+Math.round(mp).toLocaleString()+" ÷ "+td+" days · weekly = daily × "+tw+" days this week"):("risk max × session size × gain-stop R · weekly = daily × "+tw+" days this week");
           return <div style={{padding:"10px 12px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:8,marginBottom:12,fontSize:13,color:"#94a3b8",lineHeight:1.5}}>Auto: Daily <span style={{color:"#22c55e",fontWeight:700}}>${Math.round(ad).toLocaleString()}</span> · Weekly <span style={{color:"#22c55e",fontWeight:700}}>${Math.round(aw).toLocaleString()}</span> ({src}). Override either below; empty falls back to auto.</div>;
         })()}
         {/* CHANGED: Daily/Weekly P&L. Empty = auto-computed from Monthly ÷ trading days & daily × multiplier.
@@ -6857,6 +6857,13 @@ function EquityCurve(props){
   // as their first entry), fall back to total lifetime deposits so the % is still meaningful
   // instead of collapsing to 0.00%.
   var pctDenom=startBal;
+  // CHANGED: For all-time / YTD ranges, use total deposits as denominator to match the "Total P&L"
+  // overview card. Prior behavior used balance at first entry — for accounts that grew from a
+  // tiny early balance, this produced eye-popping % returns that didn't match anywhere else.
+  var _rng=(props&&props.range)||"";
+  if(_rng==="all"||_rng==="ytd"){
+    try{var _dep=0;(loadTransfers()||[]).forEach(function(tf){var a=parseFloat(tf.amount)||0;if(a>0)_dep+=a;});if(_dep>0)pctDenom=_dep;}catch(e){}
+  }
   if(!(pctDenom>0)){
     try{
       var dep=0;
@@ -8204,8 +8211,7 @@ function PerformanceTab(props){
             {/* CHANGED: No-trade activity lives in its own section, separate from trade breakevens. */}
             <StatSec title="No-Trade Activity">
             <StatRow label="No-Trade Days" value={noTradeDays.length+" day"+(noTradeDays.length===1?"":"s")} color={noTradeDays.length>0?"#fcd34d":"#64748b"}/>
-            <StatRow label="No-Trade Sessions" value={noTradeSessionsTally.total+" session"+(noTradeSessionsTally.total===1?"":"s")+(noTradeSessionsTally.explicit>0?" ("+noTradeSessionsTally.explicit+" logged)":"")} color={noTradeSessionsTally.total>0?"#fcd34d":"#64748b"}/>
-            <StatRow label="Out-of-Session Trades" value={outOfSessionTrades+" trade"+(outOfSessionTrades===1?"":"s")} last={noTradeDays.length===0&&noTradeSessionsTally.explicit===0} color={outOfSessionTrades>0?"#fcd34d":"#64748b"}/>
+            <StatRow label="No-Trade Sessions" value={noTradeSessionsTally.total+" session"+(noTradeSessionsTally.total===1?"":"s")+(noTradeSessionsTally.explicit>0?" ("+noTradeSessionsTally.explicit+" logged)":"")} last={noTradeDays.length===0&&noTradeSessionsTally.explicit===0} color={noTradeSessionsTally.total>0?"#fcd34d":"#64748b"}/>
             {(noTradeDays.length>0||noTradeSessionsTally.explicit>0)&&(function(){
               var counts={};
               noTradeDays.forEach(function(d){
@@ -8235,6 +8241,9 @@ function PerformanceTab(props){
                 </div>
               );
             })()}
+            </StatSec>
+            <StatSec title="Out-of-Session Trades">
+            <StatRow label="Total" value={outOfSessionTrades+" trade"+(outOfSessionTrades===1?"":"s")} last color={outOfSessionTrades>0?"#fcd34d":"#64748b"}/>
             </StatSec>
             </>;
           })()}
@@ -8633,6 +8642,15 @@ function SettingsTab(props){
               <div style={{fontSize:11,color:"#64748b",marginTop:5,lineHeight:1.5}}>
                 {getWithdrawalAllowancePct()}% of {fmt(Math.max(0,profit))} profit{lastDate?" since last withdrawal":" (all-time)"}
               </div>
+              {(function(){
+                // CHANGED: Notify when allowance meets/exceeds the Monthly Withdrawal goal.
+                var mwt=0;try{var g=JSON.parse(localStorage.getItem(GOALS_KEY)||"{}");mwt=parseFloat(g.monthlyWithdrawals)||0;}catch(e){}
+                if(!(mwt>0&&allowance>=mwt))return null;
+                return <div style={{marginTop:8,padding:"7px 10px",background:"#14532d",border:"1px solid #22c55e",borderRadius:6,display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:14}}>🎯</span>
+                  <span style={{fontSize:12,color:"#86efac",fontWeight:600,lineHeight:1.4}}>Allowance covers your ${Math.round(mwt).toLocaleString()} monthly withdrawal goal — you're clear to cash out.</span>
+                </div>;
+              })()}
               {allowance<=0&&<div style={{fontSize:11,color:"#fdba74",marginTop:5}}>No profit{lastDate?" since your last withdrawal":""} yet, so the suggested allowance is $0. You can still log this — it's just a guide.</div>}
               {overAllowance&&<div style={{fontSize:11,color:"#fca5a5",marginTop:5}}>Over allowance by {fmt(entered-allowance)} — you can still log it, but it exceeds the {getWithdrawalAllowancePct()}% guide.</div>}
               {/* CHANGED: Inline editable % of profit. Updates the allowance readout immediately
