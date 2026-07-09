@@ -225,24 +225,24 @@ function getSessionForTrade(t){
   // CHANGED: Preserve the trade's stamped sessionId if one exists. A session that was enabled
   // when the trade was placed but has since been disabled should still keep its attribution —
   // only truly off-hours trades (no stamped session) fall through to a time-based derivation.
+  // Compute the trade's start-time-of-day up front so we can validate a stamped sessionId
+  // against it (a stamped session whose window no longer contains the actual start time is
+  // treated as bad data — re-derive from time instead).
+  var _ms=null;
+  try{var _ents=t.entries||[];var _arr=_ents.map(function(e){return Number(e&&e.time);}).filter(function(n){return !isNaN(n)&&n>0;});if(_arr.length>0)_ms=Math.min.apply(null,_arr);}catch(e){}
+  if(_ms==null){var _op=Number(t.openedAt);if(!isNaN(_op)&&_op>0)_ms=_op;}
+  var _mins=null,_date=null;
+  if(_ms!=null){_date=new Date(_ms);_mins=_date.getHours()*60+_date.getMinutes();}
+  else{var _tsStr=(t.entries&&t.entries[0]&&typeof t.entries[0].time==="string"&&t.entries[0].time)||t.time||null;_mins=parseTimeToMinsOfDay(_tsStr);}
   if(t.sessionId){
-    for(var _i=0;_i<CACHED_SESSIONS.length;_i++){if(CACHED_SESSIONS[_i].id===t.sessionId)return t.sessionId;}
-    // Session no longer configured at all — still trust the stamp (heatmap will bucket generically).
-    return t.sessionId;
+    var stampedSess=null;
+    for(var _i=0;_i<CACHED_SESSIONS.length;_i++){if(CACHED_SESSIONS[_i].id===t.sessionId){stampedSess=CACHED_SESSIONS[_i];break;}}
+    if(!stampedSess)return t.sessionId; // session no longer configured — trust the stamp
+    // Stamped session still exists: honor the stamp only if the trade's actual start time is
+    // inside its window. Otherwise fall through and re-derive from time.
+    if(_mins!=null&&_mins>=stampedSess.startMin&&_mins<stampedSess.endMin)return t.sessionId;
   }
-  var ms=null;
-  try{
-    var ents=t.entries||[];
-    var arr=ents.map(function(e){return Number(e&&e.time);}).filter(function(n){return !isNaN(n)&&n>0;});
-    if(arr.length>0)ms=Math.min.apply(null,arr);
-  }catch(e){}
-  if(ms==null){var op=Number(t.openedAt);if(!isNaN(op)&&op>0)ms=op;}
-  var mins=null,date=null;
-  if(ms!=null){date=new Date(ms);mins=date.getHours()*60+date.getMinutes();}
-  else{
-    var timeStr=(t.entries&&t.entries[0]&&typeof t.entries[0].time==="string"&&t.entries[0].time)||t.time||null;
-    mins=parseTimeToMinsOfDay(timeStr);
-  }
+  var ms=_ms,date=_date,mins=_mins;
   if(mins==null)return null;
   var day=(date?date.getDay():getNow().getDay());
   // Pass 1: exact match — time falls inside a session window and the day is enabled for it.
