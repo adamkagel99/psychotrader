@@ -2230,7 +2230,7 @@ function CalendarGrid(props){
   // CHANGED: Load goal targets here so the grid can highlight goal-met days/weeks/months.
   var goals=(function(){try{return JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};}catch(e){return {};}})();
   var settingsForTarget=(function(){try{return JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};}catch(e){return {};}})();
-  var dailyTarget=applyHalfsizeToTarget(parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(computeDailyTarget(settingsForTarget)||0));
+  var dailyTarget=parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(computeDailyTarget(settingsForTarget)||0);
   // CHANGED: Per-day daily target scales by that day's stamped riskMax relative to the current
   // full risk setting. Prevents past full-size days from being marked "target met" against a
   // halved threshold (or vice-versa) when half-size mode is toggled later.
@@ -2238,7 +2238,7 @@ function CalendarGrid(props){
   var fullRiskMax=parseFloat(settingsForTarget.riskMax)||0;
   var weeklyMultiplier=parseFloat(goals.weeklyMultiplier)||5;
   var weeklyTarget=parseFloat(goals.weeklyPnL)>0?parseFloat(goals.weeklyPnL):defaultWeeklyFromMonthly(goals,settingsForTarget);
-  var monthlyTarget=(parseFloat(goals.monthlyPnL)||0)||((parseFloat(goals.weeklyPnL)||0)*tradingWeeksThisMonth());
+  var monthlyTarget=(parseFloat(goals.monthlyPnL)||0)||((parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(defaultDailyFromMonthly(goals,settingsForTarget)||0))*tradingDaysThisMonth());
   var now=getPT();
   // CHANGED: When parent provides controlled year/month/onMonthChange, use those instead of
   // local state so a parent (DashboardCalendar) can drive the header readout to match.
@@ -4114,14 +4114,14 @@ function GoalsSnapshot(props){
   var allW=allT.filter(function(t){return parseFloat(t.pnl)>0;});
   var oWR=allT.length>0?allW.length/allT.length*100:0;
   var aDisc=rows.length>0?rows.reduce(function(s,e){return s+calcDiscipline(e.trades||[],e.riskMax,e.commitments?{commitments:e.commitments}:{commitment:e.commitment||null});},0)/rows.length:0;
-  var monthlyTarget=(parseFloat(goals.monthlyPnL)||0)||((parseFloat(goals.weeklyPnL)||0)*tradingWeeksThisMonth());
+  var monthlyTarget=(parseFloat(goals.monthlyPnL)||0)||((parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(defaultDailyFromMonthly(goals,settings)||0))*tradingDaysThisMonth());
   // CHANGED: Daily/weekly default to monthly ÷ trading-days-this-month and daily × 5 respectively.
   // User overrides in goals.dailyPnL / goals.weeklyPnL take precedence when > 0.
   var autoDaily=defaultDailyFromMonthly(goals,settings);
   var weeklyMultiplier=parseFloat(goals.weeklyMultiplier)||5;
   var _userDaily=parseFloat(goals.dailyPnL)||0;
   var _userWeekly=parseFloat(goals.weeklyPnL)||0;
-  var dailyTarget=applyHalfsizeToTarget(_userDaily>0?_userDaily:autoDaily);
+  var dailyTarget=_userDaily>0?_userDaily:autoDaily;
   var weeklyTarget=_userWeekly>0?_userWeekly:defaultWeeklyFromMonthly(goals,settings);
   var winRateTarget=parseFloat(goals.winRate)||0;
   var disciplineTarget=loadDisciplineLockThreshold();
@@ -6024,11 +6024,11 @@ function GoalsTab(props){
   var weekWins=weekTrades.filter(function(t){return parseFloat(t.pnl)>0;}).length;
   var wWR=weekTrades.length>0?weekWins/weekTrades.length*100:0;
 
-  var monthlyTarget=(parseFloat(goals.monthlyPnL)||0)||((parseFloat(goals.weeklyPnL)||0)*tradingWeeksThisMonth());
+  var monthlyTarget=(parseFloat(goals.monthlyPnL)||0)||((parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(defaultDailyFromMonthly(goals,settings)||0))*tradingDaysThisMonth());
   var autoDaily=defaultDailyFromMonthly(goals,settings);
   var _userDaily=parseFloat(goals.dailyPnL)||0;
   var _userWeekly=parseFloat(goals.weeklyPnL)||0;
-  var dailyTarget=applyHalfsizeToTarget(_userDaily>0?_userDaily:autoDaily);
+  var dailyTarget=_userDaily>0?_userDaily:autoDaily;
   var gtRiskMax=parseFloat(settings.riskMax)||0;
   function gtRFmt(v){var r=gtRiskMax>0?v/gtRiskMax:0;return (r>=0?"+":"")+r.toFixed(1)+"R";}
   var pnlFmt=HIDE_DOLLAR_PNL?{formatValue:gtRFmt,formatTarget:gtRFmt}:{};
@@ -7010,10 +7010,16 @@ function RMultipleHistogram(props){
     (r.trades||[]).forEach(function(t){
       if(!t||t.status==="open")return;
       var pnl=parseFloat(t.pnl);if(isNaN(pnl))return;
-      var sf=parseFloat(t.sizeFraction);if(isNaN(sf)||sf<=0)sf=1;
-      var risk=rowRisk*sf;
-      if(risk<=0)return;
-      Rs.push(pnl/risk);
+      // CHANGED: Use canonical tradeR (prefers t.riskMaxAtEntry stamp, falls back to
+      // riskCapDollarsAtEntry/sf, then rowRisk). Keeps R stable if settings.riskMax later changes.
+      var rv=tradeR(t,rowRisk);
+      if(!isFinite(rv)||rv===0&&pnl!==0){
+        var sf=parseFloat(t.sizeFraction);if(isNaN(sf)||sf<=0)sf=1;
+        var risk=rowRisk*sf;
+        if(risk<=0)return;
+        rv=pnl/risk;
+      }
+      Rs.push(rv);
       if(pnl>0)winsDollar.push(pnl);else if(pnl<0)lossesDollar.push(pnl);
     });
   });
@@ -7121,12 +7127,10 @@ function DisciplineScatter(props){
         // Use process-only score so each trade's "discipline so far today" is reflected.
         var score=calcDiscipline(slice,parseFloat(r.riskMax)||0,r.commitments?{processOnly:true,commitments:r.commitments}:{processOnly:true,commitment:r.commitment||null});
         var pnl=parseFloat(t.pnl)||0;
-        // CHANGED: R must use the trade's effective risk cap (riskMax × sizeFraction), matching
-        // the canonical tradeR() used everywhere else. Without this, half-size trades plotted at
-        // half the R the Today strip reports.
-        var sfT=(t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))?parseFloat(t.sizeFraction):1;
-        var rm=(parseFloat(r.riskMax)||0)*sfT;
-        pts.push({date:r.date,score:score,pnl:pnl,pct:sb>0?(pnl/sb*100):0,r:rm>0?(pnl/rm):0,n:1});
+        // CHANGED: Use canonical tradeR (stamped riskMaxAtEntry-preferred) so R matches the
+        // Today strip and R-multiple distribution.
+        var rv=tradeR(t,parseFloat(r.riskMax)||0);
+        pts.push({date:r.date,score:score,pnl:pnl,pct:sb>0?(pnl/sb*100):0,r:rv,n:1});
       });
     });
   }else{
