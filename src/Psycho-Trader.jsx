@@ -8865,11 +8865,11 @@ function SettingsTab(props){
           <div><label style={lbl}>Positive Emotion Bonus</label><input type="number" value={discScoring.posEmotionBonus} onChange={function(e){persistDiscScoring(Object.assign({},discScoring,{posEmotionBonus:parseFloat(e.target.value)||0}));}} style={fld}/></div>
           <div><label style={lbl}>A-Grade Bonus</label><input type="number" value={discScoring.aGradeBonus} onChange={function(e){persistDiscScoring(Object.assign({},discScoring,{aGradeBonus:parseFloat(e.target.value)||0}));}} style={fld}/></div>
           <div><label style={lbl}>C-Grade Penalty</label><input type="number" value={discScoring.cGradePenalty} onChange={function(e){persistDiscScoring(Object.assign({},discScoring,{cGradePenalty:parseFloat(e.target.value)||0}));}} style={fld}/></div>
-          <div><label style={lbl}>Over-Commitment Penalty</label><input type="number" value={discScoring.overTradePenalty!=null?discScoring.overTradePenalty:10} onChange={function(e){persistDiscScoring(Object.assign({},discScoring,{overTradePenalty:parseFloat(e.target.value)||0}));}} style={fld}/></div>
+          <div><label style={lbl}>Trade Cap Exceeded Penalty</label><input type="number" value={discScoring.overTradePenalty!=null?discScoring.overTradePenalty:10} onChange={function(e){persistDiscScoring(Object.assign({},discScoring,{overTradePenalty:parseFloat(e.target.value)||0}));}} style={fld}/></div>
           <div><label style={lbl}>Setup Deviation Penalty</label><input type="number" value={discScoring.setupDeviationPenalty!=null?discScoring.setupDeviationPenalty:10} onChange={function(e){persistDiscScoring(Object.assign({},discScoring,{setupDeviationPenalty:parseFloat(e.target.value)||0}));}} style={fld}/></div>
           <div><label style={lbl}>Setup Adherence Bonus</label><input type="number" value={discScoring.setupAdherenceBonus!=null?discScoring.setupAdherenceBonus:5} onChange={function(e){persistDiscScoring(Object.assign({},discScoring,{setupAdherenceBonus:parseFloat(e.target.value)||0}));}} style={fld}/></div>
         </div>
-        <div style={{fontSize:11,color:"#64748b",marginTop:8,lineHeight:1.5}}>Over-Commitment applies when you exceed your committed max trades; Setup Deviation applies when you mark "No, I deviated" in the day's Commitment Review. Both also forfeit the winning-day bonus.</div>
+        <div style={{fontSize:11,color:"#64748b",marginTop:8,lineHeight:1.5}}>Trade Cap Exceeded applies when you exceed your committed max trades; Setup Deviation applies when you mark "No, I deviated" in the day's Commitment Review. Both also forfeit the winning-day bonus.</div>
         {resetConfirm==="discScoring"?(
           <div style={{marginTop:10,display:"flex",gap:6,alignItems:"center"}}>
             <span style={{fontSize:12,color:"#fdba74",fontWeight:600}}>Reset to defaults?</span>
@@ -9692,6 +9692,25 @@ function App(props){
     var id=setInterval(checkRollover,60000);
     return function(){clearInterval(id);};
   },[state.date]);
+  useEffect(function(){
+    // CHANGED: One-time recalc — refresh today's disciplineScore from current trades + commitments
+    // so any prior stale value gets corrected. Runs once per install.
+    try{
+      if(localStorage.getItem("pt-recalc-today-disc-v2")==="1")return;
+      var k="journal:"+todayStr().replace(/\//g,"-");
+      var raw=localStorage.getItem(k);
+      if(raw){
+        var e=JSON.parse(raw);
+        var ct=(e.trades||[]).filter(function(t){return t&&t.status!=="open";});
+        var opts=(e.commitments&&typeof e.commitments==="object")?{commitments:e.commitments}:{commitment:e.commitment||null};
+        e.disciplineScore=calcDiscipline(ct,e.riskMax,opts);
+        localStorage.setItem(k,JSON.stringify(e));
+      }
+      localStorage.setItem("pt-recalc-today-disc-v2","1");
+      if(bumpReloadKey)bumpReloadKey();
+    }catch(e){}
+  // eslint-disable-next-line
+  },[]);
   useEffect(function(){
     // CHANGED: One-time backfill — stamp riskMaxAtEntry on historical trades (derived from
     // riskCapDollarsAtEntry / sizeFraction). Makes R calcs across the app stable if settings.riskMax
