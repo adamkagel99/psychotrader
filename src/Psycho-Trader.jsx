@@ -885,7 +885,7 @@ function defaultState(){return {date:todayStr(),preChecklist:defaultChecklist(),
 // CHANGED: Each leg gets its own timestamp on creation. Editable in the form.
 function mkEntry(){return {id:Date.now()+Math.random(),contracts:"",price:"",time:Date.now()};}
 function mkExit(){return {id:Date.now()+Math.random(),contracts:"",price:"",time:Date.now()};}
-function mkTrade(){return {id:Date.now(),openedAt:Date.now(),closedAt:null,time:fmtTime(getNow()),assetClass:"",instrument:"",direction:"",entries:[],exits:[],stopLoss:"",contracts:"",positionSize:"",pnl:"",pctPnl:"",setup:"",candlePattern:"",timeframe:"",indicators:[],grade:"",emotions:[],violations:[],notes:"",screenshots:[],strike:"",expiry:"",sessionId:null,sizeFraction:1,status:"closed"};}
+function mkTrade(){return {id:Date.now(),openedAt:Date.now(),closedAt:null,time:fmtTime(getNow()),assetClass:"",instrument:"",direction:"",entries:[{contracts:"",price:"",time:null}],exits:[{contracts:"",price:"",time:null}],stopLoss:"",contracts:"",positionSize:"",pnl:"",pctPnl:"",setup:"",candlePattern:"",timeframe:"",indicators:[],grade:"",emotions:[],violations:[],notes:"",screenshots:[],strike:"",expiry:"",sessionId:null,sizeFraction:1,status:"closed"};}
 // CHANGED: Helpers to merge/read fields on a journal entry by date. Used to persist the
 // discipline-lock note and lock metadata onto the locked day's journal row.
 function updateJournalEntryFields(date,fields){
