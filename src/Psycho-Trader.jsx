@@ -5204,7 +5204,15 @@ function TradesTab(props){
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:14}}>
               <div style={{padding:"8px 10px",background:"#111118",border:"1px solid #1e293b",borderRadius:6}}>
                 <div style={{fontSize:10,color:"#64748b",textTransform:"uppercase",letterSpacing:0.5}}>P&L</div>
-                <div style={{fontSize:16,fontWeight:700,color:sPnl>=0?"#22c55e":"#ef4444",marginTop:3}}>{HIDE_DOLLAR_PNL?(function(){var dateKey=isToday?todayStr():selectedDate;var startBal=getAccountBalanceAtDate(dateKey);var pct=startBal>0?(sPnl/startBal*100):0;return (pct>=0?"+":"")+pct.toFixed(2)+"%";})():((sPnl>=0?"+":"-")+"$"+Math.abs(sPnl).toFixed(2))}</div>
+                <div style={{fontSize:16,fontWeight:700,color:sPnl>=0?"#22c55e":"#ef4444",marginTop:3}}>{(function(){
+                  var dateKey=isToday?todayStr():selectedDate;
+                  var startBal=getAccountBalanceAtDate(dateKey);
+                  var pct=startBal>0?(sPnl/startBal*100):0;
+                  var pctStr=(pct>=0?"+":"")+pct.toFixed(2)+"%";
+                  if(HIDE_DOLLAR_PNL)return pctStr;
+                  var dol=(sPnl>=0?"+":"-")+"$"+Math.abs(sPnl).toFixed(2);
+                  return <>{dol} <span style={{fontSize:11,fontWeight:600,color:"#94a3b8"}}>({pctStr})</span></>;
+                })()}</div>
               </div>
               <div style={{padding:"8px 10px",background:"#111118",border:"1px solid #1e293b",borderRadius:6}}>
                 <div style={{fontSize:10,color:"#64748b",textTransform:"uppercase",letterSpacing:0.5}}>W/L/BE</div>
