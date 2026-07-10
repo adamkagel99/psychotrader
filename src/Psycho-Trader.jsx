@@ -6870,13 +6870,6 @@ function EquityCurve(props){
   // as their first entry), fall back to total lifetime deposits so the % is still meaningful
   // instead of collapsing to 0.00%.
   var pctDenom=startBal;
-  // CHANGED: For all-time / YTD ranges, use total deposits as denominator to match the "Total P&L"
-  // overview card. Prior behavior used balance at first entry — for accounts that grew from a
-  // tiny early balance, this produced eye-popping % returns that didn't match anywhere else.
-  var _rng=(props&&props.range)||"";
-  if(_rng==="all"||_rng==="ytd"){
-    try{var _dep=0;(loadTransfers()||[]).forEach(function(tf){var a=parseFloat(tf.amount)||0;if(a>0)_dep+=a;});if(_dep>0)pctDenom=_dep;}catch(e){}
-  }
   if(!(pctDenom>0)){
     try{
       var dep=0;
