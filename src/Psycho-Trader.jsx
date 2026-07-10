@@ -6918,9 +6918,15 @@ function EquityCurve(props){
           {/* CHANGED: Date is now rendered at the bottom of the chart under the cursor line, not above the readout. */}
           <div style={{fontSize:20,fontWeight:700,color:displayVal>=0?"#22c55e":"#ef4444",fontVariantNumeric:"tabular-nums"}}>{fmt(displayVal)}</div>
         </div>
-        <div style={{textAlign:"right"}}>
-          <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Max Drawdown</div>
-          <div style={{fontSize:13,fontWeight:700,color:"#ef4444",marginTop:4,fontVariantNumeric:"tabular-nums"}}>{fmtDD()}</div>
+        <div style={{textAlign:"right",display:"flex",flexDirection:"column",gap:4}}>
+          <div>
+            <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Starting Balance</div>
+            <div style={{fontSize:12,fontWeight:600,color:"#94a3b8",fontVariantNumeric:"tabular-nums"}}>${Math.round(pctDenom).toLocaleString()}</div>
+          </div>
+          <div>
+            <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Max Drawdown</div>
+            <div style={{fontSize:13,fontWeight:700,color:"#ef4444",fontVariantNumeric:"tabular-nums"}}>{fmtDD()}</div>
+          </div>
         </div>
       </div>
       <svg ref={svgRef} viewBox={"0 0 "+W+" "+H} style={{display:"block",width:"100%",height:"100%",flex:1,minHeight:120,touchAction:"none",cursor:"crosshair"}} preserveAspectRatio="none" onMouseMove={handleMove} onMouseLeave={handleLeave} onTouchStart={handleMove} onTouchMove={handleMove} onTouchEnd={handleLeave}>
