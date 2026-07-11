@@ -1791,8 +1791,16 @@ function ToggleSwitch(props){
 function MultiDropdown(props){
   var options=props.options,selected=props.selected,onChange=props.onChange,negativeOptions=props.negativeOptions||[];
   var [open,setOpen]=useState(false);
+  var rootRef=React.useRef(null);
+  React.useEffect(function(){
+    if(!open)return;
+    function onDown(e){var el=rootRef.current;if(el&&el.contains(e.target))return;setOpen(false);}
+    document.addEventListener("mousedown",onDown);
+    document.addEventListener("touchstart",onDown);
+    return function(){document.removeEventListener("mousedown",onDown);document.removeEventListener("touchstart",onDown);};
+  },[open]);
   return (
-    <div style={{position:"relative"}}>
+    <div ref={rootRef} style={{position:"relative"}}>
       <label style={lbl}>{props.label}</label>
       <button onClick={function(){setOpen(function(o){return !o;});}} style={Object.assign({},fld,{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"})}>
         <span style={{color:selected.length>0?"#e2e8f0":"#64748b",fontSize:14,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"90%"}}>{selected.length>0?selected.join(", "):"Select..."}</span>
@@ -2906,6 +2914,15 @@ function FormSection(props){
 function Dropdown(props){
   var [open,setOpen]=React.useState(false);
   var triggerRef=React.useRef(null);
+  var menuRef=React.useRef(null);
+  // CHANGED: Global outside-click handler — clicking anywhere outside the trigger or menu closes.
+  React.useEffect(function(){
+    if(!open)return;
+    function onDown(e){var t=triggerRef.current,m=menuRef.current;if(t&&t.contains(e.target))return;if(m&&m.contains(e.target))return;setOpen(false);}
+    document.addEventListener("mousedown",onDown);
+    document.addEventListener("touchstart",onDown);
+    return function(){document.removeEventListener("mousedown",onDown);document.removeEventListener("touchstart",onDown);};
+  },[open]);
   // CHANGED: Compute menu position from trigger's bounding rect so the menu can render with
   // position:fixed and escape any ancestor overflow:hidden clipping. Recomputed each open and
   // on scroll/resize while open.
@@ -2948,7 +2965,7 @@ function Dropdown(props){
           <div onClick={function(){setOpen(false);}} style={{position:"fixed",inset:0,zIndex:30}}/>
           {/* CHANGED: Fixed positioning anchored to the trigger's viewport rect — escapes any
              ancestor overflow:hidden so all options render regardless of container clipping. */}
-          <div style={{position:"fixed",top:menuPos.top,left:menuPos.left,minWidth:menuPos.minWidth,zIndex:31,background:"#0a0a0f",border:"1px solid #334155",borderRadius:10,padding:4,boxShadow:"0 8px 24px #00000080",maxHeight:280,overflowY:"auto"}}>
+          <div ref={menuRef} style={{position:"fixed",top:menuPos.top,left:menuPos.left,minWidth:menuPos.minWidth,zIndex:31,background:"#0a0a0f",border:"1px solid #334155",borderRadius:10,padding:4,boxShadow:"0 8px 24px #00000080",maxHeight:280,overflowY:"auto"}}>
             {options.map(function(o){
               var on=o.v===value;
               return (
