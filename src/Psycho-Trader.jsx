@@ -3200,7 +3200,7 @@ function TradeForm(props){
             <div style={{minWidth:0,display:"flex",flexDirection:"column"}}>
               <label style={lbl}>Setup Grade</label>
               <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5,flex:1}}>
-                {["A","B","C"].map(function(g){return <button key={g} onClick={function(){upd("grade",g);}} style={{width:"100%",height:"100%",padding:"10px 12px",background:trade.grade===g?(g==="A"?"#14532d":g==="B"?"#713f12":"#7f1d1d"):"#0a0a0f",border:"1px solid "+(trade.grade===g?(g==="A"?"#22c55e":g==="B"?"#f59e0b":"#ef4444"):"#334155"),borderRadius:8,color:trade.grade===g?"#fff":"#64748b",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",textAlign:"center",boxSizing:"border-box",lineHeight:"20px"}}>{g}</button>;})}
+                {["A","B","C"].map(function(g){return <button key={g} onClick={function(){upd("grade",g);}} style={{width:"100%",padding:"10px 12px",background:trade.grade===g?(g==="A"?"#14532d":g==="B"?"#713f12":"#7f1d1d"):"#0a0a0f",border:"1px solid "+(trade.grade===g?(g==="A"?"#22c55e":g==="B"?"#f59e0b":"#ef4444"):"#334155"),borderRadius:8,color:trade.grade===g?"#fff":"#64748b",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",boxSizing:"border-box"}}>{g}</button>;})}
               </div>
             </div>
             <div style={{minWidth:0}}>
@@ -3251,17 +3251,20 @@ function TradeForm(props){
                     <div>
                       <label style={lblCompact}>{qtyLabel} #{i+1}</label>
                       {(function(){
-                        // CHANGED: Suggested contract count = grade-scaled position range ÷ leg cost.
-                        // Rendered as the input's placeholder so it shows in-box when empty.
+                        // CHANGED: Suggested contract count = REMAINING grade-scaled position budget ÷ leg cost.
+                        // For entry #N, we subtract the dollar cost of prior filled legs (contracts × price × mult).
                         var cost=parseFloat(en.price)||0;
                         var pMin=parseFloat(props.displayPosMin)||0;
                         var pMax=parseFloat(props.displayPosMax)||0;
                         var g=trade&&trade.grade;var mult=g==="A"?1:g==="B"?0.75:g==="C"?0.5:1;
                         pMin=pMin*mult;pMax=pMax*mult;
                         var mult2=1;try{var ac=getAssetClass(trade.assetClass);if(ac&&ac.multiplier)mult2=ac.multiplier;}catch(e){}
+                        var spent=0;
+                        for(var pi=0;pi<i;pi++){var pe=(trade.entries||[])[pi];var pc=parseFloat(pe&&pe.contracts)||0;var pp=parseFloat(pe&&pe.price)||0;if(pc>0&&pp>0)spent+=pc*pp*mult2;}
+                        var remMin=Math.max(0,pMin-spent),remMax=Math.max(0,pMax-spent);
                         var ph="";
-                        if(cost>0&&pMax>0){var minSug=Math.floor(pMin/(cost*mult2));var maxSug=Math.floor(pMax/(cost*mult2));if(maxSug>0)ph="suggested "+(minSug===maxSug?minSug:minSug+"–"+maxSug);}
-                        return <input type="text" defaultValue={en.contracts} placeholder={ph} onBlur={function(e){var val=e.target.value;st(function(prev){var ne=prev.entries.map(function(x,xi){return xi===i?Object.assign({},x,{contracts:val}):x;});return Object.assign({},prev,doRecalc(ne,prev.exits||[],prev.assetClass,prev.instrument,prev.direction));});}} style={compactFld}/>;
+                        if(cost>0&&remMax>0){var minSug=Math.floor(remMin/(cost*mult2));var maxSug=Math.floor(remMax/(cost*mult2));if(maxSug>0)ph="suggested "+(minSug===maxSug?minSug:minSug+"–"+maxSug);}
+                        return <input type="text" value={en.contracts||""} placeholder={ph} onChange={function(e){var val=e.target.value;st(function(prev){var ne=prev.entries.map(function(x,xi){return xi===i?Object.assign({},x,{contracts:val}):x;});return Object.assign({},prev,doRecalc(ne,prev.exits||[],prev.assetClass,prev.instrument,prev.direction));});}} style={compactFld}/>;
                       })()}
                     </div>
                     <button onClick={function(){st(function(prev){var ne=prev.entries.filter(function(_,xi){return xi!==i;});return Object.assign({},prev,doRecalc(ne,prev.exits||[],prev.assetClass,prev.instrument,prev.direction));});}} style={{padding:density>=2?"6px 9px":"8px 10px",background:"#7f1d1d44",border:"1px solid #7f1d1d",borderRadius:6,color:"#fca5a5",fontSize:13,cursor:"pointer",fontFamily:"inherit",marginBottom:1}}>X</button>
@@ -3318,8 +3321,8 @@ function TradeForm(props){
               return (
                 <div key={ex.id} style={{marginBottom:rowGap+2}}>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:rowGap,alignItems:"end"}}>
-                    <div><label style={lblCompact}>{priceLabel} #{i+1}</label><input type="text" defaultValue={ex.price} onBlur={function(e){var val=e.target.value;st(function(prev){var ne=prev.exits.map(function(x,xi){return xi===i?Object.assign({},x,{price:val}):x;});return Object.assign({},prev,doRecalc(prev.entries||[],ne,prev.assetClass,prev.instrument,prev.direction));});}} style={compactFld}/></div>
-                    <div><label style={lblCompact}>{qtyLabel} #{i+1}</label><input type="text" defaultValue={ex.contracts} onBlur={function(e){var val=e.target.value;st(function(prev){var ne=prev.exits.map(function(x,xi){return xi===i?Object.assign({},x,{contracts:val}):x;});return Object.assign({},prev,doRecalc(prev.entries||[],ne,prev.assetClass,prev.instrument,prev.direction));});}} style={compactFld}/></div>
+                    <div><label style={lblCompact}>{priceLabel} #{i+1}</label><input type="text" value={ex.price||""} onChange={function(e){var val=e.target.value;st(function(prev){var ne=prev.exits.map(function(x,xi){return xi===i?Object.assign({},x,{price:val}):x;});return Object.assign({},prev,doRecalc(prev.entries||[],ne,prev.assetClass,prev.instrument,prev.direction));});}} style={compactFld}/></div>
+                    <div><label style={lblCompact}>{qtyLabel} #{i+1}</label><input type="text" value={ex.contracts||""} onChange={function(e){var val=e.target.value;st(function(prev){var ne=prev.exits.map(function(x,xi){return xi===i?Object.assign({},x,{contracts:val}):x;});return Object.assign({},prev,doRecalc(prev.entries||[],ne,prev.assetClass,prev.instrument,prev.direction));});}} style={compactFld}/></div>
                     <button onClick={function(){st(function(prev){var ne=prev.exits.filter(function(_,xi){return xi!==i;});return Object.assign({},prev,doRecalc(prev.entries||[],ne,prev.assetClass,prev.instrument,prev.direction));});}} style={{padding:density>=2?"6px 9px":"8px 10px",background:"#7f1d1d44",border:"1px solid #7f1d1d",borderRadius:6,color:"#fca5a5",fontSize:13,cursor:"pointer",fontFamily:"inherit",marginBottom:1}}>X</button>
                   </div>
                   {/* CHANGED: Per-leg time row — read-only display + Edit toggle. */}
