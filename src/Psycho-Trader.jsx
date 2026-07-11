@@ -3053,18 +3053,29 @@ function TradeForm(props){
         </div>
         {/* CHANGED: Show current allowed position & risk sizing as a quick reference at top of form.
             These are planning inputs and always show $ (even when hide-$ is enabled elsewhere). */}
-        {(props.displayPosMin!=null||props.displayRiskMin!=null)&&(
-          <div style={{padding:"8px 16px",borderBottom:"1px solid #1e293b",display:"flex",gap:16,flexShrink:0,background:"#0a0a0f"}}>
+        {(props.displayPosMin!=null||props.displayRiskMin!=null)&&(function(){
+          // CHANGED: Scale display by setup grade — A=1.0, B=0.75, C=0.50. If no grade selected,
+          // show the full-size range with a hint to pick a grade.
+          var g=trade&&trade.grade;
+          var mult=g==="A"?1:g==="B"?0.75:g==="C"?0.5:1;
+          var pMin=Math.round((parseFloat(props.displayPosMin)||0)*mult);
+          var pMax=Math.round((parseFloat(props.displayPosMax)||0)*mult);
+          var rMin=Math.round((parseFloat(props.displayRiskMin)||0)*mult);
+          var rMax=Math.round((parseFloat(props.displayRiskMax)||0)*mult);
+          return (
+          <div style={{padding:"8px 16px",borderBottom:"1px solid #1e293b",display:"flex",gap:16,flexShrink:0,background:"#0a0a0f",alignItems:"center"}}>
             <div style={{flex:1}}>
-              <div style={{fontSize:9,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Position</div>
-              <div style={{fontSize:14,fontWeight:700,color:"#818cf8",marginTop:2}}>{"$"+props.displayPosMin+" "}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500}}>– ${props.displayPosMax}</span></div>
+              <div style={{fontSize:9,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Position{g?" · "+g+" grade":""}</div>
+              <div style={{fontSize:14,fontWeight:700,color:"#818cf8",marginTop:2}}>{"$"+pMin+" "}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500}}>– ${pMax}</span></div>
             </div>
             <div style={{flex:1}}>
-              <div style={{fontSize:9,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Risk</div>
-              <div style={{fontSize:14,fontWeight:700,color:"#ef4444",marginTop:2}}>{"$"+props.displayRiskMin+" "}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500}}>– ${props.displayRiskMax}</span></div>
+              <div style={{fontSize:9,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Risk{g?" · "+g+" grade":""}</div>
+              <div style={{fontSize:14,fontWeight:700,color:"#ef4444",marginTop:2}}>{"$"+rMin+" "}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500}}>– ${rMax}</span></div>
             </div>
+            {!g&&<div style={{fontSize:10,color:"#fbbf24",whiteSpace:"nowrap"}}>Pick grade → A/B/C scales</div>}
           </div>
-        )}
+          );
+        })()}
         <div style={{flex:1,overflowY:"auto",padding:density>=3?"8px 12px":density>=2?"10px 13px":"12px 14px"}}>
           <div style={{maxWidth:props.mobile?"none":760,margin:"0 auto"}}>
           {showHelper&&<div style={{background:"#1e1b4b33",border:"1px solid #4338ca44",borderRadius:8,padding:"7px 12px",marginBottom:10,fontSize:12,color:"#a5b4fc"}}>Am I entering based on a signal or impulse?</div>}
@@ -3175,7 +3186,18 @@ function TradeForm(props){
               })()}
             </div>
           )}
-          <FormSection label="Setup & Analysis" mb={sectionMb} hasContent={!!(trade.direction||trade.setup||trade.timeframe||trade.candlePattern||(trade.indicators||[]).length)}>
+          <FormSection label="Setup & Analysis" mb={sectionMb} hasContent={!!(trade.direction||trade.setup||trade.timeframe||trade.candlePattern||trade.grade||(trade.emotions||[]).length||(trade.indicators||[]).length)}>
+          {/* CHANGED: Setup Grade + Emotional State moved to the top of Setup & Analysis. Grade
+             buttons match the height of the emotion dropdown so the row aligns. */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:rowGap,marginBottom:sectionMb}}>
+            <div>
+              <label style={lblCompact}>Setup Grade</label>
+              <div style={{display:"flex",gap:5}}>
+                {["A","B","C"].map(function(g){return <button key={g} onClick={function(){upd("grade",g);}} style={Object.assign({},compactFld,{flex:1,padding:0,background:trade.grade===g?(g==="A"?"#14532d":g==="B"?"#713f12":"#7f1d1d"):"#0a0a0f",border:"1px solid "+(trade.grade===g?(g==="A"?"#22c55e":g==="B"?"#f59e0b":"#ef4444"):"#334155"),color:trade.grade===g?"#fff":"#64748b",fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center"})}>{g}</button>;})}
+              </div>
+            </div>
+            <MultiDropdown label="Emotional State" options={opts.emotion} selected={trade.emotions||[]} onChange={function(v){upd("emotions",v);}} negativeOptions={(opts.emotion||[]).filter(function(e){return getEmotionSentiment(e,opts.emotionSentiments||{})==="negative";})}/>
+          </div>
           {(function(){
             // CHANGED: Setup dropdown is only shown here when editing an existing trade.
             // For new trades, Setup is already chosen above the pre-trade checklist.
@@ -3301,16 +3323,7 @@ function TradeForm(props){
             </div>
           )}
           {/* ── SECTION: REVIEW ────────────────────────────────── */}
-          <FormSection label="Review" mb={sectionMb} hasContent={!!(trade.grade||(trade.emotions||[]).length||(trade.violations||[]).length||trade.notes)}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:rowGap,marginBottom:fldHeader}}>
-            <div>
-              <label style={lblCompact}>Setup Grade</label>
-              <div style={{display:"flex",gap:5}}>
-                {["A","B","C"].map(function(g){return <button key={g} onClick={function(){upd("grade",g);}} style={{flex:1,padding:density>=2?"5px 0":"7px 0",background:trade.grade===g?(g==="A"?"#14532d":g==="B"?"#713f12":"#7f1d1d"):"#1e293b",border:"1px solid "+(trade.grade===g?(g==="A"?"#22c55e":g==="B"?"#f59e0b":"#ef4444"):"#334155"),borderRadius:6,color:trade.grade===g?"#fff":"#64748b",fontSize:density>=2?12:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{g}</button>;})}
-              </div>
-            </div>
-            <MultiDropdown label="Emotional State" options={opts.emotion} selected={trade.emotions||[]} onChange={function(v){upd("emotions",v);}} negativeOptions={(opts.emotion||[]).filter(function(e){return getEmotionSentiment(e,opts.emotionSentiments||{})==="negative";})}/>
-          </div>
+          <FormSection label="Review" mb={sectionMb} hasContent={!!((trade.violations||[]).length||trade.notes)}>
           <div style={{marginBottom:sectionMb}}><MultiDropdown label="Rule Violations" options={opts.violation} selected={trade.violations||[]} onChange={function(v){upd("violations",v);}} negativeOptions={opts.violation}/></div>
           <div style={{marginBottom:sectionMb}}>
             <label style={lblCompact}>Quick Note</label>
