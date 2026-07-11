@@ -3189,14 +3189,16 @@ function TradeForm(props){
           <FormSection label="Setup & Analysis" mb={sectionMb} hasContent={!!(trade.direction||trade.setup||trade.timeframe||trade.candlePattern||trade.grade||(trade.emotions||[]).length||(trade.indicators||[]).length)}>
           {/* CHANGED: Setup Grade + Emotional State moved to the top of Setup & Analysis. Grade
              buttons match the height of the emotion dropdown so the row aligns. */}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:rowGap,marginBottom:sectionMb}}>
-            <div>
-              <label style={lblCompact}>Setup Grade</label>
-              <div style={{display:"flex",gap:5}}>
-                {["A","B","C"].map(function(g){return <button key={g} onClick={function(){upd("grade",g);}} style={Object.assign({},compactFld,{flex:1,padding:0,background:trade.grade===g?(g==="A"?"#14532d":g==="B"?"#713f12":"#7f1d1d"):"#0a0a0f",border:"1px solid "+(trade.grade===g?(g==="A"?"#22c55e":g==="B"?"#f59e0b":"#ef4444"):"#334155"),color:trade.grade===g?"#fff":"#64748b",fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center"})}>{g}</button>;})}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:rowGap,marginBottom:sectionMb,alignItems:"stretch"}}>
+            <div style={{minWidth:0,display:"flex",flexDirection:"column"}}>
+              <label style={lbl}>Setup Grade</label>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5,flex:1}}>
+                {["A","B","C"].map(function(g){return <button key={g} onClick={function(){upd("grade",g);}} style={{width:"100%",height:"100%",padding:"10px 12px",background:trade.grade===g?(g==="A"?"#14532d":g==="B"?"#713f12":"#7f1d1d"):"#0a0a0f",border:"1px solid "+(trade.grade===g?(g==="A"?"#22c55e":g==="B"?"#f59e0b":"#ef4444"):"#334155"),borderRadius:8,color:trade.grade===g?"#fff":"#64748b",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",textAlign:"center",boxSizing:"border-box",lineHeight:"20px"}}>{g}</button>;})}
               </div>
             </div>
-            <MultiDropdown label="Emotional State" options={opts.emotion} selected={trade.emotions||[]} onChange={function(v){upd("emotions",v);}} negativeOptions={(opts.emotion||[]).filter(function(e){return getEmotionSentiment(e,opts.emotionSentiments||{})==="negative";})}/>
+            <div style={{minWidth:0}}>
+              <MultiDropdown label="Emotional State" options={opts.emotion} selected={trade.emotions||[]} onChange={function(v){upd("emotions",v);}} negativeOptions={(opts.emotion||[]).filter(function(e){return getEmotionSentiment(e,opts.emotionSentiments||{})==="negative";})}/>
+            </div>
           </div>
           {(function(){
             // CHANGED: Setup dropdown is only shown here when editing an existing trade.
