@@ -2760,7 +2760,16 @@ function TradeTile(props){
           {isOpen&&<span style={{fontSize:10,padding:"2px 7px",background:"#7c2d1244",border:"1px solid #ea580c",borderRadius:3,color:"#fb923c",fontWeight:700,letterSpacing:0.5}}>OPEN</span>}
         </div>
         {showButtons&&(
-          <div style={{display:"flex",gap:5,flexShrink:0}}>
+          <div style={{display:"flex",gap:5,flexShrink:0,alignItems:"center"}}>
+            {(function(){
+              // CHANGED: Day discipline score badge. Prefers explicit prop; falls back to trade's
+              // stamped _dayDiscScore. Colored green ≥ threshold, red below.
+              var ds=props.disciplineScore!=null?parseFloat(props.disciplineScore):parseFloat(t._dayDiscScore);
+              if(isNaN(ds))return null;
+              var th=loadDisciplineLockThreshold();
+              var good=ds>=th;
+              return <span title={"Day discipline score"} style={{fontSize:10,padding:"3px 7px",borderRadius:4,background:good?"#14532d":"#7f1d1d",color:good?"#86efac":"#fca5a5",fontWeight:700,letterSpacing:0.5,border:"1px solid "+(good?"#22c55e":"#ef4444")}}>D {Math.round(ds)}</span>;
+            })()}
             {onEdit&&<button onClick={onEdit} style={{padding:"4px 10px",background:"transparent",border:"1px solid #334155",borderRadius:4,color:"#94a3b8",fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:600,letterSpacing:0.4}}>Edit</button>}
             {onDelete&&<button onClick={onDelete} aria-label="Delete" style={{padding:"4px 9px",background:"transparent",border:"1px solid #334155",borderRadius:4,color:"#64748b",fontSize:13,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>}
           </div>
@@ -4630,7 +4639,11 @@ function TradesTab(props){
   function startEdit(t){setEditingId(t.id);setEditDraft(Object.assign({},t));}
   function cancelEdit(){setEditingId(null);setEditDraft(null);}
   var [pickerOpen,setPickerOpen]=useState(false);
-  var [selectedDate,setSelectedDate]=useState(props.initialDate||todayStr());
+  var [selectedDate,setSelectedDate]=useState(function(){
+    try{var saved=localStorage.getItem("pt-journal-selected-date");if(saved)return saved;}catch(e){}
+    return props.initialDate||todayStr();
+  });
+  useEffect(function(){try{localStorage.setItem("pt-journal-selected-date",selectedDate);}catch(e){}},[selectedDate]);
   var [pastSessions,setPastSessions]=useState([]);
   // CHANGED: Track today's saved journal entry so we can render its summary after save.
   var [todayJournalEntry,setTodayJournalEntry]=useState(null);
@@ -4758,7 +4771,8 @@ function TradesTab(props){
     {key:"emotions",label:"Emotional State",options:opts.emotion},
     {key:"violations",label:"Rule Violations",options:["None"].concat(ALL_VIOLATIONS)},
     {key:"rBucket",label:"R Return",options:["Below -1R","-1R to 0R","Breakeven","0R to 1R","1R to 2R","2R+"]},
-    {key:"discBucket",label:"Discipline",options:["Clean (≥"+loadDisciplineLockThreshold()+")","Broken (<"+loadDisciplineLockThreshold()+")"]}
+    {key:"discBucket",label:"Discipline",options:["Clean (≥"+loadDisciplineLockThreshold()+")","Broken (<"+loadDisciplineLockThreshold()+")"]},
+    {key:"sessionBucket",label:"Session",options:(function(){var arr=(getSessions(settings)||[]).filter(function(s){return s.enabled!==false;}).map(function(s){return s.name||s.label||s.id;});arr.push("Out of Session");return arr;})()}
   ];
   var activeFilterCount=Object.values(filters).filter(function(v){return v&&v.length>0;}).length;
   var _rmForFilter=parseFloat(settings.riskMax)||0;
@@ -4774,7 +4788,7 @@ function TradesTab(props){
   // CHANGED: Stamp the day's disciplineScore on each trade so the Discipline filter can bucket.
   var _dayDisc=parseFloat(isToday?(state.disciplineScore||NaN):(pastSession&&pastSession.disciplineScore));
   var displayTrades=rawTrades.slice().filter(function(t){return t.status!=="open";}).map(function(t){return Object.assign({},t,{_dayDiscScore:_dayDisc});});
-  filterDefs.forEach(function(fd){var sel=filters[fd.key];if(!sel||!sel.length)return;displayTrades=displayTrades.filter(function(t){if(fd.key==="emotions")return(t[fd.key]||[]).some(function(e){return sel.indexOf(e)>=0;});if(fd.key==="violations"){var v=t.violations||[];if(sel.indexOf("None")>=0&&v.length===0)return true;return v.some(function(e){return sel.indexOf(e)>=0;});}if(fd.key==="rBucket")return sel.indexOf(_rBucketOf(t))>=0;if(fd.key==="discBucket"){var ds=parseFloat(t._dayDiscScore);if(isNaN(ds))return false;var th=loadDisciplineLockThreshold();var b=ds>=th?"Clean (≥"+th+")":"Broken (<"+th+")";return sel.indexOf(b)>=0;}return sel.indexOf(t[fd.key])>=0;});});
+  filterDefs.forEach(function(fd){var sel=filters[fd.key];if(!sel||!sel.length)return;displayTrades=displayTrades.filter(function(t){if(fd.key==="emotions")return(t[fd.key]||[]).some(function(e){return sel.indexOf(e)>=0;});if(fd.key==="violations"){var v=t.violations||[];if(sel.indexOf("None")>=0&&v.length===0)return true;return v.some(function(e){return sel.indexOf(e)>=0;});}if(fd.key==="rBucket")return sel.indexOf(_rBucketOf(t))>=0;if(fd.key==="discBucket"){var ds=parseFloat(t._dayDiscScore);if(isNaN(ds))return false;var th=loadDisciplineLockThreshold();var b=ds>=th?"Clean (≥"+th+")":"Broken (<"+th+")";return sel.indexOf(b)>=0;}if(fd.key==="sessionBucket"){var sid=null;try{sid=getSessionForTrade(t);}catch(e){}if(!sid)return sel.indexOf("Out of Session")>=0;var sess=(getSessions(settings)||[]).find(function(x){return x.id===sid;});var nm=sess?(sess.name||sess.label||sess.id):sid;return sel.indexOf(nm)>=0;}return sel.indexOf(t[fd.key])>=0;});});
   // CHANGED: Multi-level sort. Each sort id maps to a comparator; the chain applies them in
   // priority order, falling through to the next only when the current one ties. An empty chain
   // (or only "timestamp") defaults to chronological by openedAt.
@@ -4834,7 +4848,7 @@ function TradesTab(props){
       var _tds=parseFloat(isToday?(state.disciplineScore||NaN):(pastSession&&pastSession.disciplineScore));
       (state.trades||[]).forEach(function(t){if(t.status!=="open")all.push(Object.assign({},t,{date:todayKeyLocal,_dayDiscScore:_tds}));});
     }catch(e){}
-    filterDefs.forEach(function(fd){var sel=filters[fd.key];if(!sel||!sel.length)return;all=all.filter(function(t){if(fd.key==="emotions")return(t[fd.key]||[]).some(function(e){return sel.indexOf(e)>=0;});if(fd.key==="violations"){var v=t.violations||[];if(sel.indexOf("None")>=0&&v.length===0)return true;return v.some(function(e){return sel.indexOf(e)>=0;});}if(fd.key==="rBucket")return sel.indexOf(_rBucketOf(t))>=0;if(fd.key==="discBucket"){var ds=parseFloat(t._dayDiscScore);if(isNaN(ds))return false;var th=loadDisciplineLockThreshold();var b=ds>=th?"Clean (≥"+th+")":"Broken (<"+th+")";return sel.indexOf(b)>=0;}return sel.indexOf(t[fd.key])>=0;});});
+    filterDefs.forEach(function(fd){var sel=filters[fd.key];if(!sel||!sel.length)return;all=all.filter(function(t){if(fd.key==="emotions")return(t[fd.key]||[]).some(function(e){return sel.indexOf(e)>=0;});if(fd.key==="violations"){var v=t.violations||[];if(sel.indexOf("None")>=0&&v.length===0)return true;return v.some(function(e){return sel.indexOf(e)>=0;});}if(fd.key==="rBucket")return sel.indexOf(_rBucketOf(t))>=0;if(fd.key==="discBucket"){var ds=parseFloat(t._dayDiscScore);if(isNaN(ds))return false;var th=loadDisciplineLockThreshold();var b=ds>=th?"Clean (≥"+th+")":"Broken (<"+th+")";return sel.indexOf(b)>=0;}if(fd.key==="sessionBucket"){var sid=null;try{sid=getSessionForTrade(t);}catch(e){}if(!sid)return sel.indexOf("Out of Session")>=0;var sess=(getSessions(settings)||[]).find(function(x){return x.id===sid;});var nm=sess?(sess.name||sess.label||sess.id):sid;return sel.indexOf(nm)>=0;}return sel.indexOf(t[fd.key])>=0;});});
     all.sort(makeChainCmp(sortChain,true));
     return all;
   })();
