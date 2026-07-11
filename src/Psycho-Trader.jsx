@@ -3226,7 +3226,17 @@ function TradeForm(props){
           {formSections.candlePattern!==false&&(
           <div style={{marginBottom:sectionMb}}>
             <label style={lblCompact}>Candle Pattern</label>
-            <Dropdown value={trade.candlePattern||""} onChange={function(v){upd("candlePattern",v);}} placeholder="Select..." options={[{v:"",l:"Select..."}].concat(opts.candlePattern.map(function(p){return {v:p,l:p};}))} style={compactFld}/>
+            {(function(){
+              // CHANGED: Read patternSetups (pattern → setups). When a setup is selected, allowed
+              // patterns = those whose tag list includes this setup, OR patterns with no tags
+              // (unconstrained). No setup selected = all patterns.
+              var pss=(settings&&settings.patternSetups)||{};
+              var allowed=opts.candlePattern;
+              if(trade.setup){
+                allowed=opts.candlePattern.filter(function(p){var tags=pss[p];return !Array.isArray(tags)||tags.length===0||tags.indexOf(trade.setup)>=0;});
+              }
+              return <Dropdown value={trade.candlePattern||""} onChange={function(v){upd("candlePattern",v);}} placeholder="Select..." options={[{v:"",l:"Select..."}].concat(allowed.map(function(p){return {v:p,l:p};}))} style={compactFld}/>;
+            })()}
           </div>
           )}
           {formSections.indicators!==false&&(
@@ -4716,7 +4726,8 @@ function TradesTab(props){
     {key:"grade",label:"Setup Grade",options:["A","B","C"]},
     {key:"emotions",label:"Emotional State",options:opts.emotion},
     {key:"violations",label:"Rule Violations",options:["None"].concat(ALL_VIOLATIONS)},
-    {key:"rBucket",label:"R Return",options:["Below -1R","-1R to 0R","Breakeven","0R to 1R","1R to 2R","2R+"]}
+    {key:"rBucket",label:"R Return",options:["Below -1R","-1R to 0R","Breakeven","0R to 1R","1R to 2R","2R+"]},
+    {key:"discBucket",label:"Discipline",options:["Clean (≥"+loadDisciplineLockThreshold()+")","Broken (<"+loadDisciplineLockThreshold()+")"]}
   ];
   var activeFilterCount=Object.values(filters).filter(function(v){return v&&v.length>0;}).length;
   var _rmForFilter=parseFloat(settings.riskMax)||0;
@@ -4729,8 +4740,10 @@ function TradesTab(props){
     if(r<2)return "1R to 2R";
     return "2R+";
   }
-  var displayTrades=rawTrades.slice().filter(function(t){return t.status!=="open";});
-  filterDefs.forEach(function(fd){var sel=filters[fd.key];if(!sel||!sel.length)return;displayTrades=displayTrades.filter(function(t){if(fd.key==="emotions")return(t[fd.key]||[]).some(function(e){return sel.indexOf(e)>=0;});if(fd.key==="violations"){var v=t.violations||[];if(sel.indexOf("None")>=0&&v.length===0)return true;return v.some(function(e){return sel.indexOf(e)>=0;});}if(fd.key==="rBucket")return sel.indexOf(_rBucketOf(t))>=0;return sel.indexOf(t[fd.key])>=0;});});
+  // CHANGED: Stamp the day's disciplineScore on each trade so the Discipline filter can bucket.
+  var _dayDisc=parseFloat(viewEntry&&viewEntry.disciplineScore);
+  var displayTrades=rawTrades.slice().filter(function(t){return t.status!=="open";}).map(function(t){return Object.assign({},t,{_dayDiscScore:_dayDisc});});
+  filterDefs.forEach(function(fd){var sel=filters[fd.key];if(!sel||!sel.length)return;displayTrades=displayTrades.filter(function(t){if(fd.key==="emotions")return(t[fd.key]||[]).some(function(e){return sel.indexOf(e)>=0;});if(fd.key==="violations"){var v=t.violations||[];if(sel.indexOf("None")>=0&&v.length===0)return true;return v.some(function(e){return sel.indexOf(e)>=0;});}if(fd.key==="rBucket")return sel.indexOf(_rBucketOf(t))>=0;if(fd.key==="discBucket"){var ds=parseFloat(t._dayDiscScore);if(isNaN(ds))return false;var th=loadDisciplineLockThreshold();var b=ds>=th?"Clean (≥"+th+")":"Broken (<"+th+")";return sel.indexOf(b)>=0;}return sel.indexOf(t[fd.key])>=0;});});
   // CHANGED: Multi-level sort. Each sort id maps to a comparator; the chain applies them in
   // priority order, falling through to the next only when the current one ties. An empty chain
   // (or only "timestamp") defaults to chronological by openedAt.
@@ -4784,11 +4797,13 @@ function TradesTab(props){
       var todayKeyLocal=todayStr();
       loadJournalRows().forEach(function(entry){
         if(entry.date===todayKeyLocal)return;
-        (entry.trades||[]).forEach(function(t){if(t.status!=="open")all.push(Object.assign({},t,{date:entry.date}));});
+        var ds=parseFloat(entry.disciplineScore);
+        (entry.trades||[]).forEach(function(t){if(t.status!=="open")all.push(Object.assign({},t,{date:entry.date,_dayDiscScore:ds}));});
       });
-      (state.trades||[]).forEach(function(t){if(t.status!=="open")all.push(Object.assign({},t,{date:todayKeyLocal}));});
+      var _tds=parseFloat((viewEntry&&viewEntry.disciplineScore));
+      (state.trades||[]).forEach(function(t){if(t.status!=="open")all.push(Object.assign({},t,{date:todayKeyLocal,_dayDiscScore:_tds}));});
     }catch(e){}
-    filterDefs.forEach(function(fd){var sel=filters[fd.key];if(!sel||!sel.length)return;all=all.filter(function(t){if(fd.key==="emotions")return(t[fd.key]||[]).some(function(e){return sel.indexOf(e)>=0;});if(fd.key==="violations"){var v=t.violations||[];if(sel.indexOf("None")>=0&&v.length===0)return true;return v.some(function(e){return sel.indexOf(e)>=0;});}if(fd.key==="rBucket")return sel.indexOf(_rBucketOf(t))>=0;return sel.indexOf(t[fd.key])>=0;});});
+    filterDefs.forEach(function(fd){var sel=filters[fd.key];if(!sel||!sel.length)return;all=all.filter(function(t){if(fd.key==="emotions")return(t[fd.key]||[]).some(function(e){return sel.indexOf(e)>=0;});if(fd.key==="violations"){var v=t.violations||[];if(sel.indexOf("None")>=0&&v.length===0)return true;return v.some(function(e){return sel.indexOf(e)>=0;});}if(fd.key==="rBucket")return sel.indexOf(_rBucketOf(t))>=0;if(fd.key==="discBucket"){var ds=parseFloat(t._dayDiscScore);if(isNaN(ds))return false;var th=loadDisciplineLockThreshold();var b=ds>=th?"Clean (≥"+th+")":"Broken (<"+th+")";return sel.indexOf(b)>=0;}return sel.indexOf(t[fd.key])>=0;});});
     all.sort(makeChainCmp(sortChain,true));
     return all;
   })();
@@ -9344,6 +9359,34 @@ function SettingsTab(props){
         <OptionsEditor label="Indicators" values={tradeOptions.indicator||[]} onChange={function(v){var no=Object.assign({},tradeOptions,{indicator:v});setTradeOptions(no);saveOptions(no);}}/>
         <OptionsEditor label="Emotions" values={tradeOptions.emotion} onChange={function(v){var no=Object.assign({},tradeOptions,{emotion:v});setTradeOptions(no);saveOptions(no);}} sentiments={tradeOptions.emotionSentiments} onSentimentChange={function(ns){var no=Object.assign({},tradeOptions,{emotionSentiments:ns});setTradeOptions(no);saveOptions(no);}}/>
         <OptionsEditor label="Rule Violations" values={tradeOptions.violation} onChange={function(v){var no=Object.assign({},tradeOptions,{violation:v});setTradeOptions(no);saveOptions(no);}}/>
+        {/* CHANGED: Per-pattern setup tags. Each candle pattern lists which setups it's valid for.
+           Setups with 0 tagged patterns show all patterns (unconstrained). Setups with 1+ tagged
+           patterns only show those. Flipping the direction (patterns → setups instead of setups
+           → patterns) means adding a new pattern doesn't require revisiting every setup. */}
+        {(function(){
+          var setups=tradeOptions.setup||[];
+          var patterns=tradeOptions.candlePattern||[];
+          var pss=(settings&&settings.patternSetups)||{};
+          function persist(next){setSettings(function(s){return Object.assign({},s,{patternSetups:next});});}
+          if(setups.length===0||patterns.length===0)return null;
+          return <div style={{marginTop:12,padding:"10px 12px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8}}>
+            <div style={{fontSize:11,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:600,marginBottom:6}}>Pattern → Setup Tagging</div>
+            <div style={{fontSize:11,color:"#64748b",marginBottom:10,lineHeight:1.4}}>For each pattern, tap the setups where it applies. A setup with zero tags accepts all patterns; a setup with at least one tag only shows those tagged patterns.</div>
+            {patterns.map(function(p){
+              var tags=Array.isArray(pss[p])?pss[p]:[];
+              return <div key={p} style={{padding:"7px 0",borderBottom:"1px solid #1e293b",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                <div style={{fontSize:12,fontWeight:600,color:"#e2e8f0",minWidth:110}}>{p}</div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                  {setups.map(function(su){
+                    var on=tags.indexOf(su)>=0;
+                    return <button key={su} onClick={function(){var next=Object.assign({},pss);var arr=Array.isArray(next[p])?next[p].slice():[];var idx=arr.indexOf(su);if(idx>=0)arr.splice(idx,1);else arr.push(su);next[p]=arr;persist(next);}} style={{padding:"2px 8px",fontSize:11,background:on?"#1e1b4b":"transparent",border:"1px solid "+(on?"#4338ca":"#334155"),borderRadius:12,color:on?"#a5b4fc":"#64748b",cursor:"pointer",fontFamily:"inherit"}}>{su}</button>;
+                  })}
+                  {tags.length===0&&<span style={{fontSize:10,color:"#475569",fontStyle:"italic",marginLeft:4}}>(all setups)</span>}
+                </div>
+              </div>;
+            })}
+          </div>;
+        })()}
         <div style={{fontSize:11,color:"#64748b",marginTop:-4,marginBottom:8,lineHeight:1.5,paddingLeft:2}}>"Max risk exceeded" is applied automatically to any losing trade whose loss exceeds your risk max % (scaled by session size), so it isn't listed here.</div>
         <div style={{fontSize:11,color:"#64748b",marginTop:-4,marginBottom:8,lineHeight:1.5,paddingLeft:2}}>"Oversized entry" is applied automatically to any trade whose position size exceeds your position max (set when the trade was logged), so it isn't listed here.</div>
       </SettingsSection>
