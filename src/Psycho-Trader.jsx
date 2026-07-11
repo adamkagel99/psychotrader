@@ -544,8 +544,9 @@ function calcDiscipline(trades,riskMaxArg,opts){
     var vs=(t.violations||[]).slice();
     var pos=parseFloat(t.positionSize)||0;
     var stampedMax=parseFloat(t.posMaxAtEntry)||0;
-    var liveMax=posMax*(parseFloat(t.sizeFraction)||1);
-    var effPosMax=Math.max(stampedMax,liveMax);
+    var _cGm=t.grade==="A"?1:t.grade==="B"?0.75:t.grade==="C"?0.5:1;
+    var liveMax=posMax*(parseFloat(t.sizeFraction)||1)*_cGm;
+    var effPosMax=t.grade?liveMax:Math.max(stampedMax,liveMax);
     // CHANGED: Symmetric add/remove — stale "Oversized entry" violations from before an edit get
     // dropped here too, not just by autoAddViolations. Same idea for "Max risk exceeded" below.
     var overIdx=vs.indexOf("Oversized entry");
@@ -629,7 +630,7 @@ function calcDiscipline(trades,riskMaxArg,opts){
 function defaultSessionRules(){return {preMarket:{enabled:false,sizeFraction:1,maxTrades:99,notes:""},opening:{enabled:true,sizeFraction:1,maxTrades:99,notes:""},midDay:{enabled:false,sizeFraction:0.5,maxTrades:2,notes:""},afternoon:{enabled:true,sizeFraction:0.5,maxTrades:2,notes:""},closing:{enabled:true,sizeFraction:1,maxTrades:99,notes:""},afterHours:{enabled:false,sizeFraction:1,maxTrades:99,notes:""}};}
 // CHANGED: Each asset class now has its own quantity and price labels for the trade entry/exit leg inputs.
 var ASSET_CLASSES={
-  options:{label:"Options",unit:"contracts",unitSingular:"contract",qtyLabel:"Contracts",qtyLabelSingular:"Contract",priceLabel:"Position Cost",directions:["CALL","PUT"],showStrike:true,showExpiry:true,multiplier:1,positiveColor:"#22c55e",negativeColor:"#ef4444"},
+  options:{label:"Options",unit:"contracts",unitSingular:"contract",qtyLabel:"Contracts",qtyLabelSingular:"Contract",priceLabel:"Contract Cost",directions:["CALL","PUT"],showStrike:true,showExpiry:true,multiplier:1,positiveColor:"#22c55e",negativeColor:"#ef4444"},
   stocks:{label:"Stocks",unit:"shares",unitSingular:"share",qtyLabel:"Shares",qtyLabelSingular:"Share",priceLabel:"Share Price",directions:["LONG","SHORT"],showStrike:false,showExpiry:false,multiplier:1,positiveColor:"#22c55e",negativeColor:"#ef4444"},
   futures:{label:"Futures",unit:"contracts",unitSingular:"contract",qtyLabel:"Contracts",qtyLabelSingular:"Contract",priceLabel:"Price",directions:["LONG","SHORT"],showStrike:false,showExpiry:true,multiplier:1,positiveColor:"#22c55e",negativeColor:"#ef4444"},
   forex:{label:"Forex",unit:"lots",unitSingular:"lot",qtyLabel:"Lots",qtyLabelSingular:"Lot",priceLabel:"Price",directions:["BUY","SELL"],showStrike:false,showExpiry:false,multiplier:1,positiveColor:"#22c55e",negativeColor:"#ef4444"},
@@ -2679,8 +2680,11 @@ function TradeTile(props){
   var pos=parseFloat(t.positionSize)||0;
   var stampedPosMax=parseFloat(t.posMaxAtEntry)||0;
   var liveSF=parseFloat(t.sizeFraction)||1;
-  var livePosMax=(props.posMax||0)*liveSF;
-  var posMax=Math.max(stampedPosMax,livePosMax);
+  var _tGm=t.grade==="A"?1:t.grade==="B"?0.75:t.grade==="C"?0.5:1;
+  var livePosMax=(props.posMax||0)*liveSF*_tGm;
+  // CHANGED: When a grade is explicitly set, ENFORCE its scaled cap — don't fall back to a
+  // higher stamped full-size cap. When no grade set, take the higher of the two (legacy fallback).
+  var posMax=t.grade?livePosMax:Math.max(stampedPosMax,livePosMax);
   // CHANGED: Symmetric — remove stale "Oversized entry" flag when current check says the trade
   // is within cap (e.g. tier moved up so a previously oversized trade now fits).
   var _overIdx=effViolations.indexOf("Oversized entry");
@@ -3029,6 +3033,9 @@ function TradeForm(props){
   // form flags oversized entries during half-size trading too. Fall back to settings only if not provided.
   var effPosMaxForForm=parseFloat(props.displayPosMax);
   if(!(effPosMaxForForm>0))effPosMaxForForm=parseFloat(settings.positionMax)||0;
+  // CHANGED: Apply grade scaling — B=0.75, C=0.50 — so the red indicator fires on grade-based oversizing.
+  var _fGm=trade.grade==="A"?1:trade.grade==="B"?0.75:trade.grade==="C"?0.5:1;
+  effPosMaxForForm=effPosMaxForForm*_fGm;
   var posExceedsMax=trade.positionSize&&effPosMaxForForm>0&&parseFloat(trade.positionSize)>effPosMaxForForm;
   var legCount=entries.length+exits.length;
   var hasEvaluation=!!(trade.grade||(trade.emotions&&trade.emotions.length)||(trade.violations&&trade.violations.length)||trade.notes);
@@ -3240,8 +3247,23 @@ function TradeForm(props){
               return (
                 <div key={en.id} style={{marginBottom:rowGap+2}}>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:rowGap,alignItems:"end"}}>
-                    <div><label style={lblCompact}>{qtyLabel} #{i+1}</label><input type="text" defaultValue={en.contracts} onBlur={function(e){var val=e.target.value;st(function(prev){var ne=prev.entries.map(function(x,xi){return xi===i?Object.assign({},x,{contracts:val}):x;});return Object.assign({},prev,doRecalc(ne,prev.exits||[],prev.assetClass,prev.instrument,prev.direction));});}} style={compactFld}/></div>
-                    <div><label style={lblCompact}>{priceLabel} #{i+1}</label><input type="text" defaultValue={en.price} onBlur={function(e){var val=e.target.value;st(function(prev){var ne=prev.entries.map(function(x,xi){return xi===i?Object.assign({},x,{price:val}):x;});return Object.assign({},prev,doRecalc(ne,prev.exits||[],prev.assetClass,prev.instrument,prev.direction));});}} style={compactFld}/></div>
+                    <div><label style={lblCompact}>{priceLabel} #{i+1}</label><input type="text" value={en.price} onChange={function(e){var val=e.target.value;st(function(prev){var ne=prev.entries.map(function(x,xi){return xi===i?Object.assign({},x,{price:val}):x;});return Object.assign({},prev,doRecalc(ne,prev.exits||[],prev.assetClass,prev.instrument,prev.direction));});}} style={compactFld}/></div>
+                    <div>
+                      <label style={lblCompact}>{qtyLabel} #{i+1}</label>
+                      {(function(){
+                        // CHANGED: Suggested contract count = grade-scaled position range ÷ leg cost.
+                        // Rendered as the input's placeholder so it shows in-box when empty.
+                        var cost=parseFloat(en.price)||0;
+                        var pMin=parseFloat(props.displayPosMin)||0;
+                        var pMax=parseFloat(props.displayPosMax)||0;
+                        var g=trade&&trade.grade;var mult=g==="A"?1:g==="B"?0.75:g==="C"?0.5:1;
+                        pMin=pMin*mult;pMax=pMax*mult;
+                        var mult2=1;try{var ac=getAssetClass(trade.assetClass);if(ac&&ac.multiplier)mult2=ac.multiplier;}catch(e){}
+                        var ph="";
+                        if(cost>0&&pMax>0){var minSug=Math.floor(pMin/(cost*mult2));var maxSug=Math.floor(pMax/(cost*mult2));if(maxSug>0)ph="suggested "+(minSug===maxSug?minSug:minSug+"–"+maxSug);}
+                        return <input type="text" defaultValue={en.contracts} placeholder={ph} onBlur={function(e){var val=e.target.value;st(function(prev){var ne=prev.entries.map(function(x,xi){return xi===i?Object.assign({},x,{contracts:val}):x;});return Object.assign({},prev,doRecalc(ne,prev.exits||[],prev.assetClass,prev.instrument,prev.direction));});}} style={compactFld}/>;
+                      })()}
+                    </div>
                     <button onClick={function(){st(function(prev){var ne=prev.entries.filter(function(_,xi){return xi!==i;});return Object.assign({},prev,doRecalc(ne,prev.exits||[],prev.assetClass,prev.instrument,prev.direction));});}} style={{padding:density>=2?"6px 9px":"8px 10px",background:"#7f1d1d44",border:"1px solid #7f1d1d",borderRadius:6,color:"#fca5a5",fontSize:13,cursor:"pointer",fontFamily:"inherit",marginBottom:1}}>X</button>
                   </div>
                   {/* CHANGED: Per-leg time row — read-only display + Edit toggle. */}
@@ -3296,8 +3318,8 @@ function TradeForm(props){
               return (
                 <div key={ex.id} style={{marginBottom:rowGap+2}}>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:rowGap,alignItems:"end"}}>
-                    <div><label style={lblCompact}>{qtyLabel} #{i+1}</label><input type="text" defaultValue={ex.contracts} onBlur={function(e){var val=e.target.value;st(function(prev){var ne=prev.exits.map(function(x,xi){return xi===i?Object.assign({},x,{contracts:val}):x;});return Object.assign({},prev,doRecalc(prev.entries||[],ne,prev.assetClass,prev.instrument,prev.direction));});}} style={compactFld}/></div>
                     <div><label style={lblCompact}>{priceLabel} #{i+1}</label><input type="text" defaultValue={ex.price} onBlur={function(e){var val=e.target.value;st(function(prev){var ne=prev.exits.map(function(x,xi){return xi===i?Object.assign({},x,{price:val}):x;});return Object.assign({},prev,doRecalc(prev.entries||[],ne,prev.assetClass,prev.instrument,prev.direction));});}} style={compactFld}/></div>
+                    <div><label style={lblCompact}>{qtyLabel} #{i+1}</label><input type="text" defaultValue={ex.contracts} onBlur={function(e){var val=e.target.value;st(function(prev){var ne=prev.exits.map(function(x,xi){return xi===i?Object.assign({},x,{contracts:val}):x;});return Object.assign({},prev,doRecalc(prev.entries||[],ne,prev.assetClass,prev.instrument,prev.direction));});}} style={compactFld}/></div>
                     <button onClick={function(){st(function(prev){var ne=prev.exits.filter(function(_,xi){return xi!==i;});return Object.assign({},prev,doRecalc(prev.entries||[],ne,prev.assetClass,prev.instrument,prev.direction));});}} style={{padding:density>=2?"6px 9px":"8px 10px",background:"#7f1d1d44",border:"1px solid #7f1d1d",borderRadius:6,color:"#fca5a5",fontSize:13,cursor:"pointer",fontFamily:"inherit",marginBottom:1}}>X</button>
                   </div>
                   {/* CHANGED: Per-leg time row — read-only display + Edit toggle. */}
@@ -9879,7 +9901,10 @@ function App(props){
       try{var lk=checkDisciplineLock(state.trades,state.commitment,getCommitmentsMap(state));if(lk&&lk.locked)sf=Math.min(sf,0.5);}catch(e){}
       if(isMonthHalfsizeActive())sf=Math.min(sf,0.5);
     }
-    var effPosMax=posMax>0?posMax*sf:0;
+    // CHANGED: Grade scales the effective cap — A=1.0, B=0.75, C=0.50. Trades sized to a lower
+    // grade must fit that grade's tighter cap.
+    var _gm=t.grade==="A"?1:t.grade==="B"?0.75:t.grade==="C"?0.5:1;
+    var effPosMax=posMax>0?posMax*sf*_gm:0;
     // CHANGED: Auto-violations must be REMOVABLE — if a re-save brings the trade within the cap,
     // the previous "Oversized entry" flag should clear. Same for "Max risk exceeded".
     var overIdx=v.indexOf("Oversized entry");
