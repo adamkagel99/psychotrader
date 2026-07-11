@@ -4741,7 +4741,7 @@ function TradesTab(props){
     return "2R+";
   }
   // CHANGED: Stamp the day's disciplineScore on each trade so the Discipline filter can bucket.
-  var _dayDisc=parseFloat(viewEntry&&viewEntry.disciplineScore);
+  var _dayDisc=parseFloat(isToday?(state.disciplineScore||NaN):(pastSession&&pastSession.disciplineScore));
   var displayTrades=rawTrades.slice().filter(function(t){return t.status!=="open";}).map(function(t){return Object.assign({},t,{_dayDiscScore:_dayDisc});});
   filterDefs.forEach(function(fd){var sel=filters[fd.key];if(!sel||!sel.length)return;displayTrades=displayTrades.filter(function(t){if(fd.key==="emotions")return(t[fd.key]||[]).some(function(e){return sel.indexOf(e)>=0;});if(fd.key==="violations"){var v=t.violations||[];if(sel.indexOf("None")>=0&&v.length===0)return true;return v.some(function(e){return sel.indexOf(e)>=0;});}if(fd.key==="rBucket")return sel.indexOf(_rBucketOf(t))>=0;if(fd.key==="discBucket"){var ds=parseFloat(t._dayDiscScore);if(isNaN(ds))return false;var th=loadDisciplineLockThreshold();var b=ds>=th?"Clean (≥"+th+")":"Broken (<"+th+")";return sel.indexOf(b)>=0;}return sel.indexOf(t[fd.key])>=0;});});
   // CHANGED: Multi-level sort. Each sort id maps to a comparator; the chain applies them in
@@ -4800,7 +4800,7 @@ function TradesTab(props){
         var ds=parseFloat(entry.disciplineScore);
         (entry.trades||[]).forEach(function(t){if(t.status!=="open")all.push(Object.assign({},t,{date:entry.date,_dayDiscScore:ds}));});
       });
-      var _tds=parseFloat((viewEntry&&viewEntry.disciplineScore));
+      var _tds=parseFloat(isToday?(state.disciplineScore||NaN):(pastSession&&pastSession.disciplineScore));
       (state.trades||[]).forEach(function(t){if(t.status!=="open")all.push(Object.assign({},t,{date:todayKeyLocal,_dayDiscScore:_tds}));});
     }catch(e){}
     filterDefs.forEach(function(fd){var sel=filters[fd.key];if(!sel||!sel.length)return;all=all.filter(function(t){if(fd.key==="emotions")return(t[fd.key]||[]).some(function(e){return sel.indexOf(e)>=0;});if(fd.key==="violations"){var v=t.violations||[];if(sel.indexOf("None")>=0&&v.length===0)return true;return v.some(function(e){return sel.indexOf(e)>=0;});}if(fd.key==="rBucket")return sel.indexOf(_rBucketOf(t))>=0;if(fd.key==="discBucket"){var ds=parseFloat(t._dayDiscScore);if(isNaN(ds))return false;var th=loadDisciplineLockThreshold();var b=ds>=th?"Clean (≥"+th+")":"Broken (<"+th+")";return sel.indexOf(b)>=0;}return sel.indexOf(t[fd.key])>=0;});});
