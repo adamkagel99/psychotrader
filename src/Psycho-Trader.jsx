@@ -2497,7 +2497,15 @@ function CalendarPicker(props){
     <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",background:"#00000088"}} onClick={onClose}>
       <div style={{background:"#111118",border:"1px solid #334155",borderRadius:14,padding:"16px 16px 12px",width:380,maxWidth:"94vw",maxHeight:"92vh",overflowY:"auto",boxShadow:"0 16px 48px #000000bb"}} onClick={function(e){e.stopPropagation();}}>
         <button onClick={function(){onSelect(todayDateStr);}} style={{width:"100%",padding:"8px",background:"#1e1b4b",border:"1px solid #4338ca",borderRadius:8,color:"#a5b4fc",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginBottom:10}}>Today — {todayDateStr}</button>
-        <CalendarGrid sessionMap={sessionMap} todayDateStr={todayDateStr} selectedDate={selectedDate} onSelect={onSelect}/>
+        {(function(){
+          // CHANGED: Open the picker on the month of the currently-selected journal date instead
+          // of always defaulting to today's month.
+          var iy=null,im=null;
+          try{var p=String(selectedDate).split("/");if(p.length===3){im=(+p[0])-1;iy=+p[2];}}catch(e){}
+          var [cy,setCy]=useState(iy!=null?iy:(new Date()).getFullYear());
+          var [cm,setCm]=useState(im!=null?im:(new Date()).getMonth());
+          return <CalendarGrid year={cy} month={cm} onMonthChange={function(y,m){setCy(y);setCm(m);}} sessionMap={sessionMap} todayDateStr={todayDateStr} selectedDate={selectedDate} onSelect={onSelect}/>;
+        })()}
         <CalendarLegend/>
       </div>
     </div>
@@ -7467,6 +7475,8 @@ function PerformanceTab(props){
   var [rows,setRows]=useState([]);
   // CHANGED: Persist the time-range selection across tab switches (matches scalingTarget below).
   var [range,setRange]=useState(function(){try{var r=localStorage.getItem("tf-stats-range")||"all";return r==="custom"?"all":r;}catch(e){return "all";}});
+  // CHANGED: Discipline-score filter. "all" | "clean" (>= lock threshold) | "broken" (< threshold).
+  var [discFilter,setDiscFilter]=useState(function(){try{return localStorage.getItem("tf-stats-disc-filter")||"all";}catch(e){return "all";}});
   // CHANGED: Selected metric for the combined Overview / chart block. Default = totalPnl (equity curve).
   var [selectedMetric,setSelectedMetric]=useState("totalPnl");
   // CHANGED: Custom mode tracks whether the Custom pill's date inputs are revealed. The actual
@@ -7578,6 +7588,10 @@ function PerformanceTab(props){
     return dd>=cutoff;
   }
   var filtered=allRows.filter(function(r){return inRange(r.date);});
+  // CHANGED: Discipline-score filter — narrows rows to clean/broken days based on threshold.
+  var _discThresh=loadDisciplineLockThreshold();
+  if(discFilter==="clean")filtered=filtered.filter(function(r){var s=parseFloat(r.disciplineScore);return !isNaN(s)&&s>=_discThresh;});
+  else if(discFilter==="broken")filtered=filtered.filter(function(r){var s=parseFloat(r.disciplineScore);return !isNaN(s)&&s<_discThresh;});
   filtered.sort(function(a,b){return new Date(a.date)-new Date(b.date);});
   var allTrades=[];filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status!=="open")allTrades.push(t);});});
   // CHANGED: trading day = row with closed trades OR a non-zero stored pnl (covers entries whose
@@ -7681,6 +7695,14 @@ function PerformanceTab(props){
           {/* CHANGED: Custom pill flips customMode on. The actual `range` stays at the prior preset
              until the user picks a date — so the page's data doesn't reset when the pill is tapped. */}
           <button onClick={function(){var prevY=window.scrollY;setCustomMode(true);requestAnimationFrame(function(){window.scrollTo(0,prevY);});}} style={{padding:props.mobile?"6px 14px":"7px 16px",background:customMode?"linear-gradient(135deg,#4338ca,#4f46e5)":"#0a0a0f",border:"1px solid "+(customMode?"#6366f1":"#334155"),borderRadius:999,color:customMode?"#fff":"#94a3b8",fontSize:props.mobile?12:13,fontWeight:customMode?700:500,cursor:"pointer",fontFamily:"inherit",boxShadow:customMode?"0 1px 4px #4f46e533":"none"}}>Custom</button>
+        </div>
+        {/* CHANGED: Discipline-score filter — scopes stats to clean vs broken days. */}
+        <div style={{display:"flex",gap:6,marginTop:8,alignItems:"center",flexWrap:"wrap"}}>
+          <span style={{fontSize:11,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600,marginRight:4}}>Discipline</span>
+          {[{v:"all",l:"All"},{v:"clean",l:"≥ "+_discThresh+" (clean)"},{v:"broken",l:"< "+_discThresh+" (broken)"}].map(function(o){
+            var sel=discFilter===o.v;
+            return <button key={o.v} onClick={function(){setDiscFilter(o.v);try{localStorage.setItem("tf-stats-disc-filter",o.v);}catch(e){}}} style={{padding:"4px 10px",background:sel?"#1e1b4b":"#0a0a0f",border:"1px solid "+(sel?"#6366f1":"#334155"),borderRadius:999,color:sel?"#a5b4fc":"#94a3b8",fontSize:11,fontWeight:sel?700:500,cursor:"pointer",fontFamily:"inherit"}}>{o.l}</button>;
+          })}
         </div>
         {/* CHANGED: Date pickers reveal when Custom is selected. */}
         {customMode&&(
