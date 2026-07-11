@@ -4656,7 +4656,21 @@ function TradesTab(props){
   var [sortChain,setSortChain]=useState(function(){try{var s=localStorage.getItem("pt-trades-sort");return s?JSON.parse(s):[];}catch(e){return [];}});
   useEffect(function(){try{localStorage.setItem("pt-trades-sort",JSON.stringify(sortChain));}catch(e){}},[sortChain]);
   var [sortOpen,setSortOpen]=useState(false);
+  var sortMenuRef=React.useRef(null);
+  React.useEffect(function(){
+    if(!sortOpen)return;
+    function onDown(e){var m=sortMenuRef.current;if(m&&m.contains(e.target))return;setSortOpen(false);}
+    document.addEventListener("mousedown",onDown);document.addEventListener("touchstart",onDown);
+    return function(){document.removeEventListener("mousedown",onDown);document.removeEventListener("touchstart",onDown);};
+  },[sortOpen]);
   var [filterOpen,setFilterOpen]=useState(false);
+  var filterMenuRef=React.useRef(null);
+  React.useEffect(function(){
+    if(!filterOpen)return;
+    function onDown(e){var m=filterMenuRef.current;if(m&&m.contains(e.target))return;setFilterOpen(false);}
+    document.addEventListener("mousedown",onDown);document.addEventListener("touchstart",onDown);
+    return function(){document.removeEventListener("mousedown",onDown);document.removeEventListener("touchstart",onDown);};
+  },[filterOpen]);
   var [filters,setFilters]=useState(function(){try{var s=localStorage.getItem("pt-trades-filters");return s?JSON.parse(s):{};}catch(e){return {};}});
   useEffect(function(){try{localStorage.setItem("pt-trades-filters",JSON.stringify(filters));}catch(e){}},[filters]);
   var [collapsedMap,setCollapsedMap]=useState(function(){var m={};try{for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf("pt-sess-collapse:")===0)m[k.slice(17)]=localStorage.getItem(k)!=="0";}}catch(e){}return m;});
@@ -5021,8 +5035,8 @@ function TradesTab(props){
         {pickerOpen&&<CalendarPicker selectedDate={selectedDate} onSelect={function(d){setSelectedDate(d);setPickerOpen(false);}} onClose={function(){setPickerOpen(false);}} todayPnL={totalPnL} riskMax={parseFloat(settings.riskMax)||0} settings={settings} todayTrades={state.trades}/>}
       </div>
       <div style={{display:"flex",gap:8,position:"relative"}}>
-        <div style={{position:"relative",flex:1}}>
-          <button onClick={function(){setSortOpen(function(o){return !o;});setFilterOpen(false);}} style={{width:"100%",padding:"8px 12px",background:sortChain.length>0?"#1e1b4b":"#111118",border:"1px solid "+(sortChain.length>0?"#4338ca":"#334155"),borderRadius:6,color:sortChain.length>0?"#a5b4fc":"#64748b",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div ref={sortMenuRef} style={{position:"relative",flex:1}}>
+          <button onClick={function(){setSortOpen(function(o){return !o;});setFilterOpen(false);}} style={{width:"100%",padding:"7px 16px",background:sortChain.length>0?"#1e1b4b":"#0a0a0f",border:"1px solid "+(sortChain.length>0?"#6366f1":"#334155"),borderRadius:999,color:sortChain.length>0?"#a5b4fc":"#94a3b8",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <span>Sort{sortChain.length>0?" ("+sortChain.length+")":""}</span><span style={{fontSize:12}}>▾</span>
           </button>
           {sortOpen&&(
@@ -5051,8 +5065,8 @@ function TradesTab(props){
             </div>
           )}
         </div>
-        <div style={{position:"relative",flex:1}}>
-          <button onClick={function(){setFilterOpen(function(o){return !o;});setSortOpen(false);}} style={{width:"100%",padding:"8px 12px",background:activeFilterCount>0?"#1e1b4b":"#111118",border:"1px solid "+(activeFilterCount>0?"#4338ca":"#334155"),borderRadius:6,color:activeFilterCount>0?"#a5b4fc":"#64748b",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div ref={filterMenuRef} style={{position:"relative",flex:1}}>
+          <button onClick={function(){setFilterOpen(function(o){return !o;});setSortOpen(false);}} style={{width:"100%",padding:"7px 16px",background:activeFilterCount>0?"#1e1b4b":"#0a0a0f",border:"1px solid "+(activeFilterCount>0?"#6366f1":"#334155"),borderRadius:999,color:activeFilterCount>0?"#a5b4fc":"#94a3b8",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <span>Filter{activeFilterCount>0?" ("+activeFilterCount+") · "+filterResultCount+" result"+(filterResultCount===1?"":"s"):""}{activeFilterCount>0&&filterResultCount>0&&(function(){var src=isAllScope?allGalleryTrades:displayTrades;var sum=src.reduce(function(s,t){return s+(parseFloat(t.pnl)||0);},0);var fmt=HIDE_DOLLAR_PNL?(sum<0?"-$•••":"$•••"):((sum<0?"-$":"$")+Math.abs(Math.round(sum)).toLocaleString());return <span style={{marginLeft:8,color:sum>0?"#86efac":sum<0?"#fca5a5":"#94a3b8",fontWeight:700}}>· {fmt}</span>;})()}</span><span style={{fontSize:12}}>▾</span>
           </button>
           {filterOpen&&(
