@@ -2403,6 +2403,28 @@ function DashboardCalendar(props){
     monthTradeCount+=mdData.tradeCount||0;
     if(mdData.tradeCount>0){monthR+=mdData.rTotal||0;if(mdData.riskMax>0)monthHasRisk=true;}
   }
+  // CHANGED: Monthly R = month total P&L ÷ month-start riskMax (not the summation of daily Rs).
+  // This anchors the ratio to the risk unit in effect at the start of the month, so mid-month
+  // tier/risk-max changes don't distort the readout.
+  var monthStartRiskMax=(function(){
+    try{
+      var d=new Date(calYear,calMonth,1);
+      var ds=(d.getMonth()+1)+"/"+d.getDate()+"/"+d.getFullYear();
+      var e=sessionMap[ds];
+      if(e&&e.riskMax>0)return e.riskMax;
+      // walk forward until we find a day with a stamped riskMax
+      for(var i=1;i<=31;i++){
+        var dd=new Date(calYear,calMonth,1+i);
+        if(dd.getMonth()!==calMonth)break;
+        var dds=(dd.getMonth()+1)+"/"+dd.getDate()+"/"+dd.getFullYear();
+        var ee=sessionMap[dds];
+        if(ee&&ee.riskMax>0)return ee.riskMax;
+      }
+    }catch(e){}
+    return 0;
+  })();
+  if(monthStartRiskMax>0){monthR=monthPnL/monthStartRiskMax;monthHasRisk=true;}
+  else{monthR=0;monthHasRisk=false;}
   var monthRColor=monthR>=0?"#86efac":"#fca5a5";
   // CHANGED: One readout used in both collapsed (week) and expanded (month) states. In "trades"
   // mode shows a count; in "pnl" mode shows R when Hide-$ is on or $ otherwise.
