@@ -9550,7 +9550,8 @@ function App(props){
   // CHANGED: Always open to the home (dashboard) tab on sign-in / app load. Previously the
   // last-active tab was restored from sessionStorage which could land you in Settings or
   // Performance after a refresh — surprising and rarely what you want first.
-  var [tab,setTab]=useState("dashboard");
+  var [tab,setTab]=useState(function(){try{return localStorage.getItem("pt-active-tab")||"dashboard";}catch(e){return "dashboard";}});
+  useEffect(function(){try{localStorage.setItem("pt-active-tab",tab);}catch(e){}},[tab]);
   useEffect(function(){try{sessionStorage.setItem("tf-active-tab",tab);}catch(e){}},[tab]);
   // CHANGED: Collapsible sidebar state for laptop layout.
   var [sidebarCollapsed,setSidebarCollapsed]=useState(true);
@@ -9860,7 +9861,7 @@ function App(props){
     // CHANGED: One-time backfill — recompute every historical journal entry's disciplineScore
     // now that bonuses have been removed. Runs once per install.
     try{
-      if(localStorage.getItem("pt-disc-nobonus-v2")==="1")return;
+      if(localStorage.getItem("pt-disc-nobonus-v3")==="1")return;
       var updated=0;
       for(var i=0;i<localStorage.length;i++){
         var k=localStorage.key(i);if(!k||k.indexOf("journal:")!==0)continue;
@@ -9873,7 +9874,7 @@ function App(props){
           if(e.disciplineScore!==newScore){e.disciplineScore=newScore;localStorage.setItem(k,JSON.stringify(e));updated++;}
         }catch(err){}
       }
-      localStorage.setItem("pt-disc-nobonus-v2","1");
+      localStorage.setItem("pt-disc-nobonus-v3","1");
       if(updated>0&&bumpReloadKey)bumpReloadKey();
     }catch(e){}
   // eslint-disable-next-line
