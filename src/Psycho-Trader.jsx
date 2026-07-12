@@ -457,7 +457,7 @@ function wrColor(rate){return rate>=60?"#22c55e":rate>=40?"#f59e0b":"#ef4444";}
 // rOutcomeCap: hard ceiling/floor on the R term (±) so outcome can NUDGE but never DOMINATE process.
 // rOutcomeCleanOnly: when true, the positive R bonus is suppressed on days with any violation —
 //   a lucky win does not get to paper over rule-breaking. Losing-R always counts (small penalty).
-var DEFAULT_DISCIPLINE_SCORING={violationPenalty:15,negEmotionPenalty:10,posEmotionBonus:3,aGradeBonus:5,cGradePenalty:5,rOutcomeWeight:2,rOutcomeCap:10,rOutcomeCleanOnly:true,overTradePenalty:10,setupDeviationPenalty:10,setupAdherenceBonus:5};
+var DEFAULT_DISCIPLINE_SCORING={violationPenalty:15,negEmotionPenalty:10,posEmotionBonus:0,aGradeBonus:0,cGradePenalty:5,rOutcomeWeight:0,rOutcomeCap:0,rOutcomeCleanOnly:true,overTradePenalty:10,setupDeviationPenalty:10,setupAdherenceBonus:0};
 // CHANGED: Discipline lock threshold — editable, persisted. If a day's score falls below this, trading locks.
 var DISCIPLINE_LOCK_KEY="tf-discipline-lock-threshold";
 function loadDisciplineLockThreshold(){try{var s=localStorage.getItem(DISCIPLINE_LOCK_KEY);if(s!=null){var v=parseFloat(s);if(!isNaN(v))return v;}}catch(e){}return 60;}
