@@ -5138,7 +5138,17 @@ function TradesTab(props){
             });
           }catch(e){}
         }
-        // Sort groups by date descending (most recent first).
+        // Sort groups by date descending (most recent first). BUT when a non-timestamp sort is
+        // active, we flatten into a single ungrouped list to honor the selected criterion globally.
+        var _globalFlat=sortChain&&sortChain.length>0&&sortChain[0]!=="timestamp";
+        if(_globalFlat){
+          if(ord.length===0)return <div style={{textAlign:"center",padding:"40px 20px",borderTop:"1px dashed #1e293b",marginTop:8}}><div style={{fontSize:14,color:"#475569"}}>{activeFilterCount>0?"No trades match your filters":"No trades saved yet"}</div></div>;
+          var _flatTrades=allGalleryTrades;
+          return <div><div style={{fontSize:12,color:"#64748b",marginBottom:10}}>{_flatTrades.length} {_flatTrades.length===1?"trade":"trades"} across all sessions{activeFilterCount>0?" (filtered)":""}</div>
+            <div style={{display:"grid",gridTemplateColumns:props.mobile?"1fr":"1fr 1fr 1fr",gap:12}}>
+              {_flatTrades.map(function(t,i){return <TradeTile key={(t.id||"")+"_"+i} t={t} i={i} posMax={settings.positionMax} riskMax={settings.riskMax} hideControls={true}/>;})}
+            </div></div>;
+        }
         ord.sort(function(a,b){return new Date(b)-new Date(a);});
         if(ord.length===0)return <div style={{textAlign:"center",padding:"40px 20px",borderTop:"1px dashed #1e293b",marginTop:8}}><div style={{fontSize:14,color:"#475569"}}>{activeFilterCount>0?"No trades match your filters":"No trades saved yet"}</div></div>;
         var totalTrades=allGalleryTrades.length;
@@ -5158,7 +5168,15 @@ function TradesTab(props){
                       {g.note&&<div style={{fontSize:11,color:"#64748b",marginTop:4,fontStyle:"italic",lineHeight:1.4}}>{g.note}</div>}
                     </div>
                   ):(function(){
-                    // CHANGED: Group by session under each date (matches the per-date journal view).
+                    // CHANGED: When non-timestamp sort is active, render flat (no session grouping).
+                    var _flat=sortChain&&sortChain.length>0&&sortChain[0]!=="timestamp";
+                    if(_flat){
+                      return (
+                        <div style={{display:"grid",gridTemplateColumns:props.mobile?"1fr":"1fr 1fr 1fr",gap:12}}>
+                          {g.trades.map(function(t,i){return <TradeTile key={(t.id||"")+"_"+i} t={t} i={i} posMax={settings.positionMax} riskMax={settings.riskMax} hideControls={true}/>;})}
+                        </div>
+                      );
+                    }
                     var enab=[];try{enab=getSessions(settings).filter(function(s){return s.enabled!==false;});}catch(e){}
                     function fm(m){var h=Math.floor(m/60),mm=m%60,ap=h>=12?"PM":"AM";var h12=((h+11)%12)+1;return h12+":"+(mm<10?"0":"")+mm+" "+ap;}
                     var buckets={};var order=[];
