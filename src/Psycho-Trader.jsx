@@ -9923,6 +9923,37 @@ function App(props){
   // eslint-disable-next-line
   },[]);
   useEffect(function(){
+    // CHANGED: One-time backfill — rewrite each historical trade's "Max risk exceeded" flag
+    // under the new % rule (pctPnl < -stopThreshPctAtEntry, no grade scaling). Runs once.
+    try{
+      if(localStorage.getItem("pt-maxrisk-pct-v1")==="1")return;
+      var updated=0;
+      for(var i=0;i<localStorage.length;i++){
+        var k=localStorage.key(i);if(!k||k.indexOf("journal:")!==0)continue;
+        try{
+          var raw=localStorage.getItem(k);if(!raw)continue;
+          var e=JSON.parse(raw);if(!e||!Array.isArray(e.trades))continue;
+          var dirty=false;
+          e.trades=e.trades.map(function(t){
+            if(!t)return t;
+            var v=(t.violations||[]).slice();
+            var idx=v.indexOf("Max risk exceeded");
+            var slPct=parseFloat(t.stopThreshPctAtEntry)||0;
+            var pct=parseFloat(t.pctPnl);
+            var should=slPct>0&&!isNaN(pct)&&pct<-slPct;
+            if(should&&idx<0){v.push("Max risk exceeded");dirty=true;updated++;return Object.assign({},t,{violations:v});}
+            if(!should&&idx>=0){v.splice(idx,1);dirty=true;updated++;return Object.assign({},t,{violations:v});}
+            return t;
+          });
+          if(dirty)localStorage.setItem(k,JSON.stringify(e));
+        }catch(err){}
+      }
+      localStorage.setItem("pt-maxrisk-pct-v1","1");
+      if(updated>0&&bumpReloadKey)bumpReloadKey();
+    }catch(e){}
+  // eslint-disable-next-line
+  },[]);
+  useEffect(function(){
     // CHANGED: One-time backfill — recompute every historical journal entry's disciplineScore
     // now that bonuses have been removed. Runs once per install.
     try{
