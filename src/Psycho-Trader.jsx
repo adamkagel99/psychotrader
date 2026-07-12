@@ -10089,12 +10089,8 @@ function App(props){
     var rmDollar=parseFloat(settings&&settings.riskMax)||0;
     var riskCapDollars=rmDollar>0?rmDollar*sf:0;
     var maxRiskIdx=v.indexOf("Max risk exceeded");
-    // CHANGED: % based check — pctPnl < -(stopThreshPct scaled by grade). Grade-scale so a B/C
-    // trade's max risk % also tightens with the trade's smaller size intent.
-    var _gm2=t.grade==="A"?1:t.grade==="B"?0.75:t.grade==="C"?0.5:1;
-    var _slPct2=stopThreshPct*_gm2;
     var _pnlPct=parseFloat(t.pctPnl);
-    var stoppedOut=(_slPct2>0&&!isNaN(_pnlPct)&&_pnlPct<-_slPct2);
+    var stoppedOut=(stopThreshPct>0&&!isNaN(_pnlPct)&&_pnlPct<-stopThreshPct);
     if(stoppedOut){
       if(maxRiskIdx<0)v.push("Max risk exceeded");
     }else if(maxRiskIdx>=0){
