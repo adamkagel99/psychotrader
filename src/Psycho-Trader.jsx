@@ -4777,7 +4777,16 @@ function TradesTab(props){
     return "2R+";
   }
   // CHANGED: Stamp the day's disciplineScore on each trade so the Discipline filter can bucket.
-  var _dayDisc=parseFloat(isToday?(function(){try{return calcDiscipline((state.trades||[]).filter(function(t){return t&&t.status!=="open";}),settings.riskMax,state.commitments&&typeof state.commitments==="object"?{commitments:state.commitments}:{commitment:state.commitment});}catch(e){return NaN;}})():(pastSession&&pastSession.disciplineScore));
+  var _dayDisc=parseFloat((function(){
+    try{
+      var src=isToday?state:pastSession;
+      if(!src)return NaN;
+      var ct=(src.trades||[]).filter(function(t){return t&&t.status!=="open";});
+      var rm=isToday?settings.riskMax:src.riskMax;
+      var opts=(src.commitments&&typeof src.commitments==="object")?{commitments:src.commitments}:{commitment:src.commitment||null};
+      return calcDiscipline(ct,rm,opts);
+    }catch(e){return NaN;}
+  })());
   var displayTrades=rawTrades.slice().filter(function(t){return t.status!=="open";}).map(function(t){return Object.assign({},t,{_dayDiscScore:_dayDisc});});
   filterDefs.forEach(function(fd){var sel=filters[fd.key];if(!sel||!sel.length)return;displayTrades=displayTrades.filter(function(t){if(fd.key==="emotions")return(t[fd.key]||[]).some(function(e){return sel.indexOf(e)>=0;});if(fd.key==="violations"){var v=t.violations||[];if(sel.indexOf("None")>=0&&v.length===0)return true;return v.some(function(e){return sel.indexOf(e)>=0;});}if(fd.key==="rBucket")return sel.indexOf(_rBucketOf(t))>=0;if(fd.key==="discBucket"){var ds=parseFloat(t._dayDiscScore);if(isNaN(ds))return false;var th=loadDisciplineLockThreshold();var b=ds>=th?"Clean (≥"+th+")":"Broken (<"+th+")";return sel.indexOf(b)>=0;}if(fd.key==="sessionBucket"){var sid=null;try{sid=getSessionForTrade(t);}catch(e){}if(!sid)return sel.indexOf("Out of Session")>=0;var sess=(getSessions(settings)||[]).find(function(x){return x.id===sid;});var nm=sess?(sess.name||sess.label||sess.id):sid;return sel.indexOf(nm)>=0;}return sel.indexOf(t[fd.key])>=0;});});
   // CHANGED: Multi-level sort. Each sort id maps to a comparator; the chain applies them in
