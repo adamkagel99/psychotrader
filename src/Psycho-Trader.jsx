@@ -569,9 +569,7 @@ function calcDiscipline(trades,riskMaxArg,opts){
     if(vs.length>0)anyViolation=true;
     processScore-=vs.length*(ds.violationPenalty||15);
     processScore-=(t.emotions||[]).filter(function(x){return getEmotionSentiment(x,sentiments)==="negative";}).length*(ds.negEmotionPenalty||10);
-    if(t.grade==="A")processScore+=(ds.aGradeBonus||5);
     if(t.grade==="C")processScore-=(ds.cGradePenalty||5);
-    processScore+=(t.emotions||[]).filter(function(x){return getEmotionSentiment(x,sentiments)==="positive";}).length*(ds.posEmotionBonus||3);
     dayPnL+=parseFloat(t.pnl)||0;
   });
   // CHANGED: Commitment adherence penalties. If a commitment was made for the day, exceeding the
@@ -590,29 +588,26 @@ function calcDiscipline(trades,riskMaxArg,opts){
       var maxT=parseInt(sc.maxTrades);
       if(!isNaN(maxT)&&maxT>0&&sessTrades.length>maxT){processScore-=(ds.overTradePenalty!=null?ds.overTradePenalty:10);anyViolation=true;}
       if(sc.setupsReviewAffirmed===false){processScore-=(ds.setupDeviationPenalty!=null?ds.setupDeviationPenalty:10);anyViolation=true;}
-      if(sc.setupsReviewAffirmed===true){processScore+=(ds.setupAdherenceBonus!=null?ds.setupAdherenceBonus:5);}
     });
   }else if(com&&com.committed){
     var maxT=parseInt(com.maxTrades);
     var closedN=trades.filter(function(t){return t&&t.status!=="open";}).length;
     if(!isNaN(maxT)&&maxT>0&&closedN>maxT){processScore-=(ds.overTradePenalty!=null?ds.overTradePenalty:10);anyViolation=true;}
     if(com.setupsReviewAffirmed===false){processScore-=(ds.setupDeviationPenalty!=null?ds.setupDeviationPenalty:10);anyViolation=true;}
-    if(com.setupsReviewAffirmed===true){processScore+=(ds.setupAdherenceBonus!=null?ds.setupAdherenceBonus:5);}
   }
   processScore=Math.min(100,Math.max(0,processScore));
   // --- R-outcome term (secondary, bounded) ---
-  // R = day P&L expressed in units of one trade's max risk. Bounded by ±rOutcomeCap so a huge
-  // day cannot swamp the process signal. Positive R is suppressed on violation days when
-  // rOutcomeCleanOnly is set — winning while breaking rules is not rewarded. Negative R always
-  // applies (a losing day is a small process-independent ding, never a bonus).
+  // CHANGED: Bonuses removed — score only decreases from violations, negative emotions, C-grade,
+  // over-cap commitments, and setup deviations. R outcome term keeps only its negative side (a
+  // losing day can still ding, positive never adds).
   var rTerm=0;
   if(!(opts&&opts.processOnly)&&riskMax>0&&trades.length>0){
     var dayR=dayPnL/riskMax;
-    var weight=ds.rOutcomeWeight!=null?ds.rOutcomeWeight:2;
-    var cap=ds.rOutcomeCap!=null?ds.rOutcomeCap:10;
+    var weight=ds.rOutcomeWeight!=null?ds.rOutcomeWeight:0;
+    var cap=ds.rOutcomeCap!=null?ds.rOutcomeCap:0;
     var raw=dayR*weight;
-    if(raw>0&&(ds.rOutcomeCleanOnly!==false)&&anyViolation)raw=0;
-    rTerm=Math.max(-cap,Math.min(cap,raw));
+    if(raw>0)raw=0;
+    rTerm=Math.max(-cap,Math.min(0,raw));
   }
   var combined=processScore+rTerm;
   // CHANGED: Temporary diagnostic — log the score breakdown so we can see why repeated saves drift.
@@ -8987,14 +8982,11 @@ function SettingsTab(props){
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:8}}>
           <div><label style={lbl}>Violation Penalty</label><input type="number" value={discScoring.violationPenalty} onChange={function(e){persistDiscScoring(Object.assign({},discScoring,{violationPenalty:parseFloat(e.target.value)||0}));}} style={fld}/></div>
           <div><label style={lbl}>Negative Emotion Penalty</label><input type="number" value={discScoring.negEmotionPenalty} onChange={function(e){persistDiscScoring(Object.assign({},discScoring,{negEmotionPenalty:parseFloat(e.target.value)||0}));}} style={fld}/></div>
-          <div><label style={lbl}>Positive Emotion Bonus</label><input type="number" value={discScoring.posEmotionBonus} onChange={function(e){persistDiscScoring(Object.assign({},discScoring,{posEmotionBonus:parseFloat(e.target.value)||0}));}} style={fld}/></div>
-          <div><label style={lbl}>A-Grade Bonus</label><input type="number" value={discScoring.aGradeBonus} onChange={function(e){persistDiscScoring(Object.assign({},discScoring,{aGradeBonus:parseFloat(e.target.value)||0}));}} style={fld}/></div>
           <div><label style={lbl}>C-Grade Penalty</label><input type="number" value={discScoring.cGradePenalty} onChange={function(e){persistDiscScoring(Object.assign({},discScoring,{cGradePenalty:parseFloat(e.target.value)||0}));}} style={fld}/></div>
           <div><label style={lbl}>Trade Cap Exceeded Penalty</label><input type="number" value={discScoring.overTradePenalty!=null?discScoring.overTradePenalty:10} onChange={function(e){persistDiscScoring(Object.assign({},discScoring,{overTradePenalty:parseFloat(e.target.value)||0}));}} style={fld}/></div>
           <div><label style={lbl}>Setup Deviation Penalty</label><input type="number" value={discScoring.setupDeviationPenalty!=null?discScoring.setupDeviationPenalty:10} onChange={function(e){persistDiscScoring(Object.assign({},discScoring,{setupDeviationPenalty:parseFloat(e.target.value)||0}));}} style={fld}/></div>
-          <div><label style={lbl}>Setup Adherence Bonus</label><input type="number" value={discScoring.setupAdherenceBonus!=null?discScoring.setupAdherenceBonus:5} onChange={function(e){persistDiscScoring(Object.assign({},discScoring,{setupAdherenceBonus:parseFloat(e.target.value)||0}));}} style={fld}/></div>
         </div>
-        <div style={{fontSize:11,color:"#64748b",marginTop:8,lineHeight:1.5}}>Trade Cap Exceeded applies when you exceed your committed max trades; Setup Deviation applies when you mark "No, I deviated" in the day's Commitment Review. Both also forfeit the winning-day bonus.</div>
+        <div style={{fontSize:11,color:"#64748b",marginTop:8,lineHeight:1.5}}>Score starts at 100 and only decreases — bonuses have been removed. Trade Cap Exceeded applies when you exceed your committed max trades; Setup Deviation applies when you mark "No, I deviated" in the day's Commitment Review.</div>
         {resetConfirm==="discScoring"?(
           <div style={{marginTop:10,display:"flex",gap:6,alignItems:"center"}}>
             <span style={{fontSize:12,color:"#fdba74",fontWeight:600}}>Reset to defaults?</span>
@@ -9861,6 +9853,28 @@ function App(props){
       }
       localStorage.setItem("pt-recalc-today-disc-v2","1");
       if(bumpReloadKey)bumpReloadKey();
+    }catch(e){}
+  // eslint-disable-next-line
+  },[]);
+  useEffect(function(){
+    // CHANGED: One-time backfill — recompute every historical journal entry's disciplineScore
+    // now that bonuses have been removed. Runs once per install.
+    try{
+      if(localStorage.getItem("pt-disc-nobonus-v1")==="1")return;
+      var updated=0;
+      for(var i=0;i<localStorage.length;i++){
+        var k=localStorage.key(i);if(!k||k.indexOf("journal:")!==0)continue;
+        try{
+          var raw=localStorage.getItem(k);if(!raw)continue;
+          var e=JSON.parse(raw);if(!e)continue;
+          var ct=(e.trades||[]).filter(function(t){return t&&t.status!=="open";});
+          var opts=(e.commitments&&typeof e.commitments==="object")?{commitments:e.commitments}:{commitment:e.commitment||null};
+          var newScore=calcDiscipline(ct,e.riskMax,opts);
+          if(e.disciplineScore!==newScore){e.disciplineScore=newScore;localStorage.setItem(k,JSON.stringify(e));updated++;}
+        }catch(err){}
+      }
+      localStorage.setItem("pt-disc-nobonus-v1","1");
+      if(updated>0&&bumpReloadKey)bumpReloadKey();
     }catch(e){}
   // eslint-disable-next-line
   },[]);
