@@ -2715,16 +2715,13 @@ function TradeTile(props){
   var _overIdx=effViolations.indexOf("Oversized entry");
   if(posMax>0&&pos>posMax){if(_overIdx<0)effViolations.push("Oversized entry");}
   else if(_overIdx>=0){effViolations.splice(_overIdx,1);}
-  var riskCapDollars=parseFloat(t.riskCapDollarsAtEntry)||0;
   var _mrIdx=effViolations.indexOf("Max risk exceeded");
-  if(riskCapDollars>0){
-    if(!isNaN(pnl)&&pnl<-riskCapDollars){if(_mrIdx<0)effViolations.push("Max risk exceeded");}
-    else if(_mrIdx>=0){effViolations.splice(_mrIdx,1);}
-  }else{
-    var slThresh=parseFloat(t.stopThreshPctAtEntry)||0;
-    if(slThresh>0&&!isNaN(pnl)&&pnl<0&&!isNaN(pctPnl)&&pctPnl<-slThresh){if(_mrIdx<0)effViolations.push("Max risk exceeded");}
-    else if(_mrIdx>=0){effViolations.splice(_mrIdx,1);}
-  }
+  // CHANGED: % based — flag when the trade's loss % exceeds the Stop Loss Max % setting.
+  // Prefer stamped stopThreshPctAtEntry; fall back to current settings.riskMaxPct.
+  var _slPct=parseFloat(t.stopThreshPctAtEntry);
+  if(isNaN(_slPct)||_slPct<=0){try{var _sset=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}");_slPct=parseFloat(_sset.riskMaxPct)||0;}catch(e){_slPct=0;}}
+  if(_slPct>0&&!isNaN(pctPnl)&&pctPnl<-_slPct){if(_mrIdx<0)effViolations.push("Max risk exceeded");}
+  else if(_mrIdx>=0){effViolations.splice(_mrIdx,1);}
   var setupChain=[t.setup,t.timeframe,t.candlePattern].filter(function(x){return !!x;});
   var hasSetupInfo=setupChain.length>0;
   var hasTags=emos.length>0||effViolations.length>0;
@@ -10092,7 +10089,12 @@ function App(props){
     var rmDollar=parseFloat(settings&&settings.riskMax)||0;
     var riskCapDollars=rmDollar>0?rmDollar*sf:0;
     var maxRiskIdx=v.indexOf("Max risk exceeded");
-    var stoppedOut=(!isNaN(pnlNum)&&pnlNum<0&&riskCapDollars>0&&pnlNum<-riskCapDollars);
+    // CHANGED: % based check — pctPnl < -(stopThreshPct scaled by grade). Grade-scale so a B/C
+    // trade's max risk % also tightens with the trade's smaller size intent.
+    var _gm2=t.grade==="A"?1:t.grade==="B"?0.75:t.grade==="C"?0.5:1;
+    var _slPct2=stopThreshPct*_gm2;
+    var _pnlPct=parseFloat(t.pctPnl);
+    var stoppedOut=(_slPct2>0&&!isNaN(_pnlPct)&&_pnlPct<-_slPct2);
     if(stoppedOut){
       if(maxRiskIdx<0)v.push("Max risk exceeded");
     }else if(maxRiskIdx>=0){
