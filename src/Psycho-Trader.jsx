@@ -9926,7 +9926,7 @@ function App(props){
     // CHANGED: One-time backfill — rewrite each historical trade's "Max risk exceeded" flag
     // under the new % rule (pctPnl < -stopThreshPctAtEntry, no grade scaling). Runs once.
     try{
-      if(localStorage.getItem("pt-maxrisk-pct-v2")==="1")return;
+      if(localStorage.getItem("pt-maxrisk-pct-v3")==="1")return;
       var _fallbackSlPct=0;try{var _ss=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}");_fallbackSlPct=parseFloat(_ss.riskMaxPct)||0;}catch(e){}
       var updated=0;
       for(var i=0;i<localStorage.length;i++){
@@ -9937,19 +9937,25 @@ function App(props){
           var dirty=false;
           e.trades=e.trades.map(function(t){
             if(!t)return t;
+            var patch={};
+            // CHANGED: Overwrite stamped stopThreshPct to raw riskMaxPct (was previously stamped as
+            // riskMaxPct × sizeFraction, incorrectly tightening the % threshold for half-size trades).
+            if(_fallbackSlPct>0&&t.stopThreshPctAtEntry!==_fallbackSlPct){patch.stopThreshPctAtEntry=_fallbackSlPct;}
             var v=(t.violations||[]).slice();
             var idx=v.indexOf("Max risk exceeded");
-            var slPct=parseFloat(t.stopThreshPctAtEntry)||_fallbackSlPct;
+            var slPct=_fallbackSlPct;
             var pct=parseFloat(t.pctPnl);
             var should=slPct>0&&!isNaN(pct)&&pct<-slPct;
-            if(should&&idx<0){v.push("Max risk exceeded");dirty=true;updated++;return Object.assign({},t,{violations:v});}
-            if(!should&&idx>=0){v.splice(idx,1);dirty=true;updated++;return Object.assign({},t,{violations:v});}
-            return t;
+            if(should&&idx<0){v.push("Max risk exceeded");patch.violations=v;updated++;}
+            else if(!should&&idx>=0){v.splice(idx,1);patch.violations=v;updated++;}
+            if(Object.keys(patch).length===0)return t;
+            dirty=true;
+            return Object.assign({},t,patch);
           });
           if(dirty)localStorage.setItem(k,JSON.stringify(e));
         }catch(err){}
       }
-      localStorage.setItem("pt-maxrisk-pct-v2","1");
+      localStorage.setItem("pt-maxrisk-pct-v3","1");
       if(updated>0&&bumpReloadKey)bumpReloadKey();
     }catch(e){}
   // eslint-disable-next-line
@@ -10112,7 +10118,9 @@ function App(props){
     }else if(overIdx>=0){
       v.splice(overIdx,1);
     }
-    var stopThreshPct=(riskMaxPct>0)?riskMaxPct*sf:0;
+    // CHANGED: Stop loss max % is the largest stop distance from ENTRY — position size doesn't
+    // scale the % threshold. A 30% stop is 30% whether the position is full or half size.
+    var stopThreshPct=riskMaxPct>0?riskMaxPct:0;
     // CHANGED: "Max risk exceeded" is dollar-based, not %-based. Previous %-based check
     // (pctPnl < -(riskMaxPct × sf)) was conceptually wrong: at half-size both the dollar risk
     // cap AND the position shrink by sf, so the % stays invariant — multiplying by sf made the
