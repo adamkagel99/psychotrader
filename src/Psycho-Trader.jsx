@@ -9860,7 +9860,7 @@ function App(props){
     // CHANGED: One-time backfill — recompute every historical journal entry's disciplineScore
     // now that bonuses have been removed. Runs once per install.
     try{
-      if(localStorage.getItem("pt-disc-nobonus-v1")==="1")return;
+      if(localStorage.getItem("pt-disc-nobonus-v2")==="1")return;
       var updated=0;
       for(var i=0;i<localStorage.length;i++){
         var k=localStorage.key(i);if(!k||k.indexOf("journal:")!==0)continue;
@@ -9873,7 +9873,7 @@ function App(props){
           if(e.disciplineScore!==newScore){e.disciplineScore=newScore;localStorage.setItem(k,JSON.stringify(e));updated++;}
         }catch(err){}
       }
-      localStorage.setItem("pt-disc-nobonus-v1","1");
+      localStorage.setItem("pt-disc-nobonus-v2","1");
       if(updated>0&&bumpReloadKey)bumpReloadKey();
     }catch(e){}
   // eslint-disable-next-line
