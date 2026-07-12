@@ -5395,6 +5395,13 @@ function TradesTab(props){
         var ntSessions=(isToday?(props.state&&props.state.noTradeSessions):((pastSession&&pastSession.noTradeSessions)||(todayJournalEntry&&todayJournalEntry.noTradeSessions)))||{};
         var byGroup={};
         var groupOrder=[];
+        // CHANGED: When a non-timestamp sort is active, put every trade in one flat bucket so
+        // sorting is respected purely by the selected criterion.
+        var _flatSort=sortChain&&sortChain.length>0&&sortChain[0]!=="timestamp";
+        if(_flatSort){
+          byGroup["_flat"]={key:"_flat",items:displayTrades.map(function(t,i){return {t:t,i:i};})};
+          groupOrder.push("_flat");
+        }
         // Sort sessions by start for gap computation.
         var sortedSess=enabledSess.slice().sort(function(a,b){return (a.startMin||0)-(b.startMin||0);});
         // For each trade, find its chronological bucket. In-session → session id. Out-of-session →
@@ -5416,6 +5423,7 @@ function TradesTab(props){
           if(gk.indexOf("_out_before_")===0){var sid=gk.slice(12);var s=sortedSess.find(function(x){return x.id===sid;});return s?s.startMin-0.5:0;}
           var s2=sortedSess.find(function(x){return x.id===gk;});return s2?s2.startMin:0;
         }
+        if(!_flatSort){
         displayTrades.forEach(function(t,i){
           var sid=null;try{sid=getSessionForTrade(t);}catch(e){}
           var key;
@@ -5424,29 +5432,17 @@ function TradesTab(props){
           if(!byGroup[key]){byGroup[key]={key:key,items:[]};groupOrder.push(key);}
           byGroup[key].items.push({t:t,i:i});
         });
+        }
         // Ensure every relevant session has a group entry (even if empty).
         // For TODAY: only include sessions that have started (or are within 15 min of start).
         // Future sessions stay hidden until their window opens. Past days always show all.
+        if(!_flatSort){
         var nowMins=isToday?getCurrentMinutesLocal():null;
         relevantSess.forEach(function(s){
           if(isToday&&nowMins<(s.startMin-15))return;
           if(!byGroup[s.id]){byGroup[s.id]={key:s.id,items:[]};groupOrder.push(s.id);}
         });
-        // CHANGED: When sort chain is non-default (something other than timestamp), order session
-        // groups by the earliest position of any of their trades in the already-sorted
-        // displayTrades list — so higher-ranked trades' sessions come first. Default sort still
-        // uses session start time.
-        var _sortIsCustom=sortChain&&sortChain.length>0&&sortChain[0]!=="timestamp";
-        if(_sortIsCustom){
-          var firstIdx={};
-          displayTrades.forEach(function(t,idx){
-            var sid=null;try{sid=getSessionForTrade(t);}catch(e){}
-            var key=sid||(function(){var ob=outBucketFor(t);return ob.id;})();
-            if(firstIdx[key]==null)firstIdx[key]=idx;
-          });
-          groupOrder.sort(function(a,b){return (firstIdx[a]==null?9999:firstIdx[a])-(firstIdx[b]==null?9999:firstIdx[b]);});
-        }else{
-          groupOrder.sort(function(a,b){return sortMinFor(a)-sortMinFor(b);});
+        groupOrder.sort(function(a,b){return sortMinFor(a)-sortMinFor(b);});
         }
         function fmtMins(m){var h=Math.floor(m/60),mm=m%60,ap=h>=12?"PM":"AM";var h12=((h+11)%12)+1;return h12+":"+(mm<10?"0":"")+mm+" "+ap;}
         function headerFor(key){
@@ -5502,21 +5498,23 @@ function TradesTab(props){
           var g=byGroup[gk];
           var hdr=headerFor(gk);
           var isEmpty=g.items.length===0;
+          var isFlat=gk==="_flat";
           var isOutOfSession=gk==="_out_after"||gk.indexOf("_out_before_")===0;
               var isRelevantSession=!isOutOfSession&&relevantSess.some(function(s){return s.id===gk;});
           var collapseKey="pt-sess-collapse:"+gk;
-          var isCollapsed=collapsedMap[gk]!==false; // default collapsed
+          var isCollapsed=!isFlat&&collapsedMap[gk]!==false; // default collapsed; flat is always open
           function toggleCollapsed(){
+            if(isFlat)return;
             setCollapsedMap(function(m){var n=Object.assign({},m);var next=!(m[gk]!==false);n[gk]=!next?false:true;try{localStorage.setItem(collapseKey,n[gk]?"1":"0");}catch(e){}return n;});
           }
           return (
             <div key={gk} style={{marginBottom:16}}>
-              <div onClick={toggleCollapsed} style={{display:"flex",alignItems:"baseline",gap:10,marginBottom:isCollapsed?0:8,paddingBottom:6,borderBottom:"1px solid "+hdr.border,cursor:"pointer",userSelect:"none"}}>
+              {!isFlat&&<div onClick={toggleCollapsed} style={{display:"flex",alignItems:"baseline",gap:10,marginBottom:isCollapsed?0:8,paddingBottom:6,borderBottom:"1px solid "+hdr.border,cursor:"pointer",userSelect:"none"}}>
                 <span style={{fontSize:11,color:hdr.color,transform:isCollapsed?"rotate(-90deg)":"none",transition:"transform 0.15s",display:"inline-block"}}>▾</span>
                 <span style={{fontSize:11,fontWeight:800,letterSpacing:1,textTransform:"uppercase",color:hdr.color}}>{hdr.label}</span>
                 {hdr.sub&&<span style={{fontSize:11,color:"#64748b",fontVariantNumeric:"tabular-nums"}}>{hdr.sub}</span>}
                 <span style={{fontSize:11,color:"#475569",marginLeft:"auto"}}>{g.items.length===0?((ntSessions[gk]||sessionEnded(gk))?"no-trade":"empty"):g.items.length+" trade"+(g.items.length===1?"":"s")}</span>
-              </div>
+              </div>}
               {!isCollapsed&&(<>
               {!isEmpty&&(
                 <div style={{display:"grid",gridTemplateColumns:props.mobile?"1fr":"1fr 1fr 1fr",gap:12,alignItems:"stretch"}}>
