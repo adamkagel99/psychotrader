@@ -5432,7 +5432,22 @@ function TradesTab(props){
           if(isToday&&nowMins<(s.startMin-15))return;
           if(!byGroup[s.id]){byGroup[s.id]={key:s.id,items:[]};groupOrder.push(s.id);}
         });
-        groupOrder.sort(function(a,b){return sortMinFor(a)-sortMinFor(b);});
+        // CHANGED: When sort chain is non-default (something other than timestamp), order session
+        // groups by the earliest position of any of their trades in the already-sorted
+        // displayTrades list — so higher-ranked trades' sessions come first. Default sort still
+        // uses session start time.
+        var _sortIsCustom=sortChain&&sortChain.length>0&&sortChain[0]!=="timestamp";
+        if(_sortIsCustom){
+          var firstIdx={};
+          displayTrades.forEach(function(t,idx){
+            var sid=null;try{sid=getSessionForTrade(t);}catch(e){}
+            var key=sid||(function(){var ob=outBucketFor(t);return ob.id;})();
+            if(firstIdx[key]==null)firstIdx[key]=idx;
+          });
+          groupOrder.sort(function(a,b){return (firstIdx[a]==null?9999:firstIdx[a])-(firstIdx[b]==null?9999:firstIdx[b]);});
+        }else{
+          groupOrder.sort(function(a,b){return sortMinFor(a)-sortMinFor(b);});
+        }
         function fmtMins(m){var h=Math.floor(m/60),mm=m%60,ap=h>=12?"PM":"AM";var h12=((h+11)%12)+1;return h12+":"+(mm<10?"0":"")+mm+" "+ap;}
         function headerFor(key){
           if(key==="_out_after")return {label:"Out of Session · After",sub:"",color:"#fcd34d",border:"#a1620744"};
