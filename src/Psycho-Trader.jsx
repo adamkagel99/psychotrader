@@ -2759,21 +2759,17 @@ function TradeTile(props){
           {t.direction&&<span style={{fontSize:11,padding:"3px 9px",borderRadius:4,background:dirBg,color:dirText,fontWeight:700,letterSpacing:0.5}}>{t.direction}{(t.strike!=null&&t.strike!==""&&!isNaN(parseFloat(t.strike)))?(" $"+(function(){var n=parseFloat(t.strike);return n%1===0?n.toFixed(0):n.toString();})()):""}</span>}
           {isOpen&&<span style={{fontSize:10,padding:"2px 7px",background:"#7c2d1244",border:"1px solid #ea580c",borderRadius:3,color:"#fb923c",fontWeight:700,letterSpacing:0.5}}>OPEN</span>}
         </div>
-        {showButtons&&(
-          <div style={{display:"flex",gap:5,flexShrink:0,alignItems:"center"}}>
-            {(function(){
-              // CHANGED: Day discipline score badge. Prefers explicit prop; falls back to trade's
-              // stamped _dayDiscScore. Colored green ≥ threshold, red below.
-              var ds=props.disciplineScore!=null?parseFloat(props.disciplineScore):parseFloat(t._dayDiscScore);
-              if(isNaN(ds))return null;
-              var th=loadDisciplineLockThreshold();
-              var good=ds>=th;
-              return <span title={"Day discipline score"} style={{fontSize:10,padding:"3px 7px",borderRadius:4,background:good?"#14532d":"#7f1d1d",color:good?"#86efac":"#fca5a5",fontWeight:700,letterSpacing:0.5,border:"1px solid "+(good?"#22c55e":"#ef4444")}}>D {Math.round(ds)}</span>;
-            })()}
-            {onEdit&&<button onClick={onEdit} style={{padding:"4px 10px",background:"transparent",border:"1px solid #334155",borderRadius:4,color:"#94a3b8",fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:600,letterSpacing:0.4}}>Edit</button>}
-            {onDelete&&<button onClick={onDelete} aria-label="Delete" style={{padding:"4px 9px",background:"transparent",border:"1px solid #334155",borderRadius:4,color:"#64748b",fontSize:13,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>}
-          </div>
-        )}
+        <div style={{display:"flex",gap:5,flexShrink:0,alignItems:"center"}}>
+          {(function(){
+            var ds=props.disciplineScore!=null?parseFloat(props.disciplineScore):parseFloat(t._dayDiscScore);
+            if(isNaN(ds))return null;
+            var th=loadDisciplineLockThreshold();
+            var good=ds>=th;
+            return <span title="Day discipline score" style={{fontSize:10,padding:"3px 7px",borderRadius:4,background:good?"#14532d":"#7f1d1d",color:good?"#86efac":"#fca5a5",fontWeight:700,letterSpacing:0.5,border:"1px solid "+(good?"#22c55e":"#ef4444")}}>D {Math.round(ds)}</span>;
+          })()}
+          {showButtons&&onEdit&&<button onClick={onEdit} style={{padding:"4px 10px",background:"transparent",border:"1px solid #334155",borderRadius:4,color:"#94a3b8",fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:600,letterSpacing:0.4}}>Edit</button>}
+          {showButtons&&onDelete&&<button onClick={onDelete} aria-label="Delete" style={{padding:"4px 9px",background:"transparent",border:"1px solid #334155",borderRadius:4,color:"#64748b",fontSize:13,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>}
+        </div>
       </div>
 
       {/* P&L ROW: when $ is hidden, show % in the large slot; otherwise show $ + smaller %. */}
@@ -4786,7 +4782,7 @@ function TradesTab(props){
     return "2R+";
   }
   // CHANGED: Stamp the day's disciplineScore on each trade so the Discipline filter can bucket.
-  var _dayDisc=parseFloat(isToday?(state.disciplineScore||NaN):(pastSession&&pastSession.disciplineScore));
+  var _dayDisc=parseFloat(isToday?(function(){try{return calcDiscipline((state.trades||[]).filter(function(t){return t&&t.status!=="open";}),settings.riskMax,state.commitments&&typeof state.commitments==="object"?{commitments:state.commitments}:{commitment:state.commitment});}catch(e){return NaN;}})():(pastSession&&pastSession.disciplineScore));
   var displayTrades=rawTrades.slice().filter(function(t){return t.status!=="open";}).map(function(t){return Object.assign({},t,{_dayDiscScore:_dayDisc});});
   filterDefs.forEach(function(fd){var sel=filters[fd.key];if(!sel||!sel.length)return;displayTrades=displayTrades.filter(function(t){if(fd.key==="emotions")return(t[fd.key]||[]).some(function(e){return sel.indexOf(e)>=0;});if(fd.key==="violations"){var v=t.violations||[];if(sel.indexOf("None")>=0&&v.length===0)return true;return v.some(function(e){return sel.indexOf(e)>=0;});}if(fd.key==="rBucket")return sel.indexOf(_rBucketOf(t))>=0;if(fd.key==="discBucket"){var ds=parseFloat(t._dayDiscScore);if(isNaN(ds))return false;var th=loadDisciplineLockThreshold();var b=ds>=th?"Clean (≥"+th+")":"Broken (<"+th+")";return sel.indexOf(b)>=0;}if(fd.key==="sessionBucket"){var sid=null;try{sid=getSessionForTrade(t);}catch(e){}if(!sid)return sel.indexOf("Out of Session")>=0;var sess=(getSessions(settings)||[]).find(function(x){return x.id===sid;});var nm=sess?(sess.name||sess.label||sess.id):sid;return sel.indexOf(nm)>=0;}return sel.indexOf(t[fd.key])>=0;});});
   // CHANGED: Multi-level sort. Each sort id maps to a comparator; the chain applies them in
@@ -5507,7 +5503,7 @@ function TradesTab(props){
                       <div key={t.id||i} style={isEditing?{gridColumn:"1 / -1"}:null}>
                         {isEditing
                           ?<TradeForm trade={editDraft||t} setTrade={function(updater){setEditDraft(function(prev){var base=prev||t;return typeof updater==="function"?updater(base):updater;});}} onSave={function(updated){savePastTrade(updated);setEditDraft(null);}} onCancel={cancelEdit} settings={settings} tradeOptions={props.tradeOptions}/>
-                          :<TradeTile t={t} i={i} posMax={settings.positionMax} riskMax={settings.riskMax} onDelete={onDeleteFn} onEdit={function(){startEdit(t);}}/>
+                          :<TradeTile t={t} i={i} posMax={settings.positionMax} riskMax={settings.riskMax} disciplineScore={_dayDisc} onDelete={onDeleteFn} onEdit={function(){startEdit(t);}}/>
                         }
                       </div>
                     );
