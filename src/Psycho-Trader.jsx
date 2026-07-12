@@ -2756,11 +2756,17 @@ function TradeTile(props){
         </div>
         <div style={{display:"flex",gap:5,flexShrink:0,alignItems:"center"}}>
           {(function(){
-            var ds=props.disciplineScore!=null?parseFloat(props.disciplineScore):parseFloat(t._dayDiscScore);
-            if(isNaN(ds))return null;
+            var ds=DEFAULT_DISCIPLINE_SCORING;
+            try{var st=JSON.parse(localStorage.getItem("tf-disc-scoring")||"null");if(st)ds=Object.assign({},ds,st);}catch(e){}
+            var sentiments={};try{var opts=JSON.parse(localStorage.getItem("tf-trade-options")||"null");if(opts&&opts.emotionSentiments)sentiments=opts.emotionSentiments;}catch(e){}
+            var score=100;
+            score-=(effViolations||[]).length*(ds.violationPenalty||15);
+            score-=(t.emotions||[]).filter(function(x){return getEmotionSentiment(x,sentiments)==="negative";}).length*(ds.negEmotionPenalty||10);
+            if(t.grade==="C")score-=(ds.cGradePenalty||5);
+            score=Math.max(0,Math.min(100,score));
             var th=loadDisciplineLockThreshold();
-            var good=ds>=th;
-            return <span title="Day discipline score" style={{fontSize:10,padding:"3px 7px",borderRadius:4,background:good?"#14532d":"#7f1d1d",color:good?"#86efac":"#fca5a5",fontWeight:700,letterSpacing:0.5,border:"1px solid "+(good?"#22c55e":"#ef4444")}}>D {Math.round(ds)}</span>;
+            var good=score>=th;
+            return <span title="Trade discipline score" style={{fontSize:10,padding:"3px 7px",borderRadius:4,background:good?"#14532d":"#7f1d1d",color:good?"#86efac":"#fca5a5",fontWeight:700,letterSpacing:0.5,border:"1px solid "+(good?"#22c55e":"#ef4444")}}>D {Math.round(score)}</span>;
           })()}
           {showButtons&&onEdit&&<button onClick={onEdit} style={{padding:"4px 10px",background:"transparent",border:"1px solid #334155",borderRadius:4,color:"#94a3b8",fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:600,letterSpacing:0.4}}>Edit</button>}
           {showButtons&&onDelete&&<button onClick={onDelete} aria-label="Delete" style={{padding:"4px 9px",background:"transparent",border:"1px solid #334155",borderRadius:4,color:"#64748b",fontSize:13,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>}
