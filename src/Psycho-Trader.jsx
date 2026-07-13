@@ -3252,17 +3252,28 @@ function TradeForm(props){
                 {["A","B","C"].map(function(g){return <button key={g} onClick={function(){upd("grade",g);}} style={{width:"100%",padding:"10px 12px",background:trade.grade===g?(g==="A"?"#14532d":g==="B"?"#713f12":"#7f1d1d"):"#0a0a0f",border:"1px solid "+(trade.grade===g?(g==="A"?"#22c55e":g==="B"?"#f59e0b":"#ef4444"):"#334155"),borderRadius:8,color:trade.grade===g?"#fff":"#64748b",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",boxSizing:"border-box"}}>{g}</button>;})}
               </div>
               {(function(){
-                // CHANGED: Grade criteria shown as a bulleted checklist (visual reminder).
                 var gc=settings&&settings.gradeCriteria;
                 if(!trade.grade||!gc)return null;
                 var raw=gc[trade.grade];
                 var items=Array.isArray(raw)?raw:(typeof raw==="string"&&raw?raw.split(/\r?\n/).map(function(x){return x.trim();}).filter(Boolean):[]);
                 if(items.length===0)return null;
                 var c=trade.grade==="A"?"#22c55e":trade.grade==="B"?"#f59e0b":"#ef4444";
+                var checkedMap=trade.gradeChecked||{};
+                var checked=checkedMap[trade.grade]||[];
+                function toggle(ix){
+                  var next=checked.slice();
+                  var i=next.indexOf(ix);
+                  if(i>=0)next.splice(i,1);else next.push(ix);
+                  var nm=Object.assign({},checkedMap);nm[trade.grade]=next;
+                  upd("gradeChecked",nm);
+                }
                 return <div style={{marginTop:5,padding:"7px 10px",background:"#0a0a0f",border:"1px solid #1e293b",borderLeft:"3px solid "+c,borderRadius:5}}>
-                  {items.map(function(it,ix){return <div key={ix} style={{display:"flex",alignItems:"flex-start",gap:7,fontSize:11,color:"#cbd5e1",lineHeight:1.4,padding:"2px 0"}}>
-                    <span style={{color:c,fontWeight:700,flexShrink:0}}>☐</span><span>{it}</span>
-                  </div>;})}
+                  {items.map(function(it,ix){
+                    var isChecked=checked.indexOf(ix)>=0;
+                    return <div key={ix} onClick={function(){toggle(ix);}} style={{display:"flex",alignItems:"flex-start",gap:7,fontSize:11,color:isChecked?"#64748b":"#cbd5e1",lineHeight:1.4,padding:"3px 0",cursor:"pointer",userSelect:"none",textDecoration:isChecked?"line-through":"none"}}>
+                      <span style={{color:c,fontWeight:700,flexShrink:0}}>{isChecked?"☑":"☐"}</span><span>{it}</span>
+                    </div>;
+                  })}
                 </div>;
               })()}
             </div>
