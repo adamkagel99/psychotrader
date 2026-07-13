@@ -7746,8 +7746,33 @@ function PerformanceTab(props){
   var filtered=allRows.filter(function(r){return inRange(r.date);});
   // CHANGED: Discipline-score filter — narrows rows to clean/broken days based on threshold.
   var _discThresh=loadDisciplineLockThreshold();
-  if(discFilter==="clean")filtered=filtered.filter(function(r){var s=parseFloat(r.disciplineScore);return !isNaN(s)&&s>=_discThresh;});
-  else if(discFilter==="broken")filtered=filtered.filter(function(r){var s=parseFloat(r.disciplineScore);return !isNaN(s)&&s<_discThresh;});
+  // CHANGED: Discipline filter now scopes per-trade (matches trade card badge). Keeps day rows
+  // but strips trades that don't match the selected discipline bucket. Empty rows drop out.
+  if(discFilter==="clean"||discFilter==="broken"){
+    var _ds=DEFAULT_DISCIPLINE_SCORING;try{var _st=JSON.parse(localStorage.getItem("tf-disc-scoring")||"null");if(_st)_ds=Object.assign({},_ds,_st);}catch(e){}
+    var _sen={};try{var _to=JSON.parse(localStorage.getItem("tf-trade-options")||"null");if(_to&&_to.emotionSentiments)_sen=_to.emotionSentiments;}catch(e){}
+    function tradeDisc(t){
+      var v=(t.violations||[]).slice();
+      var sm=parseFloat(t.posMaxAtEntry)||0;
+      var sf=parseFloat(t.sizeFraction)||1;
+      var gm=t.grade==="A"?1:t.grade==="B"?0.75:t.grade==="C"?0.5:1;
+      var lpm=(parseFloat(settings.positionMax)||0)*sf*gm;
+      var cap=t.grade?lpm:Math.max(sm,lpm);
+      var pos=parseFloat(t.positionSize)||0;
+      var oi=v.indexOf("Oversized entry");
+      if(cap>0&&pos>cap){if(oi<0)v.push("Oversized entry");}else if(oi>=0){v.splice(oi,1);}
+      var sc=100;
+      sc-=v.length*(_ds.violationPenalty||15);
+      sc-=(t.emotions||[]).filter(function(x){return getEmotionSentiment(x,_sen)==="negative";}).length*(_ds.negEmotionPenalty||10);
+      if(t.grade==="C")sc-=(_ds.cGradePenalty||5);
+      return Math.max(0,Math.min(100,sc));
+    }
+    filtered=filtered.map(function(r){
+      var kept=(r.trades||[]).filter(function(t){if(!t||t.status==="open")return false;var s=tradeDisc(t);return discFilter==="clean"?s>=_discThresh:s<_discThresh;});
+      if(kept.length===0)return null;
+      return Object.assign({},r,{trades:kept});
+    }).filter(Boolean);
+  }
   filtered.sort(function(a,b){return new Date(a.date)-new Date(b.date);});
   var allTrades=[];filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status!=="open")allTrades.push(t);});});
   // CHANGED: trading day = row with closed trades OR a non-zero stored pnl (covers entries whose
