@@ -7294,10 +7294,29 @@ function DisciplineScatter(props){
       var sorted=trades.slice().sort(function(a,b){var ma=parseTimeToMinsOfDay(a.time)||0;var mb=parseTimeToMinsOfDay(b.time)||0;return ma-mb;});
       var sb=0;try{sb=getAccountBalanceAtDate(r.date);}catch(e){}
       sorted.forEach(function(t,i){
-        // CHANGED: Per-trade discipline (matches the trade card badge + filter). Score the
-        // individual trade only — no accumulated day context. Falls back to processOnly day score
-        // if you need aggregate: swap [t] for slice.
-        var score=calcDiscipline([t],parseFloat(r.riskMax)||0,{processOnly:true,commitment:null});
+        // CHANGED: Compute per-trade discipline using the SAME live-derived violations the badge
+        // and filter use — so filter + scatter agree. Otherwise stored/live mismatch on
+        // "Oversized entry" / "Max risk exceeded" produced a filter/plot desync.
+        var _ds=DEFAULT_DISCIPLINE_SCORING;try{var _st=JSON.parse(localStorage.getItem("tf-disc-scoring")||"null");if(_st)_ds=Object.assign({},_ds,_st);}catch(e){}
+        var _sen={};try{var _to=JSON.parse(localStorage.getItem("tf-trade-options")||"null");if(_to&&_to.emotionSentiments)_sen=_to.emotionSentiments;}catch(e){}
+        var v=(t.violations||[]).slice();
+        var sm=parseFloat(t.posMaxAtEntry)||0;
+        var sf=parseFloat(t.sizeFraction)||1;
+        var gm=t.grade==="A"?1:t.grade==="B"?0.75:t.grade==="C"?0.5:1;
+        var lpm=(parseFloat(settings.positionMax)||0)*sf*gm;
+        var cap=t.grade?lpm:Math.max(sm,lpm);
+        var pos=parseFloat(t.positionSize)||0;
+        var oi=v.indexOf("Oversized entry");
+        if(cap>0&&pos>cap){if(oi<0)v.push("Oversized entry");}else if(oi>=0){v.splice(oi,1);}
+        var mri=v.indexOf("Max risk exceeded");
+        var slPct=parseFloat(t.stopThreshPctAtEntry);if(isNaN(slPct)||slPct<=0)slPct=parseFloat(settings.riskMaxPct)||0;
+        var pctPnl=parseFloat(t.pctPnl);
+        if(slPct>0&&!isNaN(pctPnl)&&pctPnl<-slPct){if(mri<0)v.push("Max risk exceeded");}else if(mri>=0){v.splice(mri,1);}
+        var score=100;
+        score-=v.length*(_ds.violationPenalty||15);
+        score-=(t.emotions||[]).filter(function(x){return getEmotionSentiment(x,_sen)==="negative";}).length*(_ds.negEmotionPenalty||10);
+        if(t.grade==="C")score-=(_ds.cGradePenalty||5);
+        score=Math.max(0,Math.min(100,score));
         var pnl=parseFloat(t.pnl)||0;
         var rv=tradeR(t,parseFloat(r.riskMax)||0);
         pts.push({date:r.date,score:score,pnl:pnl,pct:sb>0?(pnl/sb*100):0,r:rv,n:1});
