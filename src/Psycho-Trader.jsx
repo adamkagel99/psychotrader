@@ -1594,14 +1594,13 @@ function isMonthHalfsizeActive(){
 // instead of totalPnL/settings.riskMax.
 function tradeR(t,riskMaxSetting){
   if(!t||t.status==="open")return 0;
-  var pct=parseFloat(t.pctPnl);
-  if(isNaN(pct))return 0;
-  // CHANGED: R now measures outcome against the stop-loss-max %, not the $ risk cap. −1R = a
-  // full stop-out at your configured stop distance, size-independent. Prefer stamped
-  // stopThreshPctAtEntry; fall back to current settings.riskMaxPct.
-  var sl=parseFloat(t.stopThreshPctAtEntry);
-  if(isNaN(sl)||sl<=0){try{var s=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}");sl=parseFloat(s.riskMaxPct)||0;}catch(e){sl=0;}}
-  return sl>0?pct/sl:0;
+  var pnl=parseFloat(t.pnl);if(isNaN(pnl))return 0;
+  var sf=(t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))?parseFloat(t.sizeFraction):1;
+  var base=parseFloat(t.riskMaxAtEntry);
+  if(isNaN(base)||base<=0){var cap=parseFloat(t.riskCapDollarsAtEntry);if(!isNaN(cap)&&cap>0&&sf>0)base=cap/sf;}
+  if(isNaN(base)||base<=0)base=parseFloat(riskMaxSetting)||0;
+  var rm=base*sf;
+  return rm>0?pnl/rm:0;
 }
 function dayR(trades,riskMaxSetting){
   return (trades||[]).reduce(function(s,t){return s+tradeR(t,riskMaxSetting);},0);
@@ -4258,15 +4257,7 @@ function GoalsSnapshot(props){
     }catch(e){return 0;}
   })();
   function money(v){if(HIDE_DOLLAR_PNL)return (v<0?"-":"")+"$•••";return (v<0?"-$":"$")+Math.abs(Math.round(v)).toLocaleString();}
-  // CHANGED: when $ is hidden, P&L goals are shown in R. R now = ($ value ÷ start balance × 100) / stopLossMax%
-  // — a "size-neutral outcome unit" consistent with per-trade R.
-  function rFmt(v){
-    var sb=(props.currentAccount||0)-(pnl||0);
-    var slPct=parseFloat(settings.riskMaxPct)||0;
-    if(sb<=0||slPct<=0)return (v>=0?"+":"")+"0.0R";
-    var r=(v/sb*100)/slPct;
-    return (r>=0?"+":"")+r.toFixed(1)+"R";
-  }
+  function rFmt(v){var r=riskMax>0?v/riskMax:0;return (r>=0?"+":"")+r.toFixed(1)+"R";}
   var pnlVal=HIDE_DOLLAR_PNL?rFmt:money;
   var pnlTgt=HIDE_DOLLAR_PNL?rFmt:money;
   // CHANGED: build GoalRing tiles grouped by category to mirror the Goals tab.
