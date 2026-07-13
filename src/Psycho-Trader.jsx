@@ -3252,11 +3252,18 @@ function TradeForm(props){
                 {["A","B","C"].map(function(g){return <button key={g} onClick={function(){upd("grade",g);}} style={{width:"100%",padding:"10px 12px",background:trade.grade===g?(g==="A"?"#14532d":g==="B"?"#713f12":"#7f1d1d"):"#0a0a0f",border:"1px solid "+(trade.grade===g?(g==="A"?"#22c55e":g==="B"?"#f59e0b":"#ef4444"):"#334155"),borderRadius:8,color:trade.grade===g?"#fff":"#64748b",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",boxSizing:"border-box"}}>{g}</button>;})}
               </div>
               {(function(){
-                // CHANGED: Show criteria for the currently-selected grade (configurable in Settings).
+                // CHANGED: Grade criteria shown as a bulleted checklist (visual reminder).
                 var gc=settings&&settings.gradeCriteria;
-                if(!trade.grade||!gc||!gc[trade.grade])return null;
+                if(!trade.grade||!gc)return null;
+                var raw=gc[trade.grade];
+                var items=Array.isArray(raw)?raw:(typeof raw==="string"&&raw?raw.split(/\r?\n/).map(function(x){return x.trim();}).filter(Boolean):[]);
+                if(items.length===0)return null;
                 var c=trade.grade==="A"?"#22c55e":trade.grade==="B"?"#f59e0b":"#ef4444";
-                return <div style={{marginTop:5,padding:"6px 9px",background:"#0a0a0f",border:"1px solid #1e293b",borderLeft:"3px solid "+c,borderRadius:5,fontSize:11,color:"#94a3b8",lineHeight:1.4}}>{gc[trade.grade]}</div>;
+                return <div style={{marginTop:5,padding:"7px 10px",background:"#0a0a0f",border:"1px solid #1e293b",borderLeft:"3px solid "+c,borderRadius:5}}>
+                  {items.map(function(it,ix){return <div key={ix} style={{display:"flex",alignItems:"flex-start",gap:7,fontSize:11,color:"#cbd5e1",lineHeight:1.4,padding:"2px 0"}}>
+                    <span style={{color:c,fontWeight:700,flexShrink:0}}>☐</span><span>{it}</span>
+                  </div>;})}
+                </div>;
               })()}
             </div>
             <div style={{minWidth:0}}>
@@ -9122,13 +9129,24 @@ function SettingsTab(props){
       </SettingsSection>
 
       <SettingsSection title="Setup Grade Criteria">
-        <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Text shown below the A/B/C buttons in the trade form when a grade is selected. Use it as a quick checklist for what makes each grade.</div>
+        <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Checklist items shown below the A/B/C buttons in the trade form when a grade is selected. Each item is a visual reminder of what qualifies each grade.</div>
         {["A","B","C"].map(function(g){
           var gc=(settings&&settings.gradeCriteria)||{};
+          var raw=gc[g];
+          var items=Array.isArray(raw)?raw:(typeof raw==="string"&&raw?raw.split(/\r?\n/).map(function(x){return x.trim();}).filter(Boolean):[]);
           var color=g==="A"?"#22c55e":g==="B"?"#f59e0b":"#ef4444";
-          return <div key={g} style={{marginBottom:10}}>
-            <label style={Object.assign({},lbl,{color:color})}>{g} Grade</label>
-            <textarea rows={2} placeholder={g==="A"?"e.g. Clean setup with confluence, at key level, no chase":g==="B"?"e.g. Decent setup but missing one confluence":"e.g. Suboptimal — take only if managed tightly"} value={gc[g]||""} onChange={function(e){var val=e.target.value;setSettings(function(s){var n=Object.assign({},s.gradeCriteria||{});n[g]=val;return Object.assign({},s,{gradeCriteria:n});});}} style={Object.assign({},fld,{fontFamily:"inherit",resize:"vertical"})}/>
+          function update(next){setSettings(function(s){var n=Object.assign({},s.gradeCriteria||{});n[g]=next;return Object.assign({},s,{gradeCriteria:n});});}
+          return <div key={g} style={{marginBottom:14,paddingBottom:12,borderBottom:"1px solid #1e293b"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+              <span style={{fontSize:12,fontWeight:800,color:color,letterSpacing:1}}>{g} GRADE</span>
+              <span style={{fontSize:10,color:"#475569"}}>{items.length} item{items.length===1?"":"s"}</span>
+            </div>
+            {items.map(function(it,ix){return <div key={ix} style={{display:"flex",gap:6,marginBottom:5,alignItems:"center"}}>
+              <span style={{color:color,fontWeight:700,fontSize:14,flexShrink:0}}>☐</span>
+              <input type="text" value={it} onChange={function(e){var v=e.target.value;var nx=items.slice();nx[ix]=v;update(nx);}} style={Object.assign({},fld,{flex:1,padding:"6px 10px",fontSize:12})}/>
+              <button onClick={function(){var nx=items.slice();nx.splice(ix,1);update(nx);}} style={{padding:"4px 10px",background:"transparent",border:"1px solid #334155",borderRadius:5,color:"#64748b",fontSize:14,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>
+            </div>;})}
+            <button onClick={function(){update(items.concat([""]));}} style={{marginTop:2,padding:"5px 12px",background:"transparent",border:"1px dashed "+color,borderRadius:5,color:color,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ Add criterion</button>
           </div>;
         })}
       </SettingsSection>
