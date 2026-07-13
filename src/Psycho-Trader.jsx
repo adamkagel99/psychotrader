@@ -1522,12 +1522,9 @@ function getLastDayR(){
     var rows=loadJournalRows().filter(function(r){return (r.trades||[]).length>0;}).sort(function(a,b){return new Date(b.date)-new Date(a.date);});
     if(rows.length===0)return {date:null,r:0,pnl:0};
     var r=rows[0];var pnl=parseFloat(r.pnl)||0;
-    // CHANGED: Prefer the entry's STORED riskMax (the value at save time) over the current
-    // settings — keeps the banner's R math identical to what the calendar / day tiles show.
-    // Falls back to current settings only if the entry is missing it.
-    var risk=parseFloat(r.riskMax);
-    if(isNaN(risk)||risk<=0){try{var s=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}");risk=parseFloat(s.riskMax)||0;}catch(e){risk=0;}}
-    var rMult=risk>0?(pnl/risk):0;
+    // CHANGED: Day R uses % formula (sum tradeR across day's trades).
+    var trades=(r.trades||[]).filter(function(t){return t&&t.status!=="open";});
+    var rMult=trades.length>0?dayR(trades,r.riskMax):0;
     return {date:r.date,r:rMult,pnl:pnl};
   }catch(e){return {date:null,r:0,pnl:0};}
 }
@@ -7206,15 +7203,8 @@ function RMultipleHistogram(props){
     (r.trades||[]).forEach(function(t){
       if(!t||t.status==="open")return;
       var pnl=parseFloat(t.pnl);if(isNaN(pnl))return;
-      // CHANGED: Use canonical tradeR (prefers t.riskMaxAtEntry stamp, falls back to
-      // riskCapDollarsAtEntry/sf, then rowRisk). Keeps R stable if settings.riskMax later changes.
       var rv=tradeR(t,rowRisk);
-      if(!isFinite(rv)||rv===0&&pnl!==0){
-        var sf=parseFloat(t.sizeFraction);if(isNaN(sf)||sf<=0)sf=1;
-        var risk=rowRisk*sf;
-        if(risk<=0)return;
-        rv=pnl/risk;
-      }
+      if(!isFinite(rv))return;
       Rs.push(rv);
       if(pnl>0)winsDollar.push(pnl);else if(pnl<0)lossesDollar.push(pnl);
     });
@@ -10393,9 +10383,9 @@ function App(props){
       var riskMaxNum=(parseFloat(settings.riskMax)||0)*effSF;
       if(riskMaxNum>0){
         var rStops=getSessionRStops(rule);
-        var dayR=totalPnL/riskMaxNum;
-        if(dayR<=rStops.lossR)return {ok:false,reason:"Daily loss stop hit ("+rStops.lossR.toFixed(1)+"R)"+(liveLockForSF.locked?" — half-size":"")};
-        if(dayR>=rStops.gainR)return {ok:false,reason:"Daily gain stop hit (+"+rStops.gainR.toFixed(1)+"R)"+(liveLockForSF.locked?" — half-size":"")};
+        var dayRv=dayR((state.trades||[]).filter(function(t){return t&&t.status!=="open";}),parseFloat(settings.riskMax)||0);
+        if(dayRv<=rStops.lossR)return {ok:false,reason:"Daily loss stop hit ("+rStops.lossR.toFixed(1)+"R)"+(liveLockForSF.locked?" — half-size":"")};
+        if(dayRv>=rStops.gainR)return {ok:false,reason:"Daily gain stop hit (+"+rStops.gainR.toFixed(1)+"R)"+(liveLockForSF.locked?" — half-size":"")};
       }
     }
     return {ok:true};
@@ -10410,7 +10400,8 @@ function App(props){
   // R progress bar metrics
   var riskMaxNum=parseFloat(settings.riskMax)||0;
   var gainMult=parseFloat(settings.gainMultiplier)||5;
-  var rValue=riskMaxNum>0?totalPnL/riskMaxNum:0;
+  // CHANGED: R progress bar uses % formula — sum of tradeR across today's trades.
+  var rValue=dayR((state.trades||[]).filter(function(t){return t&&t.status!=="open";}),riskMaxNum);
   // Range: -1R (max loss limit) to +gainMult R (e.g. +5R target). Pad to nice numbers.
   var rMinScale=-1;
   var rMaxScale=gainMult;
