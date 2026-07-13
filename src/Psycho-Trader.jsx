@@ -237,10 +237,9 @@ function getSessionForTrade(t){
   if(t.sessionId){
     var stampedSess=null;
     for(var _i=0;_i<CACHED_SESSIONS.length;_i++){if(CACHED_SESSIONS[_i].id===t.sessionId){stampedSess=CACHED_SESSIONS[_i];break;}}
-    if(!stampedSess)return t.sessionId; // session no longer configured — trust the stamp
-    // Stamped session still exists: honor the stamp only if the trade's actual start time is
-    // inside its window. Otherwise fall through and re-derive from time.
-    if(_mins!=null&&_mins>=stampedSess.startMin&&_mins<stampedSess.endMin)return t.sessionId;
+    // If stamped session is missing OR disabled, fall through to time-based derivation so trades
+    // don't create orphan session buckets. Time-based check still needs stamped time to match.
+    if(stampedSess&&stampedSess.enabled!==false&&_mins!=null&&_mins>=stampedSess.startMin&&_mins<stampedSess.endMin)return t.sessionId;
   }
   var ms=_ms,date=_date,mins=_mins;
   if(mins==null)return null;
