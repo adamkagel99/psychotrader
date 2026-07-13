@@ -7294,12 +7294,11 @@ function DisciplineScatter(props){
       var sorted=trades.slice().sort(function(a,b){var ma=parseTimeToMinsOfDay(a.time)||0;var mb=parseTimeToMinsOfDay(b.time)||0;return ma-mb;});
       var sb=0;try{sb=getAccountBalanceAtDate(r.date);}catch(e){}
       sorted.forEach(function(t,i){
-        var slice=sorted.slice(0,i+1);
-        // Use process-only score so each trade's "discipline so far today" is reflected.
-        var score=calcDiscipline(slice,parseFloat(r.riskMax)||0,r.commitments?{processOnly:true,commitments:r.commitments}:{processOnly:true,commitment:r.commitment||null});
+        // CHANGED: Per-trade discipline (matches the trade card badge + filter). Score the
+        // individual trade only — no accumulated day context. Falls back to processOnly day score
+        // if you need aggregate: swap [t] for slice.
+        var score=calcDiscipline([t],parseFloat(r.riskMax)||0,{processOnly:true,commitment:null});
         var pnl=parseFloat(t.pnl)||0;
-        // CHANGED: Use canonical tradeR (stamped riskMaxAtEntry-preferred) so R matches the
-        // Today strip and R-multiple distribution.
         var rv=tradeR(t,parseFloat(r.riskMax)||0);
         pts.push({date:r.date,score:score,pnl:pnl,pct:sb>0?(pnl/sb*100):0,r:rv,n:1});
       });
