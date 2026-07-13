@@ -944,35 +944,21 @@ function loadJournalRows(){
 // had trades. A day with zero trades (even one with saved pnl=0 / a riskMax) shows blank, not "+0.0R".
 function buildSessionMap(todayPnL,todayRiskMax,todayTradeCount,todayTrades){
   var map={};
-  // CHANGED: Calendar R stays $-based (pnl ÷ trade risk cap), independent of the % tradeR used
-  // everywhere else. This keeps the home calendar readout tied to $ risk, per user preference.
-  function dollarR(trades,rmSetting){
-    return (trades||[]).reduce(function(sum,t){
-      if(!t||t.status==="open")return sum;
-      var pnl=parseFloat(t.pnl);if(isNaN(pnl))return sum;
-      var sf=(t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))?parseFloat(t.sizeFraction):1;
-      var base=parseFloat(t.riskMaxAtEntry);
-      if(isNaN(base)||base<=0){var cap=parseFloat(t.riskCapDollarsAtEntry);if(!isNaN(cap)&&cap>0&&sf>0)base=cap/sf;}
-      if(isNaN(base)||base<=0)base=parseFloat(rmSetting)||0;
-      var rm=base*sf;
-      return sum+(rm>0?pnl/rm:0);
-    },0);
-  }
   loadJournalRows().forEach(function(s){
     var trades=Array.isArray(s.trades)?s.trades.filter(function(t){return t&&t.status!=="open";}):[];
     var tc=trades.length||((parseFloat(s.wins)||0)+(parseFloat(s.losses)||0));
     var rTotal=0;
-    if(trades.length>0){rTotal=dollarR(trades,s.riskMax);}
+    if(trades.length>0){rTotal=dayR(trades,s.riskMax);}
     else if((parseFloat(s.riskMax)||0)>0){rTotal=(parseFloat(s.pnl)||0)/(parseFloat(s.riskMax)||1);}
     map[s.date]={pnl:parseFloat(s.pnl)||0,riskMax:parseFloat(s.riskMax)||0,rTotal:rTotal,tradeCount:tc,noTradeDay:!!s.noTradeDay,wasLocked:!!s.wasLocked};
   });
   var tc=parseInt(todayTradeCount)||0;
   var todayKey=todayStr();
   if(!map[todayKey]&&(tc>0||todayPnL!==0||todayRiskMax>0)){
-    var todayRTotal=Array.isArray(todayTrades)?dollarR(todayTrades.filter(function(t){return t&&t.status!=="open";}),todayRiskMax):(todayRiskMax>0?todayPnL/todayRiskMax:0);
+    var todayRTotal=Array.isArray(todayTrades)?dayR(todayTrades.filter(function(t){return t&&t.status!=="open";}),todayRiskMax):(todayRiskMax>0?todayPnL/todayRiskMax:0);
     map[todayKey]={pnl:todayPnL,riskMax:todayRiskMax||0,rTotal:todayRTotal,tradeCount:tc,noTradeDay:false};
   }else if(map[todayKey]&&tc>map[todayKey].tradeCount){
-    var todayRTotal2=Array.isArray(todayTrades)?dollarR(todayTrades.filter(function(t){return t&&t.status!=="open";}),todayRiskMax):map[todayKey].rTotal;
+    var todayRTotal2=Array.isArray(todayTrades)?dayR(todayTrades.filter(function(t){return t&&t.status!=="open";}),todayRiskMax):map[todayKey].rTotal;
     map[todayKey]=Object.assign({},map[todayKey],{tradeCount:tc,rTotal:todayRTotal2});
   }
   return map;
