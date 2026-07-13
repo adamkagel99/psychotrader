@@ -3251,6 +3251,13 @@ function TradeForm(props){
               <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5,flex:1}}>
                 {["A","B","C"].map(function(g){return <button key={g} onClick={function(){upd("grade",g);}} style={{width:"100%",padding:"10px 12px",background:trade.grade===g?(g==="A"?"#14532d":g==="B"?"#713f12":"#7f1d1d"):"#0a0a0f",border:"1px solid "+(trade.grade===g?(g==="A"?"#22c55e":g==="B"?"#f59e0b":"#ef4444"):"#334155"),borderRadius:8,color:trade.grade===g?"#fff":"#64748b",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",boxSizing:"border-box"}}>{g}</button>;})}
               </div>
+              {(function(){
+                // CHANGED: Show criteria for the currently-selected grade (configurable in Settings).
+                var gc=settings&&settings.gradeCriteria;
+                if(!trade.grade||!gc||!gc[trade.grade])return null;
+                var c=trade.grade==="A"?"#22c55e":trade.grade==="B"?"#f59e0b":"#ef4444";
+                return <div style={{marginTop:5,padding:"6px 9px",background:"#0a0a0f",border:"1px solid #1e293b",borderLeft:"3px solid "+c,borderRadius:5,fontSize:11,color:"#94a3b8",lineHeight:1.4}}>{gc[trade.grade]}</div>;
+              })()}
             </div>
             <div style={{minWidth:0}}>
               <MultiDropdown label="Emotional State" options={opts.emotion} selected={trade.emotions||[]} onChange={function(v){upd("emotions",v);}} negativeOptions={(opts.emotion||[]).filter(function(e){return getEmotionSentiment(e,opts.emotionSentiments||{})==="negative";})}/>
@@ -9114,6 +9121,17 @@ function SettingsTab(props){
         })()}
       </SettingsSection>
 
+      <SettingsSection title="Setup Grade Criteria">
+        <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Text shown below the A/B/C buttons in the trade form when a grade is selected. Use it as a quick checklist for what makes each grade.</div>
+        {["A","B","C"].map(function(g){
+          var gc=(settings&&settings.gradeCriteria)||{};
+          var color=g==="A"?"#22c55e":g==="B"?"#f59e0b":"#ef4444";
+          return <div key={g} style={{marginBottom:10}}>
+            <label style={Object.assign({},lbl,{color:color})}>{g} Grade</label>
+            <textarea rows={2} placeholder={g==="A"?"e.g. Clean setup with confluence, at key level, no chase":g==="B"?"e.g. Decent setup but missing one confluence":"e.g. Suboptimal — take only if managed tightly"} value={gc[g]||""} onChange={function(e){var val=e.target.value;setSettings(function(s){var n=Object.assign({},s.gradeCriteria||{});n[g]=val;return Object.assign({},s,{gradeCriteria:n});});}} style={Object.assign({},fld,{fontFamily:"inherit",resize:"vertical"})}/>
+          </div>;
+        })}
+      </SettingsSection>
       <SettingsSection title="Discipline Scoring">
         <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Customize how points are awarded or deducted from your daily discipline score (starts at 100).</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:8}}>
