@@ -944,24 +944,35 @@ function loadJournalRows(){
 // had trades. A day with zero trades (even one with saved pnl=0 / a riskMax) shows blank, not "+0.0R".
 function buildSessionMap(todayPnL,todayRiskMax,todayTradeCount,todayTrades){
   var map={};
+  // CHANGED: Calendar R stays $-based (pnl ÷ trade risk cap), independent of the % tradeR used
+  // everywhere else. This keeps the home calendar readout tied to $ risk, per user preference.
+  function dollarR(trades,rmSetting){
+    return (trades||[]).reduce(function(sum,t){
+      if(!t||t.status==="open")return sum;
+      var pnl=parseFloat(t.pnl);if(isNaN(pnl))return sum;
+      var sf=(t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))?parseFloat(t.sizeFraction):1;
+      var base=parseFloat(t.riskMaxAtEntry);
+      if(isNaN(base)||base<=0){var cap=parseFloat(t.riskCapDollarsAtEntry);if(!isNaN(cap)&&cap>0&&sf>0)base=cap/sf;}
+      if(isNaN(base)||base<=0)base=parseFloat(rmSetting)||0;
+      var rm=base*sf;
+      return sum+(rm>0?pnl/rm:0);
+    },0);
+  }
   loadJournalRows().forEach(function(s){
     var trades=Array.isArray(s.trades)?s.trades.filter(function(t){return t&&t.status!=="open";}):[];
     var tc=trades.length||((parseFloat(s.wins)||0)+(parseFloat(s.losses)||0));
-    // CHANGED: rTotal sums per-trade R against each trade's stamped sizeFraction (canonical R
-    // model). Falls back to pnl/riskMax for legacy rows without a trades array.
     var rTotal=0;
-    if(trades.length>0){rTotal=dayR(trades,s.riskMax);}
+    if(trades.length>0){rTotal=dollarR(trades,s.riskMax);}
     else if((parseFloat(s.riskMax)||0)>0){rTotal=(parseFloat(s.pnl)||0)/(parseFloat(s.riskMax)||1);}
     map[s.date]={pnl:parseFloat(s.pnl)||0,riskMax:parseFloat(s.riskMax)||0,rTotal:rTotal,tradeCount:tc,noTradeDay:!!s.noTradeDay,wasLocked:!!s.wasLocked};
   });
   var tc=parseInt(todayTradeCount)||0;
   var todayKey=todayStr();
   if(!map[todayKey]&&(tc>0||todayPnL!==0||todayRiskMax>0)){
-    // CHANGED: Today's R from live trades (each with its own sizeFraction) when available.
-    var todayRTotal=Array.isArray(todayTrades)?dayR(todayTrades.filter(function(t){return t&&t.status!=="open";}),todayRiskMax):(todayRiskMax>0?todayPnL/todayRiskMax:0);
+    var todayRTotal=Array.isArray(todayTrades)?dollarR(todayTrades.filter(function(t){return t&&t.status!=="open";}),todayRiskMax):(todayRiskMax>0?todayPnL/todayRiskMax:0);
     map[todayKey]={pnl:todayPnL,riskMax:todayRiskMax||0,rTotal:todayRTotal,tradeCount:tc,noTradeDay:false};
   }else if(map[todayKey]&&tc>map[todayKey].tradeCount){
-    var todayRTotal2=Array.isArray(todayTrades)?dayR(todayTrades.filter(function(t){return t&&t.status!=="open";}),todayRiskMax):map[todayKey].rTotal;
+    var todayRTotal2=Array.isArray(todayTrades)?dollarR(todayTrades.filter(function(t){return t&&t.status!=="open";}),todayRiskMax):map[todayKey].rTotal;
     map[todayKey]=Object.assign({},map[todayKey],{tradeCount:tc,rTotal:todayRTotal2});
   }
   return map;
@@ -2445,7 +2456,7 @@ function DashboardCalendar(props){
       <button onClick={function(){setOpen(function(o){return !o;});}} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",padding:"12px 18px 8px",textAlign:"left",position:"relative"}}>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           <span style={{fontSize:13,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{open?"Calendar":"This Week"}</span>
-          {readoutText&&<span onClick={function(e){e.stopPropagation();setSummaryMode(summaryMode==="trades"?"pnl":"trades");}} title={summaryMode==="trades"?"Tap to show P&L":"Tap to show trade count"} style={{fontSize:12,fontWeight:700,color:readoutColor,fontVariantNumeric:"tabular-nums",padding:"2px 7px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:6,cursor:"pointer"}}>{readoutText}</span>}
+          {readoutText&&!open&&<span onClick={function(e){e.stopPropagation();setSummaryMode(summaryMode==="trades"?"pnl":"trades");}} title={summaryMode==="trades"?"Tap to show P&L":"Tap to show trade count"} style={{fontSize:12,fontWeight:700,color:readoutColor,fontVariantNumeric:"tabular-nums",padding:"2px 7px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:6,cursor:"pointer"}}>{readoutText}</span>}
         </div>
         {open&&(function(){
           function move(delta){var m=calMonth+delta;var y=calYear;if(m<0){m=11;y--;}if(m>11){m=0;y++;}setCalYear(y);setCalMonth(m);}
@@ -4239,8 +4250,15 @@ function GoalsSnapshot(props){
     }catch(e){return 0;}
   })();
   function money(v){if(HIDE_DOLLAR_PNL)return (v<0?"-":"")+"$•••";return (v<0?"-$":"$")+Math.abs(Math.round(v)).toLocaleString();}
-  // CHANGED: when $ is hidden, P&L goals are shown in R (value ÷ risk-per-trade).
-  function rFmt(v){var r=riskMax>0?v/riskMax:0;return (r>=0?"+":"")+r.toFixed(1)+"R";}
+  // CHANGED: when $ is hidden, P&L goals are shown in R. R now = ($ value ÷ start balance × 100) / stopLossMax%
+  // — a "size-neutral outcome unit" consistent with per-trade R.
+  function rFmt(v){
+    var sb=(props.currentAccount||0)-(pnl||0);
+    var slPct=parseFloat(settings.riskMaxPct)||0;
+    if(sb<=0||slPct<=0)return (v>=0?"+":"")+"0.0R";
+    var r=(v/sb*100)/slPct;
+    return (r>=0?"+":"")+r.toFixed(1)+"R";
+  }
   var pnlVal=HIDE_DOLLAR_PNL?rFmt:money;
   var pnlTgt=HIDE_DOLLAR_PNL?rFmt:money;
   // CHANGED: build GoalRing tiles grouped by category to mirror the Goals tab.
@@ -8614,6 +8632,14 @@ function HelpGuide(){
         <Chip bg="#3a1010" br="#7f1d1d" c="#fca5a5">½ if locked</Chip>
       </div>
       <p style={p}>The <span style={em}>Computed</span> readout in Settings, the trade form's Position/Risk display, and the Pre-Market Checklist sizing hint all use the same live calc — no drift.</p>
+
+      <div style={section}>Understanding R</div>
+      <Card color="#334155">
+        <div style={{fontSize:13,color:"#e2e8f0",fontWeight:700,marginBottom:6}}>R = trade % return ÷ Stop-Loss Max %</div>
+        <div style={{fontSize:12,color:"#94a3b8",lineHeight:1.55}}>R is a size-independent way of scoring a trade. If your Stop Loss Max is 30%, then a stopped-out trade is exactly <span style={em}>−1R</span>, a full-loss (30% down) whether it was full or half size. A trade that runs 60% is +2R. R judges the <span style={em}>quality of the setup</span> (how far price moved vs your planned risk), not how much dollar risk you took.</div>
+      </Card>
+      <Flow steps={["Stop-Loss Max % from Position Sizing","= 1R unit","Every trade measured in R"]}/>
+      <p style={p}>Where you'll see R: the trade card headline when Hide $ is on, R-multiple histogram, Discipline × Performance scatter, gain/loss stop banner, calendar month totals, session gain/loss stops (expressed in R), and the R Return filter in Journal. Because R uses the % stop threshold rather than a $ figure, historical trades stay comparable even after your risk-max % changes.</p>
 
       <div style={section}>Session Strategy</div>
       <p style={p}>Define sessions (e.g. Options Morning, Options Afternoon) with times, size fraction, max trades, R stops, days-of-week. Each trade auto-attributes by its <span style={em}>actual start time</span>. Off-hours trades bucket into <Chip bg="#1c1408" br="#a16207" c="#fcd34d">Out of Session · Before ⟨session⟩</Chip> or <Chip bg="#1c1408" br="#a16207" c="#fcd34d">Out of Session · After</Chip> — chronologically placed in the journal.</p>
