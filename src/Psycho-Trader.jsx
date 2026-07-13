@@ -2692,13 +2692,10 @@ function TradeTile(props){
   var pctPnl=parseFloat(t.pctPnl||0);
   var hasPnl=t.pnl!==""&&t.pnl!=null&&!isNaN(pnl);
   var hasPct=t.pctPnl!==""&&t.pctPnl!=null&&!isNaN(pctPnl);
-  // CHANGED: Compute R for this trade — prefer stamped dollar risk cap, else derive from
-  // props.riskMax × sizeFraction. Used as the primary big readout when $ is hidden.
-  var _sf=(t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))?parseFloat(t.sizeFraction):1;
-  var _rmFallback=(parseFloat(props.riskMax)||0)*_sf;
-  var _riskCap=(parseFloat(t.riskCapDollarsAtEntry)>0)?parseFloat(t.riskCapDollarsAtEntry):_rmFallback;
-  var rMul=(hasPnl&&_riskCap>0)?(pnl/_riskCap):NaN;
-  var hasR=!isNaN(rMul);
+  // CHANGED: Use canonical tradeR() (% formula: pctPnl / stopLossMax%) so the card matches
+  // R-multiple histogram, scatter, and R filter.
+  var rMul=tradeR(t,parseFloat(props.riskMax)||0);
+  var hasR=!isNaN(rMul)&&rMul!==0;
   var emos=filterEmotions(t.emotions||[]);
   var effViolations=(t.violations||[]).slice();
   var pos=parseFloat(t.positionSize)||0;
