@@ -5502,6 +5502,7 @@ function TradesTab(props){
             return {label:"Out of Session · Before "+nm,sub:"",color:"#fcd34d",border:"#a1620744"};
           }
           var s=enabledSess.find(function(x){return x.id===key;});
+          if(!s){try{s=(getSessions(settings)||[]).find(function(x){return x.id===key;});}catch(e){}}
           if(!s)return {label:key,sub:"",color:"#94a3b8",border:"#33415544"};
           var nm=(s.name&&String(s.name).trim())||(s.label&&String(s.label).trim())||(fmtMins(s.startMin)+"–"+fmtMins(s.endMin));
           return {label:nm,sub:fmtMins(s.startMin)+" – "+fmtMins(s.endMin),color:"#a5b4fc",border:"#4338ca44"};
@@ -9988,6 +9989,44 @@ function App(props){
     var id=setInterval(checkRollover,60000);
     return function(){clearInterval(id);};
   },[state.date]);
+  useEffect(function(){
+    // CHANGED: One-time rekey of orphaned commitments — when session IDs change (rename/recreate),
+    // commitments stored under old IDs are silently unreachable. Rekey each orphan to the current
+    // enabled session whose window contains most of its trades.
+    try{
+      if(localStorage.getItem("pt-rekey-orphan-commitments-v1")==="1")return;
+      var sessions=[];try{sessions=getSessions(settings).filter(function(s){return s.enabled!==false;});}catch(e){}
+      if(sessions.length===0)return;
+      function tmins(t){
+        var ms=null;try{var arr=(t.entries||[]).map(function(e){return Number(e&&e.time);}).filter(function(n){return !isNaN(n)&&n>0;});if(arr.length>0)ms=Math.min.apply(null,arr);}catch(e){}
+        if(ms==null){var op=Number(t.openedAt);if(!isNaN(op)&&op>0)ms=op;}
+        if(ms==null)return null;var d=new Date(ms);return d.getHours()*60+d.getMinutes();
+      }
+      for(var i=0;i<localStorage.length;i++){
+        var k=localStorage.key(i);if(!k||k.indexOf("journal:")!==0)continue;
+        try{
+          var raw=localStorage.getItem(k);if(!raw)continue;
+          var e=JSON.parse(raw);if(!e||!e.commitments||typeof e.commitments!=="object")continue;
+          var trades=(e.trades||[]).filter(function(t){return t&&t.status!=="open";});
+          var next={};var changed=false;
+          Object.keys(e.commitments).forEach(function(oldSid){
+            var val=e.commitments[oldSid];
+            if(sessions.some(function(s){return s.id===oldSid;})){next[oldSid]=val;return;}
+            var mins=trades.filter(function(t){return t.sessionId===oldSid;}).map(tmins).filter(function(m){return m!=null;});
+            if(mins.length===0){changed=true;return;}
+            var scores={};sessions.forEach(function(s){var hit=mins.filter(function(m){return m>=s.startMin&&m<s.endMin;}).length;if(hit>0)scores[s.id]=hit;});
+            var winner=Object.keys(scores).sort(function(a,b){return scores[b]-scores[a];})[0];
+            if(winner){next[winner]=Object.assign({},next[winner]||{},val);}
+            changed=true;
+          });
+          if(changed){e.commitments=next;localStorage.setItem(k,JSON.stringify(e));}
+        }catch(err){}
+      }
+      localStorage.setItem("pt-rekey-orphan-commitments-v1","1");
+      if(bumpReloadKey)bumpReloadKey();
+    }catch(e){}
+  // eslint-disable-next-line
+  },[]);
   useEffect(function(){
     // CHANGED: One-time recalc — refresh today's disciplineScore from current trades + commitments
     // so any prior stale value gets corrected. Runs once per install.
