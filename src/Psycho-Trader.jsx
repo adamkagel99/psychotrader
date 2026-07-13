@@ -9990,13 +9990,12 @@ function App(props){
     return function(){clearInterval(id);};
   },[state.date]);
   useEffect(function(){
-    // CHANGED: One-time rekey of orphaned commitments — when session IDs change (rename/recreate),
-    // commitments stored under old IDs are silently unreachable. Rekey each orphan to the current
-    // enabled session whose window contains most of its trades.
+    // CHANGED: Force re-run — rekey orphan commitments, recompute discipline scores from current
+    // logic, and clear wasLocked when the new score meets threshold.
     try{
-      if(localStorage.getItem("pt-rekey-orphan-commitments-v1")==="1")return;
+      if(localStorage.getItem("pt-recalc-cleanup-v1")==="1")return;
       var sessions=[];try{sessions=getSessions(settings).filter(function(s){return s.enabled!==false;});}catch(e){}
-      if(sessions.length===0)return;
+      var thr=loadDisciplineLockThreshold();
       function tmins(t){
         var ms=null;try{var arr=(t.entries||[]).map(function(e){return Number(e&&e.time);}).filter(function(n){return !isNaN(n)&&n>0;});if(arr.length>0)ms=Math.min.apply(null,arr);}catch(e){}
         if(ms==null){var op=Number(t.openedAt);if(!isNaN(op)&&op>0)ms=op;}
@@ -10006,23 +10005,32 @@ function App(props){
         var k=localStorage.key(i);if(!k||k.indexOf("journal:")!==0)continue;
         try{
           var raw=localStorage.getItem(k);if(!raw)continue;
-          var e=JSON.parse(raw);if(!e||!e.commitments||typeof e.commitments!=="object")continue;
-          var trades=(e.trades||[]).filter(function(t){return t&&t.status!=="open";});
-          var next={};var changed=false;
-          Object.keys(e.commitments).forEach(function(oldSid){
-            var val=e.commitments[oldSid];
-            if(sessions.some(function(s){return s.id===oldSid;})){next[oldSid]=val;return;}
-            var mins=trades.filter(function(t){return t.sessionId===oldSid;}).map(tmins).filter(function(m){return m!=null;});
-            if(mins.length===0){changed=true;return;}
-            var scores={};sessions.forEach(function(s){var hit=mins.filter(function(m){return m>=s.startMin&&m<s.endMin;}).length;if(hit>0)scores[s.id]=hit;});
-            var winner=Object.keys(scores).sort(function(a,b){return scores[b]-scores[a];})[0];
-            if(winner){next[winner]=Object.assign({},next[winner]||{},val);}
-            changed=true;
-          });
-          if(changed){e.commitments=next;localStorage.setItem(k,JSON.stringify(e));}
+          var e=JSON.parse(raw);if(!e)continue;
+          // 1) Rekey orphan commitments
+          if(e.commitments&&typeof e.commitments==="object"&&sessions.length>0){
+            var trades=(e.trades||[]).filter(function(t){return t&&t.status!=="open";});
+            var next={};
+            Object.keys(e.commitments).forEach(function(oldSid){
+              var val=e.commitments[oldSid];
+              if(sessions.some(function(s){return s.id===oldSid;})){next[oldSid]=val;return;}
+              var mins=trades.filter(function(t){return t.sessionId===oldSid;}).map(tmins).filter(function(m){return m!=null;});
+              if(mins.length===0)return;
+              var scores={};sessions.forEach(function(s){var hit=mins.filter(function(m){return m>=s.startMin&&m<s.endMin;}).length;if(hit>0)scores[s.id]=hit;});
+              var winner=Object.keys(scores).sort(function(a,b){return scores[b]-scores[a];})[0];
+              if(winner)next[winner]=Object.assign({},next[winner]||{},val);
+            });
+            e.commitments=next;
+          }
+          // 2) Recompute discipline
+          var ct=(e.trades||[]).filter(function(t){return t&&t.status!=="open";});
+          var opts=(e.commitments&&typeof e.commitments==="object")?{commitments:e.commitments}:{commitment:e.commitment||null};
+          e.disciplineScore=calcDiscipline(ct,e.riskMax,opts);
+          // 3) Clear wasLocked if score now meets threshold
+          if(e.wasLocked&&e.disciplineScore>=thr)e.wasLocked=false;
+          localStorage.setItem(k,JSON.stringify(e));
         }catch(err){}
       }
-      localStorage.setItem("pt-rekey-orphan-commitments-v1","1");
+      localStorage.setItem("pt-recalc-cleanup-v1","1");
       if(bumpReloadKey)bumpReloadKey();
     }catch(e){}
   // eslint-disable-next-line
