@@ -2453,15 +2453,15 @@ function DashboardCalendar(props){
   }
   return (
     <div style={CS({marginBottom:16,padding:0,overflow:"hidden"})}>
-      <button onClick={function(){setOpen(function(o){return !o;});}} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",padding:"12px 18px 8px",textAlign:"left",position:"relative"}}>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
+      <button onClick={function(){setOpen(function(o){return !o;});}} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",padding:"12px 18px 8px",textAlign:"left",flexWrap:"wrap",gap:6}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
           <span style={{fontSize:13,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{open?"Calendar":"This Week"}</span>
-          {readoutText&&!open&&<span onClick={function(e){e.stopPropagation();setSummaryMode(summaryMode==="trades"?"pnl":"trades");}} title={summaryMode==="trades"?"Tap to show P&L":"Tap to show trade count"} style={{fontSize:12,fontWeight:700,color:readoutColor,fontVariantNumeric:"tabular-nums",padding:"2px 7px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:6,cursor:"pointer"}}>{readoutText}</span>}
+          {readoutText&&<span onClick={function(e){e.stopPropagation();setSummaryMode(summaryMode==="trades"?"pnl":"trades");}} title={summaryMode==="trades"?"Tap to show P&L":"Tap to show trade count"} style={{fontSize:12,fontWeight:700,color:readoutColor,fontVariantNumeric:"tabular-nums",padding:"2px 7px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:6,cursor:"pointer"}}>{readoutText}</span>}
         </div>
         {open&&(function(){
           function move(delta){var m=calMonth+delta;var y=calYear;if(m<0){m=11;y--;}if(m>11){m=0;y++;}setCalYear(y);setCalMonth(m);}
           return (
-            <span onClick={function(e){e.stopPropagation();}} style={{position:"absolute",left:"50%",top:"50%",transform:"translate(-50%,-50%)",display:"flex",alignItems:"center",gap:6}}>
+            <span onClick={function(e){e.stopPropagation();}} style={{display:"flex",alignItems:"center",gap:6,marginLeft:6}}>
               <button onClick={function(){move(-1);}} style={{background:"none",border:"1px solid #334155",borderRadius:5,color:"#94a3b8",fontSize:12,cursor:"pointer",fontFamily:"inherit",padding:"2px 8px"}}>‹</button>
               <span style={{fontSize:13,fontWeight:700,color:"#e2e8f0",minWidth:100,textAlign:"center"}}>{MONTH_NAMES[calMonth]} {calYear}</span>
               <button onClick={function(){move(1);}} style={{background:"none",border:"1px solid #334155",borderRadius:5,color:"#94a3b8",fontSize:12,cursor:"pointer",fontFamily:"inherit",padding:"2px 8px"}}>›</button>
