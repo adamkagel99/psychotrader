@@ -1600,15 +1600,14 @@ function isMonthHalfsizeActive(){
 // instead of totalPnL/settings.riskMax.
 function tradeR(t,riskMaxSetting){
   if(!t||t.status==="open")return 0;
-  var pnl=parseFloat(t.pnl);if(isNaN(pnl))return 0;
-  var sf=(t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))?parseFloat(t.sizeFraction):1;
-  // CHANGED: Prefer riskMaxAtEntry stamped on the trade. Falls back to riskCapDollarsAtEntry/sf
-  // (older stamp), then to the current riskMax setting for legacy trades.
-  var base=parseFloat(t.riskMaxAtEntry);
-  if(isNaN(base)||base<=0){var cap=parseFloat(t.riskCapDollarsAtEntry);if(!isNaN(cap)&&cap>0&&sf>0)base=cap/sf;}
-  if(isNaN(base)||base<=0)base=parseFloat(riskMaxSetting)||0;
-  var rm=base*sf;
-  return rm>0?pnl/rm:0;
+  var pct=parseFloat(t.pctPnl);
+  if(isNaN(pct))return 0;
+  // CHANGED: R now measures outcome against the stop-loss-max %, not the $ risk cap. −1R = a
+  // full stop-out at your configured stop distance, size-independent. Prefer stamped
+  // stopThreshPctAtEntry; fall back to current settings.riskMaxPct.
+  var sl=parseFloat(t.stopThreshPctAtEntry);
+  if(isNaN(sl)||sl<=0){try{var s=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}");sl=parseFloat(s.riskMaxPct)||0;}catch(e){sl=0;}}
+  return sl>0?pct/sl:0;
 }
 function dayR(trades,riskMaxSetting){
   return (trades||[]).reduce(function(s,t){return s+tradeR(t,riskMaxSetting);},0);
