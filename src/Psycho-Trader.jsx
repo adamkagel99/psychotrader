@@ -1085,6 +1085,24 @@ function SessionCommitmentReview(props){
     return {};
   })();
   var c=map[sid];
+  if(!c||!c.committed){
+    // CHANGED: Fallback — if this session has no commitment under its current id, but the
+    // session's trades carry a stamped sessionId that has a commitment in the map (and that
+    // stamped id doesn't correspond to any currently-configured session), adopt it.
+    try{
+      var enabledIds={};(props.session&&props.session.parentSessions?props.session.parentSessions:[]).forEach(function(x){enabledIds[x]=1;});
+      var currentIds={};(function(){try{var arr=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}").sessions||[];arr.forEach(function(s){currentIds[s.id]=1;});}catch(e){}})();
+      var stampedIds={};
+      (props.sessionTrades||[]).forEach(function(t){if(t&&t.sessionId&&t.sessionId!==sid)stampedIds[t.sessionId]=(stampedIds[t.sessionId]||0)+1;});
+      var candidateSid=null,candidateHits=0;
+      Object.keys(stampedIds).forEach(function(oid){
+        if(currentIds[oid])return; // orphan only
+        if(!map[oid]||!map[oid].committed)return;
+        if(stampedIds[oid]>candidateHits){candidateHits=stampedIds[oid];candidateSid=oid;}
+      });
+      if(candidateSid){c=map[candidateSid];sid=candidateSid;}
+    }catch(e){}
+  }
   if(!c||!c.committed)return null;
   var closedInSession=(props.sessionTrades||[]).filter(function(t){return !t||t.status!=="open";});
   var maxT=parseInt(c.maxTrades);
