@@ -119,6 +119,12 @@ let currentUserId = null;
 let patched = false;
 const pending = new Map(); // key -> { type, op }
 let flushTimer = null;
+// CHANGED: While a restore is running, the debounced push queue is suspended. restoreFromFile
+// (in the app) writes every backup key via the PATCHED localStorage.setItem, which queues a
+// flush; that flush would otherwise fire mid-restore and race __psychoSyncRestore's own
+// authoritative cloud writes — non-deterministically dropping user_kv rows (e.g. tf-settings /
+// setup grade criteria). While true, queue() is a no-op and no debounced flush can fire.
+let restoreInProgress = false;
 
 // ---- raw localStorage handles (captured before patching) ----
 const rawSet = Storage.prototype.setItem;
@@ -157,9 +163,14 @@ export async function pullFromCloud(userId) {
   // KV result, it was deleted on another device — remove it locally so cross-device disables
   // (e.g. turning off half-size on mobile) actually propagate to laptop and vice-versa.
   const cloudKeys = new Set((kv || []).map((r) => r.key));
+  // CHANGED: Never auto-delete tf-settings via reconciliation. It's core config that is always
+  // present once set and is never "removed on another device" — so a cloud row briefly missing
+  // (e.g. an interrupted restore push) must not silently wipe the user's settings and reset
+  // setup grade criteria / sizing / sessions to defaults. Keep the local copy authoritative.
+  const NEVER_DELETE = new Set(["tf-settings"]);
   for (let i = window.localStorage.length - 1; i >= 0; i--) {
     const k = window.localStorage.key(i);
-    if (isSyncableKv(k) && !cloudKeys.has(k)) {
+    if (isSyncableKv(k) && !cloudKeys.has(k) && !NEVER_DELETE.has(k)) {
       rawRemove.call(window.localStorage, k);
     }
   }
@@ -450,6 +461,7 @@ async function handleRemove(key) {
 
 function queue(key, op) {
   if (!currentUserId) return;
+  if (restoreInProgress) return; // restore pushes authoritatively; don't double-write / race it
   if (!(isJournalKey(key) || key === "tf-transfers" || isSyncableKv(key))) return;
   pending.set(key, { op });
   if (!flushTimer) flushTimer = setTimeout(flush, 800); // debounce
@@ -561,6 +573,13 @@ if (typeof window !== "undefined") {
   window.__psychoSyncRestore = async function (backup) {
     if (!currentUserId) return;
     const uid = currentUserId;
+    // CHANGED: Suspend the debounced sync BEFORE doing anything. The app already wrote every
+    // backup key through the patched setItem, which queued a flush; cancel it and block new
+    // queueing so nothing races the authoritative writes below.
+    restoreInProgress = true;
+    pending.clear();
+    if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+    try {
     try {
       await supabase.from("trades").delete().eq("user_id", uid);
       await supabase.from("journal_days").delete().eq("user_id", uid);
@@ -586,6 +605,10 @@ if (typeof window !== "undefined") {
       } catch (e) {
         console.error("Restore push failed for", key, e);
       }
+    }
+    } finally {
+      // Re-enable normal syncing. Any pending flush from before restore was already cancelled.
+      restoreInProgress = false;
     }
   };
 
