@@ -234,12 +234,10 @@ function getSessionForTrade(t){
   var _mins=null,_date=null;
   if(_ms!=null){_date=new Date(_ms);_mins=_date.getHours()*60+_date.getMinutes();}
   else{var _tsStr=(t.entries&&t.entries[0]&&typeof t.entries[0].time==="string"&&t.entries[0].time)||t.time||null;_mins=parseTimeToMinsOfDay(_tsStr);}
-  if(t.sessionId){
-    var stampedSess=null;
-    for(var _i=0;_i<CACHED_SESSIONS.length;_i++){if(CACHED_SESSIONS[_i].id===t.sessionId){stampedSess=CACHED_SESSIONS[_i];break;}}
-    if(!stampedSess)return t.sessionId;
-    if(_mins!=null&&_mins>=stampedSess.startMin&&_mins<stampedSess.endMin)return t.sessionId;
-  }
+  // Purely time-based: every trade is bucketed by its actual start time against the user's
+  // current session windows. The stored sessionId tag is intentionally NOT consulted — the only
+  // source of truth is start time → session window (Pass 1 below). Editing a session's hours will
+  // therefore re-bucket historical trades to match the new windows.
   var ms=_ms,date=_date,mins=_mins;
   if(mins==null)return null;
   var day=(date?date.getDay():getNow().getDay());
@@ -1515,15 +1513,12 @@ function getWithdrawalAllowance(todayPnL){
   if(!getAllowanceEnabled())return 0;
   var profit=getProfitSinceLastWithdrawal(todayPnL);
   if(profit<=0)return 0;
-  var raw=profit*(getWithdrawalAllowancePct()/100);
-  // CHANGED: If the user set a Monthly Withdrawal target, cap the suggested allowance at the
-  // remaining gap to that target. This keeps the nudge in line with the user's monthly plan.
-  var monthlyTarget=getMonthlyWithdrawalTarget();
-  if(monthlyTarget>0){
-    var remaining=Math.max(0,monthlyTarget-getMonthWithdrawn());
-    return Math.min(raw,remaining);
-  }
-  return raw;
+  // Allowance is a flat % of profit since the last withdrawal — the "counter". It is NOT capped
+  // by the Monthly Withdrawal goal: that goal is a savings plan, and capping to it silently
+  // zeroed the allowance once the goal was exceeded (showing "$0" + a false "no profit" note
+  // even when real profit existed). The monthly goal now only drives the informational 🎯 note
+  // and Home banner, never the allowance amount.
+  return profit*(getWithdrawalAllowancePct()/100);
 }
 // CHANGED: Optional allowance-target notification. The user sets a $ target; when the live allowance
 // reaches it, a banner appears on Home. We persist the target and a "dismissed-at-target" marker so
@@ -4685,10 +4680,11 @@ function TradesTab(props){
   function cancelEdit(){setEditingId(null);setEditDraft(null);}
   var [pickerOpen,setPickerOpen]=useState(false);
   var [selectedDate,setSelectedDate]=useState(function(){
-    try{var saved=localStorage.getItem("pt-journal-selected-date");if(saved)return saved;}catch(e){}
+    // Only restore the last-viewed entry if it was viewed TODAY. On a new day, open to today.
+    try{var saved=localStorage.getItem("pt-journal-selected-date");var savedDay=localStorage.getItem("pt-journal-selected-day");if(saved&&savedDay===todayStr())return saved;}catch(e){}
     return props.initialDate||todayStr();
   });
-  useEffect(function(){try{localStorage.setItem("pt-journal-selected-date",selectedDate);}catch(e){}},[selectedDate]);
+  useEffect(function(){try{localStorage.setItem("pt-journal-selected-date",selectedDate);localStorage.setItem("pt-journal-selected-day",todayStr());}catch(e){}},[selectedDate]);
   var [pastSessions,setPastSessions]=useState([]);
   // CHANGED: Track today's saved journal entry so we can render its summary after save.
   var [todayJournalEntry,setTodayJournalEntry]=useState(null);
@@ -5418,7 +5414,23 @@ function TradesTab(props){
             {/* CHANGED: Render the snapshot of economic events that matched the user's filters
                on this day. Helps re-read past sessions with the macro context they were traded in. */}
             {(function(){
-              var ev=(entry.events||[]).slice().sort(function(a,b){return (a.ts||0)-(b.ts||0);});
+              // Show this day's economic events using the SAME currency/impact filters as the Home
+              // page (getFilteredEventsForDate reads the shared EVENT_FILTERS_KEY). If the live
+              // events cache still covers this day, use it (so filter changes are honored); for
+              // older days the cache no longer holds, fall back to the snapshot saved on the entry.
+              var dateStr=isToday?todayStr():(selectedDate||entry.date);
+              var live=[],covered=false;
+              try{
+                var _p=String(dateStr).split("/");
+                if(_p.length===3){
+                  var _d=new Date(+_p[2],+_p[0]-1,+_p[1]);
+                  var _ds=new Date(_d.getFullYear(),_d.getMonth(),_d.getDate());
+                  var _de=new Date(_ds.getTime()+86400000);
+                  covered=loadEvents().some(function(e){var pd=parseEventDate(e);return pd&&pd>=_ds&&pd<_de;});
+                  live=getFilteredEventsForDate(_d).map(eventToStorable);
+                }
+              }catch(e){}
+              var ev=(covered?live:(entry.events||[])).slice().sort(function(a,b){return (a.ts||0)-(b.ts||0);});
               if(ev.length===0)return null;
               function impColor(imp){if(imp==="high")return "#ef4444";if(imp==="medium")return "#fbbf24";return "#64748b";}
               function fmtTime(ts){if(!ts)return "";var d=new Date(ts);var h=d.getHours();var m=d.getMinutes();var ap=h>=12?"PM":"AM";var hh=h%12||12;return hh+":"+String(m).padStart(2,"0")+" "+ap;}
