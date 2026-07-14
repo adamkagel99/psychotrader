@@ -5611,13 +5611,9 @@ function TradesTab(props){
                   })}
                 </div>
               )}
+              {!isOutOfSession&&<SessionCommitmentReview sessionId={gk} sessionLabel={hdr.label} session={enabledSess.find(function(x){return x.id===gk;})} sessionTrades={g.items.map(function(p){return p.t;})} sessionEnded={sessionEnded(gk)} isToday={isToday} state={props.state} setState={props.setState} todayJournalEntry={todayJournalEntry} setTodayJournalEntry={setTodayJournalEntry} pastSession={pastSession} setPastSessions={setPastSessions} bumpReloadKey={props.bumpReloadKey}/>}
               {isEmpty&&isRelevantSession&&<SessionNoTradePanel sessionId={gk} sessionLabel={hdr.label} data={ntSessions[gk]} sessionEnded={sessionEnded(gk)} onSave={saveSessionNoTrade} onClear={clearSessionNoTrade} setNoTradeViewer={setNoTradeViewer}/>}
               </>)}
-              {/* CHANGED: The per-session commitment review renders OUTSIDE the collapse gate so every
-                 committed session surfaces its commitment/review in the journal — including sessions
-                 you committed to but took no trades in (which are empty, default-collapsed groups).
-                 Positioned after the trade grid so the expanded layout order is unchanged. */}
-              {!isOutOfSession&&<SessionCommitmentReview sessionId={gk} sessionLabel={hdr.label} session={enabledSess.find(function(x){return x.id===gk;})} sessionTrades={g.items.map(function(p){return p.t;})} sessionEnded={sessionEnded(gk)} isToday={isToday} state={props.state} setState={props.setState} todayJournalEntry={todayJournalEntry} setTodayJournalEntry={setTodayJournalEntry} pastSession={pastSession} setPastSessions={setPastSessions} bumpReloadKey={props.bumpReloadKey}/>}
             </div>
           );
         });
