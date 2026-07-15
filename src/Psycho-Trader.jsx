@@ -467,43 +467,36 @@ function daysBetween(aStr,bStr){
   var b=new Date(bStr);b.setHours(0,0,0,0);
   return Math.round((b.getTime()-a.getTime())/86400000);
 }
+// CHANGED: Automatic discipline-triggered half-size has been REMOVED. Breaking discipline no
+// longer force-halves position/risk. checkDisciplineLock is now a no-op, kept only so the existing
+// sizing callers (position size floor, target halving, R-stop labels, half-size readouts) compile
+// unchanged and simply see "not locked". Instead, disciplineBreakForBanner() drives a SUGGESTION
+// banner that nudges the user to opt into half-size via the Position Sizing Parameters toggle.
 function checkDisciplineLock(todayTrades,commitment,commitmentsMap){
+  return {locked:false};
+}
+// Detection for the half-size SUGGESTION banner only. Returns the most recent completed trading
+// day (before today) whose discipline score fell below the lock threshold, or null. Enforces
+// nothing — it just tells the banner whether to suggest half-size for today.
+function disciplineBreakForBanner(){
   try{
     var threshold=loadDisciplineLockThreshold();
-    // 1) Same-day: today's live trades drop below threshold -> locked today (no unlock).
-    var tToday=(todayTrades||[]).filter(function(t){return t.status!=="open";});
-    if(tToday.length>0){
-      // CHANGED: Include commitment penalties so the lock score matches journal/performance.
-      // Per-session map preferred; falls back to legacy single commitment.
-      var todayScore=calcDiscipline(tToday,0,commitmentsMap?{processOnly:true,commitments:commitmentsMap}:{processOnly:true,commitment:commitment||null});
-      if(todayScore<threshold){
-        return {locked:true,fromDate:todayStr(),score:Math.round(todayScore),sameDay:true};
-      }
-    }
-    // 2) A recent completed trading day was below threshold.
     var rows=loadJournalRows().filter(function(r){return (r.trades||[]).length>0;});
-    if(rows.length===0)return {locked:false};
+    if(rows.length===0)return null;
     rows.sort(function(a,b){return (new Date(a.date).getTime()||0)-(new Date(b.date).getTime()||0);});
     var todayD=new Date(todayStr());todayD.setHours(0,0,0,0);
     var prior=null;
     rows.forEach(function(r){var d=new Date(r.date);d.setHours(0,0,0,0);if(d.getTime()<todayD.getTime())prior=r;});
-    if(!prior)return {locked:false};
-    // CHANGED: A lock is an immutable historical event. If the prior day was marked wasLocked when
-    // it happened, honor that even if a later discipline recompute (different commitment context,
-    // settings change, etc.) would now score it above threshold. This prevents the lock from
-    // silently disappearing after a recompute.
-    var liveScore=(prior.trades&&prior.trades.length>0)
+    if(!prior)return null;
+    var score=(prior.trades&&prior.trades.length>0)
       ? calcDiscipline(prior.trades,0,prior.commitments?{processOnly:true,commitments:prior.commitments}:{processOnly:true,commitment:prior.commitment||null})
       : (prior.disciplineScore!=null?parseFloat(prior.disciplineScore):100);
-    var wasLocked=!!prior.wasLocked;
-    var score=wasLocked?(prior.lockScore!=null?parseFloat(prior.lockScore):liveScore):liveScore;
-    if(!wasLocked&&liveScore>=threshold)return {locked:false};
-    // Auto-clear once 2+ calendar days have passed (one full day served as cooldown).
-    var elapsed=daysBetween(prior.date,todayStr());
-    if(elapsed>=2)return {locked:false,expired:true,fromDate:prior.date,score:Math.round(score)};
-    return {locked:true,fromDate:prior.date,score:Math.round(score),clearsIn:Math.max(0,2-elapsed)};
-  }catch(e){return {locked:false};}
+    if(score>=threshold)return null;
+    return {fromDate:prior.date,score:Math.round(score),threshold:threshold};
+  }catch(e){return null;}
 }
+function disciplineHalfSizeSuggestDismissedFor(dateStr){try{return localStorage.getItem("tf-disc-halfsize-suggest-dismissed")===dateStr;}catch(e){return false;}}
+function dismissDisciplineHalfSizeSuggest(dateStr){try{localStorage.setItem("tf-disc-halfsize-suggest-dismissed",dateStr);}catch(e){}}
 function loadDisciplineScoring(){try{var s=localStorage.getItem(DISCIPLINE_SCORING_KEY);if(s)return Object.assign({},DEFAULT_DISCIPLINE_SCORING,JSON.parse(s));}catch(e){}return Object.assign({},DEFAULT_DISCIPLINE_SCORING);}
 function saveDisciplineScoring(ds){try{localStorage.setItem(DISCIPLINE_SCORING_KEY,JSON.stringify(ds));}catch(e){}}
 
@@ -4923,62 +4916,26 @@ function TradesTab(props){
           return getSessions(settings||{}).some(function(s){if(s.enabled===false)return false;var days=s.days||[1,2,3,4,5];if(days.indexOf(dow)<0)return false;return now>=(s.startMin-15)&&now<s.endMin;});
         }catch(e){return false;}
       })()&&<CommitmentPanel state={props.state} setState={props.setState} phase={phase} settings={settings}/>}
-      {/* CHANGED: Discipline lockout banner — date-aware. When viewing today, shows the active lock
-          (if any). When viewing a past day that had a lock event saved on its journal row, shows
-          the historical lock summary. Otherwise hidden. */}
+      {/* CHANGED: Discipline half-size SUGGESTION banner. Replaces the old auto-half-size lock.
+          When the most recent completed trading day broke discipline, this SUGGESTS (never forces)
+          half-size for today, with a button to the Position Sizing half-size toggle. */}
       {(function(){
-        var liveLock=checkDisciplineLock(state.trades,state.commitment,getCommitmentsMap(state));
-        var isViewingToday=selectedDate===todayStr();
-        // Determine what to show based on selected date.
-        var mode=null,lock=null,entryNote="";
-        if(isViewingToday&&liveLock.locked){
-          mode="active";lock=liveLock;
-          // Persist live lock metadata onto today's journal entry the first time we see it.
-          var existingLockedAt=getJournalEntryField(liveLock.fromDate,"lockedAt");
-          updateJournalEntryFields(liveLock.fromDate,{wasLocked:true,lockScore:liveLock.score,lockThreshold:loadDisciplineLockThreshold(),lockedAt:existingLockedAt||Date.now()});
-        }else if(!isViewingToday){
-          // Past day — check the journal entry for a recorded lock event.
-          var wasLocked=getJournalEntryField(selectedDate,"wasLocked");
-          if(wasLocked){
-            mode="historical";
-            lock={fromDate:selectedDate,score:getJournalEntryField(selectedDate,"lockScore")||0};
-          }
-        }
-        if(!mode)return null;
-        // CHANGED: Suppress the historical banner on past days — the Day Summary already carries a
-        // "⚠ HALF-SIZE TRIGGERED" badge for those. Only the live "active" mode banner still shows.
-        if(mode==="historical")return null;
-        var thr=mode==="active"?loadDisciplineLockThreshold():(getJournalEntryField(lock.fromDate,"lockThreshold")||loadDisciplineLockThreshold());
-        var openLive=(props.liveTrades||[]);
-        var hasOpen=mode==="active"&&openLive.length>0;
-        var clearMsg=mode==="active"?(lock.sameDay
-          ? "This lock stays in place tomorrow and clears the day after. A weekend serves the cooldown, so a Friday lock clears Monday."
-          : (lock.clearsIn===1?"This lock clears automatically tomorrow.":"This lock clears automatically after one full day.")):null;
-        var headerLabel=mode==="active"
-          ? (lock.sameDay
-            ? "⚠ Half-Size Trading Active"
-            : (function(){var d=daysBetween(lock.fromDate,todayStr());return "⚠ Half-Size Active · triggered "+(d===1?"yesterday":d+" days ago")+" ("+lock.fromDate+")";})())
-          : "⚠ Half-Size Event — "+lock.fromDate;
-        var bodyMsg=mode==="active"
-          ? ((lock.sameDay?"Today's discipline score has dropped to ":"Your discipline score on "+lock.fromDate+" was ")+"")
-          : ("Discipline score on this day was ");
+        if(selectedDate!==todayStr())return null;      // today-only nudge
+        if(isMonthHalfsizeActive())return null;         // already half-sizing — nothing to suggest
+        if(disciplineHalfSizeSuggestDismissedFor(todayStr()))return null;
+        var brk=disciplineBreakForBanner();
+        if(!brk)return null;
         return (
-          <div style={{marginBottom:10,padding:"10px 12px",background:"#1c0a0a",border:"1px solid #ef4444",borderRadius:8}}>
+          <div style={{marginBottom:10,padding:"10px 12px",background:"#1a1206",border:"1px solid #f59e0b",borderRadius:8}}>
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
-              <span style={{fontSize:11,color:"#fca5a5",letterSpacing:1,textTransform:"uppercase",fontWeight:800}}>{headerLabel}</span>
-              <span style={{fontSize:11,color:"#94a3b8"}}>· score {lock.score}/{thr}</span>
+              <span style={{fontSize:11,color:"#fbbf24",letterSpacing:1,textTransform:"uppercase",fontWeight:800}}>⚠ Consider Half-Size Today</span>
+              <span style={{fontSize:11,color:"#94a3b8"}}>· {brk.fromDate} scored {brk.score}/{brk.threshold}</span>
             </div>
-            <div style={{fontSize:12,color:"#fecaca",lineHeight:1.5,marginBottom:6}}>{mode==="active"?"Position/risk auto-halved. Keep trading at half size.":"Position/risk were auto-halved this day."}</div>
-            {clearMsg&&<div style={{fontSize:11,color:"#fbbf24",lineHeight:1.4,marginBottom:6}}>{clearMsg}</div>}
-            {(function(){
-              var saved=getJournalEntryField(lock.fromDate,"lockNote")||"";
-              return (
-                <details style={{marginTop:4}}>
-                  <summary style={{fontSize:11,color:"#94a3b8",cursor:"pointer",userSelect:"none"}}>{saved?"📝 Reflection saved · edit":"+ Add reflection"}</summary>
-                  <textarea defaultValue={saved} onChange={function(e){updateJournalEntryFields(lock.fromDate,{lockNote:e.target.value});}} placeholder={mode==="active"?"What broke down? What's the plan for next session?":"Write your reflection..."} style={{width:"100%",marginTop:6,padding:"8px 10px",background:"#0a0a0f",border:"1px solid #7f1d1d",borderRadius:6,color:"#e2e8f0",fontSize:13,fontFamily:"inherit",lineHeight:1.5,minHeight:60,resize:"vertical",boxSizing:"border-box"}}/>
-                </details>
-              );
-            })()}
+            <div style={{fontSize:12,color:"#fde68a",lineHeight:1.5,marginBottom:8}}>Your discipline broke on your last trading day. Consider trading half-size today to guard against tilt — it's your call, not enforced.</div>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={function(){if(props.onNavigateToHalfSize)props.onNavigateToHalfSize();}} style={{padding:"7px 14px",background:"#f59e0b",border:"none",borderRadius:6,color:"#422006",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Turn on half-size →</button>
+              <button onClick={function(){dismissDisciplineHalfSizeSuggest(todayStr());if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"7px 12px",background:"none",border:"1px solid #78716c",borderRadius:6,color:"#a8a29e",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Dismiss</button>
+            </div>
           </div>
         );
       })()}
@@ -5363,7 +5320,7 @@ function TradesTab(props){
           <div style={CS({marginTop:18,marginBottom:14,border:"1px solid "+(isToday?"#16653444":"#1e293b")})}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
               <div style={{fontSize:13,color:isToday?"#86efac":"#a5b4fc",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{isToday?"Saved to Journal ✓":"Day Summary"}</div>
-              {!isToday&&entry.wasLocked&&<span style={{fontSize:10,fontWeight:800,color:"#fca5a5",background:"#3a1010",border:"1px solid #7f1d1d",borderRadius:4,padding:"2px 7px",letterSpacing:0.5}} title="Discipline lock triggered — next day traded at half size">⚠ HALF-SIZE TRIGGERED</span>}
+              {!isToday&&entry.wasLocked&&<span style={{fontSize:10,fontWeight:800,color:"#fca5a5",background:"#3a1010",border:"1px solid #7f1d1d",borderRadius:4,padding:"2px 7px",letterSpacing:0.5}} title="Discipline score fell below your threshold this day">⚠ DISCIPLINE BROKEN</span>}
             </div>
             {entry.noTradeDay&&<NoTradeDayDetails entry={entry} isToday={isToday} selectedDate={selectedDate} setTodayJournalEntry={setTodayJournalEntry} setPastSessions={setPastSessions} bumpReloadKey={props.bumpReloadKey} setNoTradeViewer={setNoTradeViewer}/>}
             {/* CHANGED: Day was initially saved as no-trade, then trades were taken. Preserve the original sit-out reasons as historical context. */}
@@ -9002,7 +8959,7 @@ function SettingsTab(props){
         })}
       </SettingsSection>
 
-      <SettingsSection title="Position Sizing Parameters">
+      <SettingsSection title="Position Sizing Parameters" forceOpen={props.focusSection==="positionSizing"}>
         <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Risk Max % of Balance is the most you'll lose on a single trade as a % of your account. Stop Loss Max % is the largest stop distance from entry as a % of position size. Together they determine your position size: Position Size % = Risk / Stop × 100. Slippage % sets a minimum lower bound.</div>
         {/* CHANGED: Half-size trading toggle relocated from Balance to Position Sizing Parameters. */}
         {(function(){
@@ -9834,18 +9791,20 @@ function App(props){
           // even if the event cache or user's filters change.
           events:(function(){try{return getTodaysFilteredEvents().map(eventToStorable).filter(Boolean);}catch(e){return [];}})()
         };
-        // Preserve lock-side fields if they exist on the saved entry.
-        if(existing){
-          // CHANGED: But CLEAR them if the recomputed score is now above threshold — keeps the
-          // calendar "D" marker and the half-size cooldown in sync with current truth.
+        // CHANGED: Stamp the "discipline broken" marker (drives the calendar "D" badge) purely from
+        // this day's discipline score vs the lock threshold. It is now ONLY a marker — it no longer
+        // triggers any automatic half-size (that enforcement was removed). Score at/above threshold
+        // leaves it unset, so the fresh entry effectively clears any prior marker.
+        (function(){
           var thr=loadDisciplineLockThreshold();
-          var keepLock=existing.wasLocked&&discScore<thr;
-          if(keepLock){
-            if(existing.wasLocked)entry.wasLocked=existing.wasLocked;
-            if(existing.lockScore!=null)entry.lockScore=existing.lockScore;
-            if(existing.lockThreshold!=null)entry.lockThreshold=existing.lockThreshold;
-            if(existing.lockedAt!=null)entry.lockedAt=existing.lockedAt;
+          if(closedT.length>0&&discScore<thr){
+            entry.wasLocked=true;
+            entry.lockScore=Math.round(discScore);
+            entry.lockThreshold=thr;
+            entry.lockedAt=(existing&&existing.lockedAt!=null)?existing.lockedAt:Date.now();
           }
+        })();
+        if(existing){
           if(existing.noTradeDay)entry.noTradeDay=existing.noTradeDay;
           if(existing.noTradeShots)entry.noTradeShots=existing.noTradeShots;
         }
@@ -10319,12 +10278,17 @@ function App(props){
           if(entry.noTradeReason&&!entry.initialNoTradeReason)updated.initialNoTradeReason=entry.noTradeReason;
           if(entry.noTradeLoggedAt&&!entry.initialNoTradeLoggedAt)updated.initialNoTradeLoggedAt=entry.noTradeLoggedAt;
         }
-        // CHANGED: If editing brought today's discipline back above threshold, clear the lock-trigger
-        // metadata so the calendar "D" marker disappears and the half-size cooldown lifts. The lock
-        // is no longer immutable — it reflects current truth, not historical intent.
+        // CHANGED: Keep the "discipline broken" marker (calendar "D" badge) in sync with the edited
+        // score — set it when the day is below threshold, clear it when at/above. Purely a marker;
+        // no half-size is triggered.
         var newScore=updated.disciplineScore;
         var lockThreshold=loadDisciplineLockThreshold();
-        if(entry.wasLocked&&newScore!=null&&parseFloat(newScore)>=lockThreshold){
+        if(newScore!=null&&parseFloat(newScore)<lockThreshold&&(updated.trades||[]).length>0){
+          updated.wasLocked=true;
+          updated.lockScore=Math.round(parseFloat(newScore));
+          updated.lockThreshold=lockThreshold;
+          if(updated.lockedAt==null)updated.lockedAt=Date.now();
+        }else if(newScore!=null&&parseFloat(newScore)>=lockThreshold){
           updated.wasLocked=false;
           delete updated.lockScore;
           delete updated.lockThreshold;
@@ -10525,7 +10489,7 @@ function App(props){
                the tab content. */}
             {mobile&&<MonthlyTargetBanner totalPnL={totalPnL} bumpReloadKey={bumpReloadKey} onWithdraw={function(amt){setPendingWithdrawAmount(amt);setTab("settings");}}/>}
             {tab==="dashboard"&&<DashboardTab key={reloadKey} mobile={mobile} settings={settings} phase={phase} state={state} setState={setState} checklistVersion={checklistVersion} onNavigateToJournal={function(){setTab("trades");}} onStartTrade={function(){var t=mkTrade();t.sessionId=phase!=="closed"?phase:null;setTrade(t);setShowForm(true);setTab("trades");}} preCheckComplete={preCheckComplete} currentAccount={computeAccountBalance(totalPnL)} displayPosMin={dPosMin} displayPosMax={dPosMax} displayRiskMin={dRiskMin} displayRiskMax={dRiskMax} totalPnL={totalPnL} todayTrades={state.trades} prevPnL={prevPnL} prevDate={prevDate} prevRiskMax={prevRiskMax} onNavigateToTrade={navigateToTrade} eventsReloadKey={eventsReloadKey} eventCurrencyFilter={eventCurrencyFilter} setEventCurrencyFilter={setEventCurrencyFilter} eventImpactFilter={eventImpactFilter} setEventImpactFilter={setEventImpactFilter} onNavigateToSettings={function(){setSettingsFocus("economicEvents");setTab("settings");}} onNavigateToPerformance={function(){setTab("performance");}} onNavigateToGoals={function(){setTab("goals");}} onWithdraw={function(amt){setPendingWithdrawAmount(amt);setTab("settings");}} bumpReloadKey={bumpReloadKey} tradeStatus={tradeStatus}/>}
-            {tab==="trades"&&<TradesTab mobile={mobile} state={state} setState={setState} showForm={showForm} setShowForm={setShowForm} trade={trade} setTrade={setTrade} saveTrade={saveTrade} deleteTrade={deleteTrade} tradeStatus={tradeStatus} phase={phase} settings={settings} preCheckComplete={preCheckComplete} totalPnL={totalPnL} initialDate={tradesInitialDate} reloadKey={reloadKey} bumpReloadKey={bumpReloadKey} timezone={settings.timezone} liveTrades={liveTrades} openLiveTrade={function(lt){setLiveTradeManaging(lt);}} displayPosMin={dPosMin} displayPosMax={dPosMax} displayRiskMin={dRiskMin} displayRiskMax={dRiskMax} tradeOptions={tradeOptions} autoAddViolations={autoAddViolations} refreshHistory={bumpReloadKey} checklistVersion={checklistVersion}/>}
+            {tab==="trades"&&<TradesTab mobile={mobile} state={state} setState={setState} showForm={showForm} setShowForm={setShowForm} trade={trade} setTrade={setTrade} saveTrade={saveTrade} deleteTrade={deleteTrade} tradeStatus={tradeStatus} phase={phase} settings={settings} preCheckComplete={preCheckComplete} totalPnL={totalPnL} initialDate={tradesInitialDate} reloadKey={reloadKey} bumpReloadKey={bumpReloadKey} timezone={settings.timezone} liveTrades={liveTrades} openLiveTrade={function(lt){setLiveTradeManaging(lt);}} displayPosMin={dPosMin} displayPosMax={dPosMax} displayRiskMin={dRiskMin} displayRiskMax={dRiskMax} tradeOptions={tradeOptions} autoAddViolations={autoAddViolations} refreshHistory={bumpReloadKey} checklistVersion={checklistVersion} onNavigateToHalfSize={function(){setSettingsFocus("positionSizing");setTab("settings");}}/>}
           </>);
         })()}
         {tab==="goals"&&<GoalsTab mobile={mobile} settings={settings} reloadKey={reloadKey} bumpReloadKey={bumpReloadKey} liveTotalPnL={totalPnL} tradeOptions={tradeOptions} state={state}/>}
