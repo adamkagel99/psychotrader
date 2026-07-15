@@ -8961,18 +8961,22 @@ function SettingsTab(props){
 
       <SettingsSection title="Position Sizing Parameters" forceOpen={props.focusSection==="positionSizing"}>
         <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Risk Max % of Balance is the most you'll lose on a single trade as a % of your account. Stop Loss Max % is the largest stop distance from entry as a % of position size. Together they determine your position size: Position Size % = Risk / Stop × 100. Slippage % sets a minimum lower bound.</div>
-        {/* CHANGED: Half-size trading toggle relocated from Balance to Position Sizing Parameters. */}
+        {/* CHANGED: Half-size toggle is now ALWAYS interactive. Previously a weekly/monthly P&L
+            goal hit hard-locked it (cursor:not-allowed, early return), which — combined with a
+            manual-off flag — left it stuck showing "Off" but unclickable. Goal-hit still auto-
+            engages half-size by default (via isMonthHalfsizeActive), but the user can always
+            override it on or off here. */}
         {(function(){
-          var locked=isWeeklyGoalHit(props.liveTotalPnL||0)||isMonthlyGoalHit(props.liveTotalPnL||0);
           var on=isMonthHalfsizeActive();
-          function toggle(){if(locked)return;setMonthHalfsizeActive(!on);if(!on===false){try{localStorage.removeItem("tf-month-goal-banner-dismissed");}catch(e){}}if(props.bumpReloadKey)props.bumpReloadKey();}
+          var goalHit=isWeeklyGoalHit(props.liveTotalPnL||0)||isMonthlyGoalHit(props.liveTotalPnL||0);
+          function toggle(){var turningOn=!on;setMonthHalfsizeActive(turningOn);if(turningOn){try{localStorage.removeItem("tf-month-goal-banner-dismissed");}catch(e){}}if(props.bumpReloadKey)props.bumpReloadKey();}
           return (
-            <div onClick={toggle} style={{marginBottom:12,padding:"10px 12px",background:"#0a0a0f",border:"1px solid "+(on?"#facc15":"#334155"),borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,cursor:locked?"not-allowed":"pointer"}}>
+            <div onClick={toggle} style={{marginBottom:12,padding:"10px 12px",background:"#0a0a0f",border:"1px solid "+(on?"#facc15":"#334155"),borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,cursor:"pointer"}}>
               <div style={{minWidth:0}}>
                 <div style={{fontSize:12,color:"#e2e8f0",fontWeight:700}}>{on?"🔒 Half-size active":"Half-size trading"}</div>
-                <div style={{fontSize:10,color:"#64748b",marginTop:2}}>{locked?"Locked on — weekly/monthly goal hit":on?"Manual opt-in — tap to turn off":"All sizing/risk halves for the rest of the month"}</div>
+                <div style={{fontSize:10,color:"#64748b",marginTop:2}}>{on?"All sizing/risk halved this month — tap to turn off":(goalHit?"Suggested — you've hit a P&L goal. Tap to turn on.":"Tap to halve all sizing/risk for the rest of the month")}</div>
               </div>
-              <div style={{padding:"5px 12px",background:on?"#facc15":"#1e293b",border:"1px solid "+(on?"#facc15":"#475569"),borderRadius:5,color:on?"#422006":"#cbd5e1",fontSize:11,fontWeight:700,fontFamily:"inherit",opacity:locked?0.7:1,flexShrink:0,pointerEvents:"none"}}>{on?"On":"Off"}</div>
+              <div style={{padding:"5px 12px",background:on?"#facc15":"#1e293b",border:"1px solid "+(on?"#facc15":"#475569"),borderRadius:5,color:on?"#422006":"#cbd5e1",fontSize:11,fontWeight:700,fontFamily:"inherit",flexShrink:0,pointerEvents:"none"}}>{on?"On":"Off"}</div>
             </div>
           );
         })()}
