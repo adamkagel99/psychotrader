@@ -4105,8 +4105,13 @@ function PerformanceSummary(props){
   var totalLosses=Math.abs(losses.reduce(function(s,t){return s+parseFloat(t.pnl);},0));
   var pf=totalLosses>0?(totalWins/totalLosses).toFixed(2):totalWins>0?"∞":"0.00";
   var expValue=totalPnl/allTrades.length;
-  var expPctArr=allTrades.map(function(t){return parseFloat(t.pctPnl);}).filter(function(v){return !isNaN(v);});
-  var expPctVal=expPctArr.length?expPctArr.reduce(function(s,v){return s+v;},0)/expPctArr.length:null;
+  // CHANGED: Match PerformanceTab's expectancy formula EXACTLY — average $ per trade as a % of the
+  // average position size (a ratio of means), NOT the mean of per-trade pctPnl (a mean of ratios).
+  // The two diverge whenever position sizes vary, which made this Home figure disagree with the
+  // Performance tab for the same timeframe.
+  var _posSizes=allTrades.map(function(t){return parseFloat(t.positionSize);}).filter(function(v){return !isNaN(v)&&v>0;});
+  var _avgPosSize=_posSizes.length?_posSizes.reduce(function(s,v){return s+v;},0)/_posSizes.length:0;
+  var expPctVal=_avgPosSize>0?(expValue/_avgPosSize)*100:null;
   var tradingDays=allRows.filter(function(r){return (r.trades||[]).some(function(t){return t.status!=="open";});}).length;
   var pfNum=pf==="∞"?Infinity:parseFloat(pf);
   function Stat(p){return (
@@ -4329,17 +4334,14 @@ function PerfProgressCard(props){
   // CHANGED: Time-period selector for the KPI strip. Filters the trades that feed Win Rate,
   // Profit Factor, Expectancy, Green Streak, and Days Since Lock — Account Balance below
   // stays current-state (it's always "now"). Choice persists per-device.
-  var [range,setRange]=useState(function(){try{return localStorage.getItem("tf-home-perf-range")||"all";}catch(e){return "all";}});
-  useEffect(function(){try{localStorage.setItem("tf-home-perf-range",range);}catch(e){}},[range]);
-  function rangeStart(){
-    var now=new Date();
-    if(range==="week"){var d=new Date(now);d.setDate(d.getDate()-d.getDay());d.setHours(0,0,0,0);return d;}
-    if(range==="month")return new Date(now.getFullYear(),now.getMonth(),1);
-    if(range==="year")return new Date(now.getFullYear(),0,1);
-    return null;
-  }
-  var rsStart=rangeStart();
-  var rows=loadJournalRows().filter(function(r){if(!rsStart)return true;var d=new Date(r.date);return !isNaN(d.getTime())&&d>=rsStart;});
+  // CHANGED: Home now shares the Performance tab's timeframe via tf-stats-range (+ the same custom
+  // dates), so a range chosen in either place is reflected in the other. Each tab re-mounts when
+  // selected and reads the shared key, so switching tabs carries the selection across with no extra
+  // wiring. Filtering uses the shared statsRangeInclude helper so results match exactly.
+  var [range,setRange]=useState(function(){try{return localStorage.getItem("tf-stats-range")||"all";}catch(e){return "all";}});
+  useEffect(function(){try{localStorage.setItem("tf-stats-range",range);}catch(e){}},[range]);
+  var _cStart="",_cEnd="";try{_cStart=localStorage.getItem("tf-stats-custom-start")||"";_cEnd=localStorage.getItem("tf-stats-custom-end")||"";}catch(e){}
+  var rows=loadJournalRows().filter(function(r){return statsRangeInclude(r.date, range, _cStart, _cEnd);});
   var todayKey=todayStr();
   var hasTodayRow=rows.some(function(r){return r.date===todayKey;});
   var liveTrades=(props.todayTrades||[]).filter(function(t){return t&&t.status!=="open";});
@@ -4354,8 +4356,14 @@ function PerfProgressCard(props){
   var totalLosses=Math.abs(losses.reduce(function(s,t){return s+parseFloat(t.pnl);},0));
   var pf=totalLosses>0?(totalWins/totalLosses).toFixed(2):totalWins>0?"∞":"0.00";
   var pfNum=pf==="∞"?Infinity:parseFloat(pf);
-  var expPctArr=allTrades.map(function(t){return parseFloat(t.pctPnl);}).filter(function(v){return !isNaN(v);});
-  var expPctVal=expPctArr.length?expPctArr.reduce(function(s,v){return s+v;},0)/expPctArr.length:null;
+  // CHANGED: Match PerformanceTab's expectancy formula EXACTLY — average $ per trade as a % of the
+  // average position size (ratio of means), not the mean of per-trade pctPnl. Keeps this Home KPI
+  // consistent with the Performance tab for the same timeframe.
+  var _totalPnl=allTrades.reduce(function(s,t){return s+(parseFloat(t.pnl)||0);},0);
+  var _expValue=allTrades.length?_totalPnl/allTrades.length:0;
+  var _posSizes=allTrades.map(function(t){return parseFloat(t.positionSize);}).filter(function(v){return !isNaN(v)&&v>0;});
+  var _avgPosSize=_posSizes.length?_posSizes.reduce(function(s,v){return s+v;},0)/_posSizes.length:0;
+  var expPctVal=_avgPosSize>0?(_expValue/_avgPosSize)*100:null;
   var streak=calculateStreak(true);
   var aGrade=calculateAGradeStreak(true);
   // CHANGED: Days-since-discipline-lock — walks trading days (those with closed trades OR
@@ -4381,7 +4389,7 @@ function PerfProgressCard(props){
       <div onClick={function(){if(props.onNavigate)props.onNavigate();}} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"13px 16px",background:"linear-gradient(135deg,#1e1b4b 0%,#15151f 70%)",borderBottom:"1px solid #312e81",cursor:"pointer"}}>
         <span style={{fontSize:13,color:"#c7d2fe",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,flexShrink:0}}>Performance &amp; Progress</span>
         <div onClick={function(e){e.stopPropagation();}} style={{display:"flex",marginLeft:12,marginRight:"auto"}}>
-          <Dropdown variant="pill" value={range} onChange={function(v){setRange(v);}} options={[{v:"week",l:"This Week"},{v:"month",l:"Month to Date"},{v:"year",l:"Year to Date"},{v:"all",l:"All Time"}]} style={{padding:"4px 10px",fontSize:11}}/>
+          <Dropdown variant="pill" value={range} onChange={function(v){setRange(v);}} options={[{v:"thisweek",l:"This Week"},{v:"week",l:"Last Week"},{v:"mtd",l:"Month to Date"},{v:"lastmonth",l:"Last Month"},{v:"ytd",l:"Year to Date"},{v:"all",l:"All Time"}].concat(range==="custom"?[{v:"custom",l:"Custom"}]:[])} style={{padding:"4px 10px",fontSize:11}}/>
         </div>
         <button onClick={function(e){e.stopPropagation();setOpen(function(o){return !o;});}} aria-label={open?"Collapse":"Expand"} style={{background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",padding:4,display:"flex",alignItems:"center",flexShrink:0}}>
           <svg width="13" height="13" viewBox="0 0 12 12" fill="none" style={{transition:"transform 0.2s",transform:open?"rotate(180deg)":"rotate(0deg)"}}><path d="M2 4l4 4 4-4" stroke="#a5b4fc" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -7635,6 +7643,67 @@ function AchievementsPanel(){
   );
 }
 
+// CHANGED: Shared date-in-range test used by BOTH the Home performance card and the Performance
+// tab so the two always agree for a given range selection. Extracted verbatim from the Performance
+// tab's former inRange(). range/customStart/customEnd are passed in instead of closed over.
+function statsRangeInclude(d, range, customStart, customEnd){
+  if(range==="all"||!range)return true;
+  var dd;
+  if(typeof d==="string"){
+    var iso=d.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    var sl=d.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    var dsh=d.match(/^(\d{1,2})-(\d{1,2})-(\d{4})/);
+    if(iso)dd=new Date(+iso[1],+iso[2]-1,+iso[3]);
+    else if(sl)dd=new Date(+sl[3],+sl[1]-1,+sl[2]);
+    else if(dsh)dd=new Date(+dsh[3],+dsh[1]-1,+dsh[2]);
+    else dd=new Date(d);
+  }else dd=new Date(d);
+  if(isNaN(dd.getTime()))return false;
+  dd.setHours(0,0,0,0);
+  var now=getPT();
+  if(range==="thisweek"){
+    var sunNow=new Date(now);sunNow.setHours(0,0,0,0);
+    sunNow.setDate(sunNow.getDate()-sunNow.getDay());
+    return dd>=sunNow;
+  }
+  if(range==="week"){
+    var sunThis=new Date(now);sunThis.setHours(0,0,0,0);
+    sunThis.setDate(sunThis.getDate()-sunThis.getDay());
+    var startPrev=new Date(sunThis);startPrev.setDate(sunThis.getDate()-7);
+    var endPrev=new Date(sunThis);endPrev.setDate(sunThis.getDate()-1);endPrev.setHours(0,0,0,0);
+    return dd>=startPrev&&dd<=endPrev;
+  }
+  if(range==="mtd"){
+    var startM=new Date(now.getFullYear(),now.getMonth(),1);startM.setHours(0,0,0,0);
+    return dd>=startM;
+  }
+  if(range==="lastmonth"){
+    var startPM=new Date(now.getFullYear(),now.getMonth()-1,1);startPM.setHours(0,0,0,0);
+    var endPM=new Date(now.getFullYear(),now.getMonth(),0);endPM.setHours(0,0,0,0);
+    return dd>=startPM&&dd<=endPM;
+  }
+  if(range==="ytd"){
+    var startY=new Date(now.getFullYear(),0,1);startY.setHours(0,0,0,0);
+    return dd>=startY;
+  }
+  if(range==="custom"){
+    if(customStart){
+      var sParts=customStart.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if(sParts){var sD=new Date(+sParts[1],+sParts[2]-1,+sParts[3]);sD.setHours(0,0,0,0);if(dd<sD)return false;}
+    }
+    if(customEnd){
+      var eParts=customEnd.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if(eParts){var eD=new Date(+eParts[1],+eParts[2]-1,+eParts[3]);eD.setHours(0,0,0,0);if(dd>eD)return false;}
+    }
+    return true;
+  }
+  var cutoff=new Date(now);
+  if(range==="month")cutoff.setMonth(now.getMonth()-1);
+  else if(range==="3month")cutoff.setMonth(now.getMonth()-3);
+  else if(range==="year")cutoff.setFullYear(now.getFullYear()-1);
+  cutoff.setHours(0,0,0,0);
+  return dd>=cutoff;
+}
 function PerformanceTab(props){
   var settings=props.settings;
   var [rows,setRows]=useState([]);
@@ -7683,74 +7752,7 @@ function PerformanceTab(props){
     return changed?Object.assign({},r,{trades:fixed}):r;
   });
   function inRange(d){
-    if(range==="all")return true;
-    // CHANGED: Parse as LOCAL midnight regardless of format. ISO strings ("2026-06-07") would
-    // otherwise be read as UTC midnight, shifting to the previous local day in negative-UTC
-    // timezones and silently dropping yesterday's trades from "This Week".
-    var dd;
-    if(typeof d==="string"){
-      var iso=d.match(/^(\d{4})-(\d{2})-(\d{2})/);
-      var sl=d.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-      var dsh=d.match(/^(\d{1,2})-(\d{1,2})-(\d{4})/);
-      if(iso)dd=new Date(+iso[1],+iso[2]-1,+iso[3]);
-      else if(sl)dd=new Date(+sl[3],+sl[1]-1,+sl[2]);
-      else if(dsh)dd=new Date(+dsh[3],+dsh[1]-1,+dsh[2]);
-      else dd=new Date(d);
-    }else dd=new Date(d);
-    if(isNaN(dd.getTime()))return false;
-    dd.setHours(0,0,0,0);
-    var now=getPT();
-    // CHANGED: "Last Week" now means the PREVIOUS fixed calendar week (Mon–Sun before the current
-    // week), not a rolling 7-day window. A rolling window slides daily and clips a different
-    // boundary day each time, which is why a real 5-trading-day week could read as 4. This is a
-    // fixed Mon–Fri(+weekend) span, so it shows the same full week regardless of today's weekday.
-    // CHANGED: Week boundaries are Sunday-start (Sun–Sat) per user spec.
-    if(range==="thisweek"){
-      var sunNow=new Date(now);sunNow.setHours(0,0,0,0);
-      sunNow.setDate(sunNow.getDate()-sunNow.getDay()); // Sunday of current week, 00:00
-      return dd>=sunNow; // Sunday through today
-    }
-    if(range==="week"){
-      var sunThis=new Date(now);sunThis.setHours(0,0,0,0);
-      sunThis.setDate(sunThis.getDate()-sunThis.getDay()); // Sunday of CURRENT week, 00:00
-      var startPrev=new Date(sunThis);startPrev.setDate(sunThis.getDate()-7); // previous Sunday
-      var endPrev=new Date(sunThis);endPrev.setDate(sunThis.getDate()-1);endPrev.setHours(0,0,0,0); // previous Saturday
-      return dd>=startPrev&&dd<=endPrev;
-    }
-    if(range==="mtd"){
-      // CHANGED: Month-to-date = first of current month → today.
-      var startM=new Date(now.getFullYear(),now.getMonth(),1);startM.setHours(0,0,0,0);
-      return dd>=startM;
-    }
-    if(range==="lastmonth"){
-      // CHANGED: Last Month = full previous calendar month.
-      var startPM=new Date(now.getFullYear(),now.getMonth()-1,1);startPM.setHours(0,0,0,0);
-      var endPM=new Date(now.getFullYear(),now.getMonth(),0);endPM.setHours(0,0,0,0); // last day of prev month
-      return dd>=startPM&&dd<=endPM;
-    }
-    if(range==="ytd"){
-      // CHANGED: Year-to-date = Jan 1 of current year → today.
-      var startY=new Date(now.getFullYear(),0,1);startY.setHours(0,0,0,0);
-      return dd>=startY;
-    }
-    if(range==="custom"){
-      // CHANGED: Custom range — bounded by user-picked ISO dates. Missing bound = open-ended on that side.
-      if(customStart){
-        var sParts=customStart.match(/^(\d{4})-(\d{2})-(\d{2})/);
-        if(sParts){var sD=new Date(+sParts[1],+sParts[2]-1,+sParts[3]);sD.setHours(0,0,0,0);if(dd<sD)return false;}
-      }
-      if(customEnd){
-        var eParts=customEnd.match(/^(\d{4})-(\d{2})-(\d{2})/);
-        if(eParts){var eD=new Date(+eParts[1],+eParts[2]-1,+eParts[3]);eD.setHours(0,0,0,0);if(dd>eD)return false;}
-      }
-      return true;
-    }
-    var cutoff=new Date(now);
-    if(range==="month")cutoff.setMonth(now.getMonth()-1);
-    else if(range==="3month")cutoff.setMonth(now.getMonth()-3);
-    else if(range==="year")cutoff.setFullYear(now.getFullYear()-1);
-    cutoff.setHours(0,0,0,0);
-    return dd>=cutoff;
+    return statsRangeInclude(d, range, customStart, customEnd);
   }
   var filtered=allRows.filter(function(r){return inRange(r.date);});
   // CHANGED: Discipline-score filter — narrows rows to clean/broken days based on threshold.
