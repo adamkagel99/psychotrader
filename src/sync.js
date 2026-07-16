@@ -129,6 +129,21 @@ let restoreInProgress = false;
 // ---- raw localStorage handles (captured before patching) ----
 const rawSet = Storage.prototype.setItem;
 const rawRemove = Storage.prototype.removeItem;
+const rawGet = Storage.prototype.getItem;
+
+// CHANGED: Order-insensitive JSON compare. The app re-serializes tf-settings on every load and the
+// key order can differ from the stored copy even when the data is identical; comparing raw strings
+// would then falsely bump the settings timestamp on every load. stableStringify normalizes key
+// order so the timestamp only advances on a genuine settings change.
+function stableStringify(v) {
+  if (v === null || typeof v !== "object") return JSON.stringify(v);
+  if (Array.isArray(v)) return "[" + v.map(stableStringify).join(",") + "]";
+  return "{" + Object.keys(v).sort().map(function (k) { return JSON.stringify(k) + ":" + stableStringify(v[k]); }).join(",") + "}";
+}
+function settingsChanged(a, b) {
+  if (a == null || b == null) return a !== b;
+  try { return stableStringify(JSON.parse(a)) !== stableStringify(JSON.parse(b)); } catch (e) { return a !== b; }
+}
 
 function rawSetItem(k, v) {
   rawSet.call(window.localStorage, k, v);
@@ -149,16 +164,50 @@ export async function pullFromCloud(userId) {
   // cloud BEFORE a key was added to SKIP_KEYS would keep getting restored on every pull,
   // overwriting the local-only toggle the user just set. Skipping here makes the local
   // value authoritative for UI-state keys.
+  // CHANGED: Build a key→value lookup and read both sides' settings timestamps so tf-settings can
+  // use last-write-wins instead of the cloud blindly overwriting local (overnight settings loss).
+  const kvByKey = {};
+  (kv || []).forEach((row) => { if (row && typeof row.key === "string") kvByKey[row.key] = row.value; });
+  const settingsMtimeCloud = (function () { var v = kvByKey["tf-settings-mtime"]; var n = parseInt(typeof v === "object" ? JSON.stringify(v) : v, 10); return isNaN(n) ? 0 : n; })();
+  let localSettings = null, settingsMtimeLocal = 0;
+  try { localSettings = window.localStorage.getItem("tf-settings"); } catch (e) {}
+  try { settingsMtimeLocal = parseInt(window.localStorage.getItem("tf-settings-mtime") || "0", 10) || 0; } catch (e) {}
+
   (kv || []).forEach((row) => {
     if (row.value == null) return;
     if (typeof row.key === "string" && SKIP_KEYS.has(row.key)) return;
-    // CHANGED: Don't re-JSON.stringify primitive values (strings/numbers/booleans). Push stores
-    // raw strings like "2026-06" (the halfsize/banner month keys) as bare strings in cloud;
-    // re-stringifying them on pull produces '"2026-06"' (with quote chars) in localStorage,
-    // which breaks the app's strict equality check against the month key.
+    // tf-settings and its timestamp are resolved by last-write-wins below, not overwritten here.
+    if (row.key === "tf-settings" || row.key === "tf-settings-mtime") return;
     const out = typeof row.value === "object" ? JSON.stringify(row.value) : String(row.value);
     rawSetItem(row.key, out);
   });
+
+  // CHANGED: tf-settings last-write-wins. Adopt cloud only when it is genuinely newer; otherwise
+  // keep the local copy (never revert overnight) and heal the cloud from local.
+  (function () {
+    const cloudRaw = kvByKey["tf-settings"];
+    const cloudHas = cloudRaw != null;
+    const cloudStr = cloudHas ? (typeof cloudRaw === "object" ? JSON.stringify(cloudRaw) : String(cloudRaw)) : null;
+    if (!localSettings) {
+      if (cloudHas) { // fresh device — adopt cloud
+        rawSetItem("tf-settings", cloudStr);
+        rawSetItem("tf-settings-mtime", String(settingsMtimeCloud || Date.now()));
+      }
+      return;
+    }
+    if (cloudHas && settingsMtimeCloud > settingsMtimeLocal) { // another device wrote later
+      rawSetItem("tf-settings", cloudStr);
+      rawSetItem("tf-settings-mtime", String(settingsMtimeCloud));
+      return;
+    }
+    // Keep local. Ensure it has a timestamp, then push local up so the cloud agrees next time.
+    if (!settingsMtimeLocal) { settingsMtimeLocal = Date.now(); rawSetItem("tf-settings-mtime", String(settingsMtimeLocal)); }
+    if (!cloudHas || cloudStr !== localSettings || settingsMtimeCloud !== settingsMtimeLocal) {
+      pending.set("tf-settings", { op: "set" });
+      pending.set("tf-settings-mtime", { op: "set" });
+      if (!flushTimer) flushTimer = setTimeout(flush, 800);
+    }
+  })();
   // CHANGED: Reconcile deletions. If a syncable key exists in localStorage but NOT in the cloud
   // KV result, it was deleted on another device — remove it locally so cross-device disables
   // (e.g. turning off half-size on mobile) actually propagate to laptop and vice-versa.
@@ -167,7 +216,7 @@ export async function pullFromCloud(userId) {
   // present once set and is never "removed on another device" — so a cloud row briefly missing
   // (e.g. an interrupted restore push) must not silently wipe the user's settings and reset
   // setup grade criteria / sizing / sessions to defaults. Keep the local copy authoritative.
-  const NEVER_DELETE = new Set(["tf-settings"]);
+  const NEVER_DELETE = new Set(["tf-settings", "tf-settings-mtime"]);
   for (let i = window.localStorage.length - 1; i >= 0; i--) {
     const k = window.localStorage.key(i);
     if (isSyncableKv(k) && !cloudKeys.has(k) && !NEVER_DELETE.has(k)) {
@@ -476,8 +525,19 @@ export function startSync(userId) {
   patched = true;
 
   Storage.prototype.setItem = function (k, v) {
+    // CHANGED: Stamp a last-write timestamp whenever tf-settings actually CHANGES value, so the
+    // pull can do last-write-wins and never revert newer local settings to a stale cloud copy
+    // (the "settings don't save overnight" bug). Only bump on a real change so a same-value
+    // re-serialize on load doesn't falsely mark local as newer than another device.
+    var prevSettings = (this === window.localStorage && k === "tf-settings") ? rawGet.call(this, k) : null;
     rawSet.call(this, k, v);
-    if (this === window.localStorage) queue(k, "set");
+    if (this === window.localStorage) {
+      if (k === "tf-settings" && settingsChanged(v, prevSettings)) {
+        try { rawSet.call(window.localStorage, "tf-settings-mtime", String(Date.now())); } catch (e) {}
+        queue("tf-settings-mtime", "set");
+      }
+      queue(k, "set");
+    }
   };
   Storage.prototype.removeItem = function (k) {
     rawRemove.call(this, k);
@@ -567,45 +627,43 @@ if (typeof window !== "undefined") {
     } catch (e) { console.error("Cloud wipe failed:", e); throw e; }
   };
 
-  // Restore: DESTRUCTIVE. Wipes the user's cloud data + local app data, then pushes every key
-  // from the backup OBJECT. The backup file is the new source of truth — nothing from before
-  // survives. (If a user wants additive behavior they can manually merge files first.)
+  // Restore: PUSH-FIRST and NON-DESTRUCTIVE.
+  //
+  // The old design wiped ALL cloud rows and cleared ALL local storage BEFORE rebuilding. That
+  // left a window where, if any push failed or the tab reloaded mid-restore, BOTH cloud and
+  // local were empty — and the app's sign-in pull then refilled from an empty cloud, wiping the
+  // user's history. This rewrite never deletes globally:
+  //   1) write every backup key to localStorage first, so local is instantly complete;
+  //   2) upsert every key to the cloud. journal_days / user_kv / transfers all upsert, and
+  //      handleSetFromValue replaces trades scoped to each day it touches — so the backup
+  //      overwrites matching rows WITHOUT a destructive global delete.
+  // If a push fails or the page reloads partway, nothing is lost: local still holds everything
+  // and the cloud holds at least what pushed. Worst case a stale row that isn't in the backup
+  // survives (a later per-day/per-key sync corrects it) — never data loss.
   window.__psychoSyncRestore = async function (backup) {
     if (!currentUserId) return;
     const uid = currentUserId;
-    // CHANGED: Suspend the debounced sync BEFORE doing anything. The app already wrote every
-    // backup key through the patched setItem, which queued a flush; cancel it and block new
-    // queueing so nothing races the authoritative writes below.
+    // Suspend the debounced sync first: the app already wrote every backup key through the
+    // patched setItem, which queued a flush. Cancel it and block new queueing so nothing races
+    // the authoritative writes below.
     restoreInProgress = true;
     pending.clear();
     if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
     try {
-    try {
-      await supabase.from("trades").delete().eq("user_id", uid);
-      await supabase.from("journal_days").delete().eq("user_id", uid);
-      await supabase.from("transfers").delete().eq("user_id", uid);
-      await supabase.from("user_kv").delete().eq("user_id", uid);
-    } catch (e) { console.error("Cloud clear before restore failed:", e); }
-    // Also clear local app keys so restore is a clean slate. SKIP_KEYS (events cache) is preserved.
-    try {
-      const toRemove = [];
-      for (let i = 0; i < window.localStorage.length; i++) {
-        const k = window.localStorage.key(i);
-        if (typeof k === "string" && SKIP_KEYS.has(k)) continue;
-        if (isJournalKey(k) || (typeof k === "string" && k.startsWith("tf-"))) toRemove.push(k);
+      // 1) Make LOCAL complete immediately (raw writes bypass the patch, so no queueing).
+      for (const key of Object.keys(backup || {})) {
+        if (!(isJournalKey(key) || key === "tf-transfers" || isSyncableKv(key))) continue;
+        try { rawSetItem(key, backup[key]); } catch (e) { /* quota: cloud push still carries it */ }
       }
-      toRemove.forEach((k) => rawRemove.call(window.localStorage, k));
-    } catch (e) { console.error("Local clear before restore failed:", e); }
-
-    for (const key of Object.keys(backup || {})) {
-      if (!(isJournalKey(key) || key === "tf-transfers" || isSyncableKv(key))) continue;
-      try { rawSetItem(key, backup[key]); } catch (e) { /* quota: handled below */ }
-      try {
-        await handleSetFromValue(key, backup[key], uid);
-      } catch (e) {
-        console.error("Restore push failed for", key, e);
+      // 2) Upsert everything to the CLOUD. No up-front delete of any table.
+      for (const key of Object.keys(backup || {})) {
+        if (!(isJournalKey(key) || key === "tf-transfers" || isSyncableKv(key))) continue;
+        try {
+          await handleSetFromValue(key, backup[key], uid);
+        } catch (e) {
+          console.error("Restore push failed for", key, e);
+        }
       }
-    }
     } finally {
       // Re-enable normal syncing. Any pending flush from before restore was already cancelled.
       restoreInProgress = false;
