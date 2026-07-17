@@ -4346,7 +4346,10 @@ function PerfProgressCard(props){
   var hasTodayRow=rows.some(function(r){return r.date===todayKey;});
   var liveTrades=(props.todayTrades||[]).filter(function(t){return t&&t.status!=="open";});
   var allRows=rows.slice();
-  if(!hasTodayRow&&liveTrades.length>0)allRows.push({date:todayKey,trades:liveTrades});
+  // CHANGED: Only fold in today's live trades when TODAY falls inside the selected range. Otherwise
+  // ranges that exclude today (Last Month, Last Week) wrongly picked up today's live trades here,
+  // making Home disagree with the Performance tab (which filters its today row through the range).
+  if(!hasTodayRow&&liveTrades.length>0&&statsRangeInclude(todayKey,range,_cStart,_cEnd))allRows.push({date:todayKey,trades:liveTrades});
   var allTrades=[];allRows.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status!=="open")allTrades.push(t);});});
   var hasData=allTrades.length>0;
   var wins=allTrades.filter(function(t){return parseFloat(t.pnl)>0;});
