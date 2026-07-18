@@ -1652,10 +1652,11 @@ function MonthlyTargetBanner(props){
         <div style={{fontSize:13,fontWeight:800,color:"#fff",display:"flex",alignItems:"center",gap:7}}>🏁 Monthly target hit — {fmt(monthPnLLive)} of {fmt(monthlyTarget)}</div>
       </div>
       <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap"}}>
-        {/* CHANGED: Half-size is mandatory once the monthly goal is hit — replaced the toggle
-           button with a locked "On" indicator. The user can no longer flip it off for the rest
-           of the month. */}
-        <div title="Half-size is locked on after hitting your monthly goal" style={{padding:"6px 12px",background:"#facc15",border:"1px solid #facc15",borderRadius:6,color:"#422006",fontSize:12,fontWeight:700,whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:5}}>🔒 Half-size locked on</div>
+        {/* CHANGED: Half-size is no longer force-locked by a goal hit — it's a suggestion the user
+           can override. This control now reflects the ACTUAL half-size state and toggles it, instead
+           of always claiming "locked on" while the Settings toggle read Off. */}
+        <button onClick={function(){setMonthHalfsizeActive(!halfOn);if(!halfOn){try{localStorage.removeItem("tf-month-goal-banner-dismissed");}catch(e){}}if(props.bumpReloadKey)props.bumpReloadKey();}} title={halfOn?"Half-size is on — tap to turn off":"Suggested after hitting your monthly goal — tap to turn on"} style={{padding:"6px 12px",background:halfOn?"#facc15":"transparent",border:"1px solid #facc15",borderRadius:6,color:halfOn?"#422006":"#facc15",fontSize:12,fontWeight:700,whiteSpace:"nowrap",cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:5}}>{halfOn?"🔒 Half-size on":"Turn on half-size"}</button>
+        {!halfOn&&<button onClick={function(){dismissMonthGoalBanner();if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"none",border:"1px solid #a16207",borderRadius:6,color:"#fde68a",fontSize:12,fontWeight:600,whiteSpace:"nowrap",cursor:"pointer",fontFamily:"inherit"}}>Dismiss</button>}
       </div>
     </div>
   );
