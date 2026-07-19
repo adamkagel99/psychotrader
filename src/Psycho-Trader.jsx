@@ -1643,7 +1643,11 @@ function MonthlyTargetBanner(props){
   var monthPnLLive=monthRows.reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0)+(todayInJournal?0:totalPnL);
   if(monthPnLLive<monthlyTarget)return null;
   var halfOn=isMonthHalfsizeActive();
-  if(!halfOn&&isMonthGoalBannerDismissed())return null;
+  // CHANGED: Once half-size is ON the banner has served its purpose (it exists to surface the
+  // suggestion), so hide it. Previously it stayed sticky while half-size was on to act as a
+  // toggle-off point — half-size is now managed in Settings → Position Sizing Parameters.
+  if(halfOn)return null;
+  if(isMonthGoalBannerDismissed())return null;
   var allowance=getWithdrawalAllowance(totalPnL);
   var fmt=function(n){return "$"+Math.round(n).toLocaleString();};
   return (
@@ -1652,11 +1656,11 @@ function MonthlyTargetBanner(props){
         <div style={{fontSize:13,fontWeight:800,color:"#fff",display:"flex",alignItems:"center",gap:7}}>🏁 Monthly target hit — {fmt(monthPnLLive)} of {fmt(monthlyTarget)}</div>
       </div>
       <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap"}}>
-        {/* CHANGED: Half-size is no longer force-locked by a goal hit — it's a suggestion the user
-           can override. This control now reflects the ACTUAL half-size state and toggles it, instead
-           of always claiming "locked on" while the Settings toggle read Off. */}
-        <button onClick={function(){setMonthHalfsizeActive(!halfOn);if(!halfOn){try{localStorage.removeItem("tf-month-goal-banner-dismissed");}catch(e){}}if(props.bumpReloadKey)props.bumpReloadKey();}} title={halfOn?"Half-size is on — tap to turn off":"Suggested after hitting your monthly goal — tap to turn on"} style={{padding:"6px 12px",background:halfOn?"#facc15":"transparent",border:"1px solid #facc15",borderRadius:6,color:halfOn?"#422006":"#facc15",fontSize:12,fontWeight:700,whiteSpace:"nowrap",cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:5}}>{halfOn?"🔒 Half-size on":"Turn on half-size"}</button>
-        {!halfOn&&<button onClick={function(){dismissMonthGoalBanner();if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"none",border:"1px solid #a16207",borderRadius:6,color:"#fde68a",fontSize:12,fontWeight:600,whiteSpace:"nowrap",cursor:"pointer",fontFamily:"inherit"}}>Dismiss</button>}
+        {/* CHANGED: Half-size is a suggestion, not a forced lock. The banner only renders while
+           half-size is OFF, so this is always the "turn it on" action; turning it on hides the
+           banner. Turning half-size back off is done in Settings → Position Sizing Parameters. */}
+        <button onClick={function(){setMonthHalfsizeActive(true);try{localStorage.removeItem("tf-month-goal-banner-dismissed");}catch(e){}if(props.bumpReloadKey)props.bumpReloadKey();}} title="Suggested after hitting your monthly goal — tap to turn on" style={{padding:"6px 12px",background:"transparent",border:"1px solid #facc15",borderRadius:6,color:"#facc15",fontSize:12,fontWeight:700,whiteSpace:"nowrap",cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:5}}>Turn on half-size</button>
+        <button onClick={function(){dismissMonthGoalBanner();if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"none",border:"1px solid #a16207",borderRadius:6,color:"#fde68a",fontSize:12,fontWeight:600,whiteSpace:"nowrap",cursor:"pointer",fontFamily:"inherit"}}>Dismiss</button>
       </div>
     </div>
   );
