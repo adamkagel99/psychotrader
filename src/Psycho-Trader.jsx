@@ -9687,10 +9687,50 @@ function App(props){
   // refresh data from localStorage WITHOUT remounting — this preserves all in-progress UI state
   // (forms, drafts, editing, scroll position). Without this the app was remounting on every
   // tab return and erasing whatever the user had been typing.
+  // CHANGED: Track whether a cloud pull has completed. The day-rollover auto no-trade writer
+  // consults this (via ref, so the 60s interval closure always sees the current value) to avoid
+  // writing a "no-trade day" over a real trading day whose journal entry simply hasn't been
+  // pulled from the cloud yet.
+  var syncReadyRef=useRef(false);
+  useEffect(function(){
+    if(props.syncTick!=null&&props.syncTick>0)syncReadyRef.current=true;
+  },[props.syncTick]);
   useEffect(function(){
     // Don't fire on initial mount (syncTick=0); only on subsequent increments.
     if(props.syncTick==null||props.syncTick===0)return;
     try{bumpReloadKey();}catch(e){}
+  },[props.syncTick]);
+  // CHANGED: Self-heal contradictory journal entries — a day flagged as a no-trade day that
+  // nonetheless has trades. That combination is the fingerprint of the rollover bug guarded above:
+  // an auto no-trade summary (pnl 0 / discipline 100) written over a real trading day, while the
+  // trades themselves survived (they sync in a separate cloud table). Recomputes the day summary
+  // from the trades and clears the no-trade flags. Idempotent, and re-runs after each cloud pull.
+  useEffect(function(){
+    try{
+      var healed=0;
+      for(var i=0;i<localStorage.length;i++){
+        var k=localStorage.key(i);
+        if(typeof k!=="string"||k.indexOf("journal:")!==0)continue;
+        var raw=localStorage.getItem(k);if(!raw)continue;
+        var e=null;try{e=JSON.parse(raw);}catch(err){continue;}
+        if(!e||!e.noTradeDay)continue;
+        var closed=(e.trades||[]).filter(function(t){return t&&t.status!=="open";});
+        if(closed.length===0)continue;
+        var rm=parseFloat(e.riskMax)||0;
+        var fixed=Object.assign({},e,{
+          noTradeDay:false,
+          autoNoTrade:false,
+          pnl:closed.reduce(function(s,t){return s+(parseFloat(t.pnl)||0);},0),
+          wins:closed.filter(function(t){return parseFloat(t.pnl)>0;}).length,
+          losses:closed.filter(function(t){return parseFloat(t.pnl)<0;}).length,
+          disciplineScore:calcDiscipline(closed,rm,e.commitments?{commitments:e.commitments}:{commitment:e.commitment||null})
+        });
+        delete fixed.noTradeLoggedAt;
+        safeWriteJournalEntry(k,fixed);
+        healed++;
+      }
+      if(healed>0){try{bumpReloadKey();}catch(e){}}
+    }catch(e){console.error("No-trade/trades conflict heal failed:",e);}
   },[props.syncTick]);
   // CHANGED: Persist active tab in sessionStorage so it survives reloads but isn't wiped by cloud-sync (which rewrites localStorage).
   // CHANGED: Always open to the home (dashboard) tab on sign-in / app load. Previously the
@@ -9965,13 +10005,27 @@ function App(props){
             var ntKey="journal:"+state.date.replace(/\//g,"-");
             var hadExisting=false;try{hadExisting=!!localStorage.getItem(ntKey);}catch(e){}
             if(!hadExisting){
-              var parts=String(state.date).split("/");
-              var dObj=parts.length===3?new Date(parseInt(parts[2],10),parseInt(parts[0],10)-1,parseInt(parts[1],10)):null;
-              var dow=dObj?dObj.getDay():-1;
-              var marketWasOpen=dObj&&dow!==0&&dow!==6&&!MARKET_HOLIDAYS[state.date];
-              if(marketWasOpen){
-                var ntEntry={date:state.date,pnl:0,trades:[],note:state.dailyNote||"",noTradeReason:"",noTradeReasons:[],noTradeShots:[],noTradeDay:true,noTradeLoggedAt:Date.now(),autoNoTrade:true,ruleViolations:[],commitment:state.commitment||null,commitments:getCommitmentsMap(state),wins:0,losses:0,riskMax:parseFloat(settings.riskMax)||0,disciplineScore:100};
-                safeWriteJournalEntry(ntKey,ntEntry);
+              // CHANGED: Only auto-log a no-trade day when we can TRUST that local data is fully
+              // loaded. On a reload the cloud pull is async, so localStorage can be momentarily
+              // empty of journal keys — the old code read that as "the prior day had no entry" and
+              // wrote a pnl:0 / noTradeDay auto entry OVER a real trading day's summary. (Trades
+              // live in a separate cloud table, so they survived while the day summary was reset —
+              // exactly the reported symptom.) Two guards:
+              //   1) If cloud sync is active, require a completed pull (syncTick > 0) first.
+              //   2) Require at least one journal key present, so we never write from empty local.
+              var cloudActive=(typeof window!=="undefined"&&typeof window.__psychoSyncRestore==="function");
+              var hasAnyJournal=false;
+              try{for(var _ji=0;_ji<localStorage.length;_ji++){var _jk=localStorage.key(_ji);if(typeof _jk==="string"&&_jk.indexOf("journal:")===0){hasAnyJournal=true;break;}}}catch(e){}
+              var safeToAutoLog=(!cloudActive||syncReadyRef.current)&&hasAnyJournal;
+              if(safeToAutoLog){
+                var parts=String(state.date).split("/");
+                var dObj=parts.length===3?new Date(parseInt(parts[2],10),parseInt(parts[0],10)-1,parseInt(parts[1],10)):null;
+                var dow=dObj?dObj.getDay():-1;
+                var marketWasOpen=dObj&&dow!==0&&dow!==6&&!MARKET_HOLIDAYS[state.date];
+                if(marketWasOpen){
+                  var ntEntry={date:state.date,pnl:0,trades:[],note:state.dailyNote||"",noTradeReason:"",noTradeReasons:[],noTradeShots:[],noTradeDay:true,noTradeLoggedAt:Date.now(),autoNoTrade:true,ruleViolations:[],commitment:state.commitment||null,commitments:getCommitmentsMap(state),wins:0,losses:0,riskMax:parseFloat(settings.riskMax)||0,disciplineScore:100};
+                  safeWriteJournalEntry(ntKey,ntEntry);
+                }
               }
             }
           }catch(e){}
