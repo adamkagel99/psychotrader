@@ -1875,7 +1875,7 @@ function getAccountBalance(){
     // Falls back to entry.pnl only when a row has no trades (legacy / imported entries).
     var totalPnL=rows.reduce(function(s,e){
       var ts=(e.trades||[]).filter(function(t){return t&&t.status!=="open";});
-      if(ts.length>0)return s+ts.reduce(function(a,t){return a+(parseFloat(t.pnl)||0);},0);
+      if(ts.length>0)return s+ts.reduce(function(a,t){return a+tradeNetPnl(t);},0);
       return s+(parseFloat(e.pnl)||0);
     },0);
     return transferTotal(transfers)+totalPnL;
@@ -2686,11 +2686,43 @@ function SessionStrategy(props){
 // Prices banner: prominent ENTRY → EXIT.
 // Single meta line: time, duration, contracts, grade.
 // Body: setup chain, tags, notes, screenshots — each in its own clean row.
+// CHANGED: Canonical fee resolution + NET P&L for a trade.
+// A trade's stored `pnl` is net of fees ONLY if it was computed while a commission was configured
+// (doRecalc subtracts fees and stamps feesPaid). Trades logged before commissions were set — or
+// whose backfill didn't persist — still hold GROSS pnl with feesPaid 0. Summing stored pnl in that
+// state understates costs, so P&L reads gross everywhere.
+// tradeFees() reports the fee and whether it is already baked into `pnl`; tradeNetPnl() always
+// returns true net cash. Deriving at read time means P&L is correct regardless of backfill state,
+// and never double-counts (when feesPaid > 0 the stored pnl is returned unchanged).
+function tradeFees(t){
+  if(!t)return {fees:0,inPnl:true};
+  var stored=parseFloat(t.feesPaid)||0;
+  if(stored>0)return {fees:stored,inPnl:true};
+  try{
+    var s=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}");
+    var acs=(s.assetClassSettings||{})[t.assetClass||s.defaultAssetClass||"options"]||{};
+    var comm=parseFloat(acs.commissionPerContract)||0;
+    if(comm<=0)return {fees:0,inPnl:true};
+    var ec=(t.entries||[]).reduce(function(a,e){var n=parseFloat(e&&e.contracts);return a+(isNaN(n)?0:n);},0);
+    var xc=(t.exits||[]).reduce(function(a,e){var n=parseFloat(e&&e.contracts);return a+(isNaN(n)?0:n);},0);
+    // Legacy trades without entry/exit arrays: assume a round trip on the stored contract count.
+    if(ec===0&&xc===0){var ct=parseFloat(t.contracts)||0;ec=ct;xc=ct;}
+    var derived=(ec+xc)*comm;
+    if(!(derived>0))return {fees:0,inPnl:true};
+    return {fees:derived,inPnl:false};
+  }catch(e){return {fees:0,inPnl:true};}
+}
+function tradeNetPnl(t){
+  var p=parseFloat(t&&t.pnl);
+  if(isNaN(p))return 0;
+  var f=tradeFees(t);
+  return f.inPnl?p:(p-f.fees);
+}
 function TradeTile(props){
   var t=props.t,i=props.i,onDelete=props.onDelete,onEdit=props.onEdit;
   var hideControls=!!props.hideControls;
   var [tileViewer,setTileViewer]=useState(null);
-  var pnl=parseFloat(t.pnl||0);
+  var pnl=tradeNetPnl(t);
   var pctPnl=parseFloat(t.pctPnl||0);
   var hasPnl=t.pnl!==""&&t.pnl!=null&&!isNaN(pnl);
   var hasPct=t.pctPnl!==""&&t.pctPnl!=null&&!isNaN(pctPnl);
@@ -2806,22 +2838,12 @@ function TradeTile(props){
              this just makes the deduction visible so the math is transparent. Hidden when $ is
              hidden or no fees were charged. */}
           {!HIDE_DOLLAR_PNL&&(function(){
-            // CHANGED: If the stored feesPaid is 0 or missing, derive display fees from current
-            // commission × total contracts (entry+exit legs). Purely display — doesn't rewrite the
-            // stored value; use Settings → Backfill to persist.
-            var stored=parseFloat(t.feesPaid)||0;
-            if(stored>0)return <div style={{fontSize:11,color:"#64748b",fontWeight:500,fontVariantNumeric:"tabular-nums"}} title="Commission fees deducted from gross P&L">fees −${stored.toFixed(2)}</div>;
-            try{
-              var s=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}");
-              var acs=(s.assetClassSettings||{})[t.assetClass]||{};
-              var comm=parseFloat(acs.commissionPerContract)||0;
-              if(comm<=0)return null;
-              var ec=(t.entries||[]).reduce(function(a,e){var n=parseFloat(e&&e.contracts);return a+(isNaN(n)?0:n);},0);
-              var xc=(t.exits||[]).reduce(function(a,e){var n=parseFloat(e&&e.contracts);return a+(isNaN(n)?0:n);},0);
-              var derived=(ec+xc)*comm;
-              if(derived<=0)return null;
-              return <div style={{fontSize:11,color:"#64748b",fontWeight:500,fontVariantNumeric:"tabular-nums",opacity:0.75}} title="Commission fees at current rate (not yet backfilled into P&L)">fees ~−${derived.toFixed(2)}</div>;
-            }catch(e){return null;}
+            // CHANGED: P&L above is ALWAYS net of fees now (tradeNetPnl derives the fee when it
+            // isn't already baked into the stored value), so there's no longer an "estimated but
+            // not applied" state — the fee shown here is always the one deducted.
+            var f=tradeFees(t);
+            if(!(f.fees>0))return null;
+            return <div style={{fontSize:11,color:"#64748b",fontWeight:500,fontVariantNumeric:"tabular-nums"}} title="Commission fees deducted from gross P&L">fees −${f.fees.toFixed(2)}</div>;
           })()}
         </div>
       )}
@@ -3697,7 +3719,7 @@ function NotebookPanel(props){
     // belongs in the Notebook — it's a written note like any other.
     var lockNote=(r.lockNote||"").trim();
     // Day P&L from all closed trades (for the P&L sort), independent of which trades have notes.
-    var dayPnl=(r.trades||[]).reduce(function(s,t){return s+((t&&t.status!=="open")?(parseFloat(t.pnl)||0):0);},0);
+    var dayPnl=(r.trades||[]).reduce(function(s,t){return s+((t&&t.status!=="open")?tradeNetPnl(t):0);},0);
     return {date:d,tradeNotes:tradeNotes,dayNote:dayNote,lockNote:lockNote,dayPnl:dayPnl};
   }).filter(function(e){return e.tradeNotes.length>0||e.dayNote||e.lockNote;});
   // CHANGED: Apply the chosen sort — by date or by day P&L, asc or desc.
@@ -4104,7 +4126,7 @@ function PerformanceSummary(props){
   if(allTrades.length===0)return null; // nothing to summarize yet
   var wins=allTrades.filter(function(t){return parseFloat(t.pnl)>0;});
   var losses=allTrades.filter(function(t){return parseFloat(t.pnl)<0;});
-  var totalPnl=allTrades.reduce(function(s,t){return s+(parseFloat(t.pnl)||0);},0);
+  var totalPnl=allTrades.reduce(function(s,t){return s+tradeNetPnl(t);},0);
   var winRate=Math.round((wins.length/allTrades.length)*100);
   var totalWins=wins.reduce(function(s,t){return s+parseFloat(t.pnl);},0);
   var totalLosses=Math.abs(losses.reduce(function(s,t){return s+parseFloat(t.pnl);},0));
@@ -4367,7 +4389,7 @@ function PerfProgressCard(props){
   // CHANGED: Match PerformanceTab's expectancy formula EXACTLY — average $ per trade as a % of the
   // average position size (ratio of means), not the mean of per-trade pctPnl. Keeps this Home KPI
   // consistent with the Performance tab for the same timeframe.
-  var _totalPnl=allTrades.reduce(function(s,t){return s+(parseFloat(t.pnl)||0);},0);
+  var _totalPnl=allTrades.reduce(function(s,t){return s+tradeNetPnl(t);},0);
   var _expValue=allTrades.length?_totalPnl/allTrades.length:0;
   var _posSizes=allTrades.map(function(t){return parseFloat(t.positionSize);}).filter(function(v){return !isNaN(v)&&v>0;});
   var _avgPosSize=_posSizes.length?_posSizes.reduce(function(s,v){return s+v;},0)/_posSizes.length:0;
@@ -4758,7 +4780,7 @@ function TradesTab(props){
     // CHANGED: A past day's riskMax is a historical fact — preserve the entry's own riskMax (only
     // fall back to current settings if absent), and score discipline against that same value.
     var entryRiskMax=(existing.riskMax!=null&&parseFloat(existing.riskMax)>0)?parseFloat(existing.riskMax):(parseFloat(settings.riskMax)||0);
-    var newEntry=Object.assign({},existing,{trades:ut,wins:ut.filter(function(x){return parseFloat(x.pnl)>0;}).length,losses:ut.filter(function(x){return parseFloat(x.pnl)<0;}).length,pnl:ut.reduce(function(s,x){return s+(parseFloat(x.pnl)||0);},0),disciplineScore:calcDiscipline(ut,entryRiskMax,existing.commitments?{commitments:existing.commitments}:{commitment:existing.commitment||null}),riskMax:entryRiskMax,noTradeDay:ut.length>0?false:!!existing.noTradeDay});
+    var newEntry=Object.assign({},existing,{trades:ut,wins:ut.filter(function(x){return parseFloat(x.pnl)>0;}).length,losses:ut.filter(function(x){return parseFloat(x.pnl)<0;}).length,pnl:ut.reduce(function(s,x){return s+tradeNetPnl(x);},0),disciplineScore:calcDiscipline(ut,entryRiskMax,existing.commitments?{commitments:existing.commitments}:{commitment:existing.commitment||null}),riskMax:entryRiskMax,noTradeDay:ut.length>0?false:!!existing.noTradeDay});
     try{localStorage.setItem("journal:"+selectedDate.replace(/\//g,"-"),JSON.stringify(newEntry));}catch(e){}
     setPastSessions(function(arr){var found=arr.some(function(x){return x.date===selectedDate;});return found?arr.map(function(x){return x.date===selectedDate?newEntry:x;}):arr.concat([newEntry]);});
     setPastNewTrade(null);
@@ -4776,7 +4798,7 @@ function TradesTab(props){
     var ut=(sourceEntry.trades||[]).map(function(x){return x.id===enriched.id?enriched:x;});
     // CHANGED: Today's riskMax follows current settings (live day); a past day preserves its own.
     var entryRiskMax=isToday?(parseFloat(settings.riskMax)||0):((sourceEntry.riskMax!=null&&parseFloat(sourceEntry.riskMax)>0)?parseFloat(sourceEntry.riskMax):(parseFloat(settings.riskMax)||0));
-    var newEntry=Object.assign({},sourceEntry,{trades:ut,wins:ut.filter(function(x){return parseFloat(x.pnl)>0;}).length,losses:ut.filter(function(x){return parseFloat(x.pnl)<0;}).length,pnl:ut.reduce(function(s,x){return s+(parseFloat(x.pnl)||0);},0),disciplineScore:calcDiscipline(ut,entryRiskMax,(sourceEntry&&sourceEntry.commitments)?{commitments:sourceEntry.commitments}:(Object.keys(getCommitmentsMap(state)).length?{commitments:getCommitmentsMap(state)}:{commitment:(sourceEntry&&sourceEntry.commitment)||state.commitment||null})),riskMax:entryRiskMax,noTradeDay:ut.length>0?false:!!sourceEntry.noTradeDay});
+    var newEntry=Object.assign({},sourceEntry,{trades:ut,wins:ut.filter(function(x){return parseFloat(x.pnl)>0;}).length,losses:ut.filter(function(x){return parseFloat(x.pnl)<0;}).length,pnl:ut.reduce(function(s,x){return s+tradeNetPnl(x);},0),disciplineScore:calcDiscipline(ut,entryRiskMax,(sourceEntry&&sourceEntry.commitments)?{commitments:sourceEntry.commitments}:(Object.keys(getCommitmentsMap(state)).length?{commitments:getCommitmentsMap(state)}:{commitment:(sourceEntry&&sourceEntry.commitment)||state.commitment||null})),riskMax:entryRiskMax,noTradeDay:ut.length>0?false:!!sourceEntry.noTradeDay});
     var dateKey=isToday?todayStr():selectedDate;
     var written=safeWriteJournalEntry("journal:"+dateKey.replace(/\//g,"-"),newEntry);
     if(written)newEntry=written;
@@ -4798,7 +4820,7 @@ function TradesTab(props){
     var ut=(sourceEntry.trades||[]).filter(function(x){return x.id!==tradeId;});
     // CHANGED: Today's riskMax follows current settings (live day); a past day preserves its own.
     var entryRiskMax=isToday?(parseFloat(settings.riskMax)||0):((sourceEntry.riskMax!=null&&parseFloat(sourceEntry.riskMax)>0)?parseFloat(sourceEntry.riskMax):(parseFloat(settings.riskMax)||0));
-    var newEntry=Object.assign({},sourceEntry,{trades:ut,wins:ut.filter(function(x){return parseFloat(x.pnl)>0;}).length,losses:ut.filter(function(x){return parseFloat(x.pnl)<0;}).length,pnl:ut.reduce(function(s,x){return s+(parseFloat(x.pnl)||0);},0),disciplineScore:calcDiscipline(ut,entryRiskMax,(sourceEntry&&sourceEntry.commitments)?{commitments:sourceEntry.commitments}:(Object.keys(getCommitmentsMap(state)).length?{commitments:getCommitmentsMap(state)}:{commitment:(sourceEntry&&sourceEntry.commitment)||state.commitment||null})),riskMax:entryRiskMax,noTradeDay:ut.length>0?false:!!sourceEntry.noTradeDay});
+    var newEntry=Object.assign({},sourceEntry,{trades:ut,wins:ut.filter(function(x){return parseFloat(x.pnl)>0;}).length,losses:ut.filter(function(x){return parseFloat(x.pnl)<0;}).length,pnl:ut.reduce(function(s,x){return s+tradeNetPnl(x);},0),disciplineScore:calcDiscipline(ut,entryRiskMax,(sourceEntry&&sourceEntry.commitments)?{commitments:sourceEntry.commitments}:(Object.keys(getCommitmentsMap(state)).length?{commitments:getCommitmentsMap(state)}:{commitment:(sourceEntry&&sourceEntry.commitment)||state.commitment||null})),riskMax:entryRiskMax,noTradeDay:ut.length>0?false:!!sourceEntry.noTradeDay});
     var dateKey=isToday?todayStr():selectedDate;
     var written=safeWriteJournalEntry("journal:"+dateKey.replace(/\//g,"-"),newEntry);
     if(written)newEntry=written;
@@ -5668,7 +5690,7 @@ function JournalTab(props){
       trades:ut,
       wins:ut.filter(function(x){return parseFloat(x.pnl)>0;}).length,
       losses:ut.filter(function(x){return parseFloat(x.pnl)<0;}).length,
-      pnl:ut.reduce(function(s,x){return s+(parseFloat(x.pnl)||0);},0),
+      pnl:ut.reduce(function(s,x){return s+tradeNetPnl(x);},0),
       disciplineScore:calcDiscipline(ut,entryRiskMax,selectedEntry.commitments?{commitments:selectedEntry.commitments}:{commitment:selectedEntry.commitment||null}),
       riskMax:entryRiskMax
     });
@@ -5690,12 +5712,14 @@ function JournalTab(props){
   if(selectedEntry){
     // CHANGED: When editing, render from draft. Otherwise from saved entry.
     var viewEntry=editing&&editDraft?Object.assign({},selectedEntry,{trades:editDraft.trades,note:editDraft.note}):selectedEntry;
-    var pnlVal=parseFloat(viewEntry.pnl)||0;
     var trades=viewEntry.trades||[];
-    // Live recompute when editing
-    if(editing){
-      pnlVal=trades.reduce(function(s,t){return s+(parseFloat(t.pnl)||0);},0);
-    }
+    // CHANGED: Day P&L is summed from per-trade NET pnl (tradeNetPnl) rather than the stored
+    // entry.pnl. Stored day totals are gross whenever their trades were logged before commissions
+    // were configured, so the summary read as gross while the cards showed fees separately. Summing
+    // net here keeps Daily Summary == sum of the cards, with fees deducted, regardless of backfill.
+    // Falls back to the stored total only when there are no closed trades to sum.
+    var _closedForPnl=trades.filter(function(t){return t&&t.status!=="open";});
+    var pnlVal=_closedForPnl.length>0?_closedForPnl.reduce(function(s,t){return s+tradeNetPnl(t);},0):(parseFloat(viewEntry.pnl)||0);
     var wins=trades.filter(function(t){return parseFloat(t.pnl)>0;}).length;
     var losses=trades.filter(function(t){return parseFloat(t.pnl)<0;}).length;
     var winRate=trades.length>0?Math.round((wins/trades.length)*100):0;
@@ -7810,7 +7834,7 @@ function PerformanceTab(props){
   // has no closed trades (legacy / corrupt-entry safety net — same fallback the curve uses).
   var totalPnl=filtered.reduce(function(s,r){
     var ct=(r.trades||[]).filter(function(t){return t&&t.status!=="open";});
-    if(ct.length>0)return s+ct.reduce(function(a,t){return a+(parseFloat(t.pnl)||0);},0);
+    if(ct.length>0)return s+ct.reduce(function(a,t){return a+tradeNetPnl(t);},0);
     return s+(parseFloat(r.pnl)||0);
   },0);
   var wins=allTrades.filter(function(t){return parseFloat(t.pnl)>0;});
@@ -8340,7 +8364,7 @@ function PerformanceTab(props){
             if(lockedDays.length>0){
               var grp={n:lockedDays.length,lossN:0,lossPnl:0,lossPcts:[],worstPnl:0};
               lockedDays.forEach(function(r){
-                var dayPnl=(r.trades||[]).reduce(function(s,t){return s+(t&&t.status!=="open"?(parseFloat(t.pnl)||0):0);},0);
+                var dayPnl=(r.trades||[]).reduce(function(s,t){return s+(t&&t.status!=="open"?tradeNetPnl(t):0);},0);
                 if(dayPnl<0){grp.lossN++;grp.lossPnl+=dayPnl;if(dayPnl<grp.worstPnl)grp.worstPnl=dayPnl;}
               });
               groups["Discipline threshold broken"]=grp;
@@ -9829,7 +9853,7 @@ function App(props){
         var discScore=0;try{discScore=calcDiscipline(closedT,riskMaxN,{commitments:_commMap});}catch(e){}
         var entry={
           date:todayStr(),
-          pnl:closedT.reduce(function(s,t){return s+(parseFloat(t.pnl)||0);},0),
+          pnl:closedT.reduce(function(s,t){return s+tradeNetPnl(t);},0),
           trades:closedT,
           note:note,
           ruleViolations:state.ruleViolations||[],
@@ -9983,7 +10007,7 @@ function App(props){
             mergedTrades.forEach(function(t){if(t&&t.id!=null)seen[t.id]=true;});
             existing.trades.forEach(function(t){if(t&&t.id!=null&&!seen[t.id])mergedTrades.push(t);});
           }
-          var pnl=mergedTrades.reduce(function(s,t){return s+(parseFloat(t.pnl)||0);},0);
+          var pnl=mergedTrades.reduce(function(s,t){return s+tradeNetPnl(t);},0);
           var wins=mergedTrades.filter(function(t){return parseFloat(t.pnl)>0;}).length;
           var losses=mergedTrades.filter(function(t){return parseFloat(t.pnl)<0;}).length;
           var rolloverRiskMax=parseFloat(settings.riskMax)||(existing&&existing.riskMax)||0;
@@ -10399,7 +10423,7 @@ function App(props){
   }
   function bumpReloadKey(){setReloadKey(function(k){return k+1;});}
   var preCheckComplete=isPreCheckComplete(state.preChecklist);
-  var totalPnL=state.trades.filter(function(t){return t.status!=="open";}).reduce(function(s,t){return s+(parseFloat(t.pnl)||0);},0);
+  var totalPnL=state.trades.filter(function(t){return t.status!=="open";}).reduce(function(s,t){return s+tradeNetPnl(t);},0);
   var liveTrades=state.trades.filter(function(t){return t.status==="open";});
   // CHANGED: Compute effective size-fraction (session sizeFraction × 0.5 when discipline-locked)
   // up here so both tradeStatus and the display values below share the same scaling.
