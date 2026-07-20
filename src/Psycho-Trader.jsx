@@ -2712,10 +2712,42 @@ function tradeFees(t){
     return {fees:derived,inPnl:false};
   }catch(e){return {fees:0,inPnl:true};}
 }
+// CHANGED: Recompute a trade's GROSS pnl from its own entry/exit prices, mirroring doRecalc.
+// This is the ground truth used to decide whether the stored pnl already has fees removed —
+// a stamped feesPaid can NOT be trusted for that, because a partially-applied backfill can leave
+// feesPaid set while pnl is still gross (exactly the state that made fees never show up in totals).
+function tradeGrossPnl(t){
+  try{
+    var entries=t&&t.entries,exits=t&&t.exits;
+    if(!Array.isArray(entries)||!Array.isArray(exits)||!entries.length||!exits.length)return null;
+    var tc=0,rawCost=0;
+    entries.forEach(function(en){var ec=parseFloat(en&&en.contracts),ep=parseFloat(en&&en.price);if(!isNaN(ec)&&!isNaN(ep)){tc+=ec;rawCost+=ec*ep;}});
+    if(!(tc>0))return null;
+    var avg=rawCost/tc;
+    if(isNaN(avg))return null;
+    var acId=t.assetClass||"options";
+    var cls=ASSET_CLASSES[acId]||ASSET_CLASSES.options;
+    var baseMult=(cls&&cls.multiplier)||1;
+    var futMult=(acId==="futures"&&t.instrument)?getFuturesPointValue(t.instrument):1;
+    var mult=acId==="futures"?futMult:baseMult;
+    var sign=(t.direction==="SHORT"||t.direction==="SELL")?-1:1;
+    var tp=0,any=false;
+    exits.forEach(function(ex){var ec=parseFloat(ex&&ex.contracts),ep=parseFloat(ex&&ex.price);if(!isNaN(ec)&&!isNaN(ep)){tp+=(ep-avg)*ec*mult*sign;any=true;}});
+    return any?tp:null;
+  }catch(e){return null;}
+}
 function tradeNetPnl(t){
   var p=parseFloat(t&&t.pnl);
   if(isNaN(p))return 0;
   var f=tradeFees(t);
+  if(!(f.fees>0))return p;
+  // Prefer evidence over the flag: compare the stored pnl against the recomputed gross.
+  var g=tradeGrossPnl(t);
+  if(g!=null){
+    if(Math.abs(p-(g-f.fees))<0.005)return p; // already net — don't deduct twice
+    if(Math.abs(p-g)<0.005)return p-f.fees;   // stored is gross — deduct
+  }
+  // No usable price data: fall back to what feesPaid claims.
   return f.inPnl?p:(p-f.fees);
 }
 function TradeTile(props){
@@ -9259,11 +9291,23 @@ function SettingsTab(props){
                 }
               }catch(e){}
             }catch(e){console.error("[backfill] outer error",e);}
-            // CHANGED: 2s wait for sync push, then full reload. Refresh ensures React state
-            // (which can't be updated from a localStorage write) picks up the new fees.
+            // CHANGED: Wait for the cloud push to actually COMPLETE before reloading. The old code
+            // reloaded on a fixed 2s timer, which was routinely shorter than the debounced push of
+            // every rewritten day + trade. The reload aborted the push mid-flight, the cloud kept
+            // its pre-backfill (gross) values, and the next pull restored them — so the backfill
+            // appeared to do nothing. Falls back to the old timer when sync isn't active.
             console.log("[backfill] done. scanned:",scanned,"updated:",updated);
-            window.alert("Recalculated "+updated+" of "+scanned+" trades.\n\nPage will reload in 2 seconds.");
-            setTimeout(function(){window.location.reload();},2000);
+            if(typeof window!=="undefined"&&typeof window.__psychoSyncFlushNow==="function"){
+              window.alert("Recalculated "+updated+" of "+scanned+" trades.\n\nSaving to the cloud — the page will reload when that finishes.");
+              window.__psychoSyncFlushNow().then(function(){window.location.reload();},function(err){
+                console.error("[backfill] cloud flush failed",err);
+                window.alert("Saved locally, but the cloud sync had an issue: "+((err&&err.message)||err)+"\n\nReloading anyway.");
+                window.location.reload();
+              });
+            }else{
+              window.alert("Recalculated "+updated+" of "+scanned+" trades.\n\nPage will reload in 2 seconds.");
+              setTimeout(function(){window.location.reload();},2000);
+            }
           }} style={{padding:"6px 12px",background:"#0a0a0f",border:"1px solid #4338ca",borderRadius:6,color:"#a5b4fc",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Apply commissions to saved trades</button>
         </div>
         {ASSET_CLASS_ORDER.map(function(c){

@@ -640,6 +640,20 @@ if (typeof window !== "undefined") {
   // If a push fails or the page reloads partway, nothing is lost: local still holds everything
   // and the cloud holds at least what pushed. Worst case a stale row that isn't in the backup
   // survives (a later per-day/per-key sync corrects it) — never data loss.
+  // CHANGED: Let the app force a push and WAIT for it before doing something destructive to the
+  // page (e.g. the commission backfill, which rewrites every trade then reloads). Without this the
+  // reload could cut the debounced push short, leaving the cloud on pre-backfill values that the
+  // next pull would restore — making the backfill look like it silently did nothing.
+  // Loops because flush() only drains the batch captured when it started; writes queued while it
+  // was running remain pending.
+  window.__psychoSyncFlushNow = async function () {
+    if (!currentUserId) return;
+    if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+    for (let i = 0; i < 20 && pending.size > 0; i++) {
+      await flush();
+    }
+  };
+
   window.__psychoSyncRestore = async function (backup) {
     if (!currentUserId) return;
     const uid = currentUserId;
