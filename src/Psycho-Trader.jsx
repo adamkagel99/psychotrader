@@ -500,67 +500,86 @@ function dismissDisciplineHalfSizeSuggest(dateStr){try{localStorage.setItem("tf-
 function loadDisciplineScoring(){try{var s=localStorage.getItem(DISCIPLINE_SCORING_KEY);if(s)return Object.assign({},DEFAULT_DISCIPLINE_SCORING,JSON.parse(s));}catch(e){}return Object.assign({},DEFAULT_DISCIPLINE_SCORING);}
 function saveDisciplineScoring(ds){try{localStorage.setItem(DISCIPLINE_SCORING_KEY,JSON.stringify(ds));}catch(e){}}
 
-function calcDiscipline(trades,riskMaxArg,opts){
+// CHANGED: Canonical discipline primitives. Previously the per-trade "D nn" badge on a trade card
+// and the day-level score were computed by two separate copies of this logic that could disagree
+// (the card detected "Max risk exceeded" from loss %, while the day score preferred the dollar risk
+// cap). These are now the single definition used by the card, the day summary, and every stat.
+// buildDisciplineCtx() resolves the shared settings once so per-trade scoring stays cheap.
+function buildDisciplineCtx(riskMaxArg){
   var sentiments=null;
   try{var s=localStorage.getItem(OPTIONS_KEY);if(s){var p=JSON.parse(s);sentiments=p.emotionSentiments||DEFAULT_EMOTION_SENTIMENTS;}}catch(e){sentiments=DEFAULT_EMOTION_SENTIMENTS;}
   if(!sentiments)sentiments=DEFAULT_EMOTION_SENTIMENTS;
   var ds=loadDisciplineScoring();
-  var posMax=0;
-  var riskMaxPctSetting=33;
+  var posMax=0,riskMaxPctSetting=33,riskMax=parseFloat(riskMaxArg)||0;
   try{
     var st=localStorage.getItem(SETTINGS_KEY);
     if(st){
       var sp=JSON.parse(st);
       if(sp.riskMaxPct!=null)riskMaxPctSetting=parseFloat(sp.riskMaxPct)||0;
-      // CHANGED: posMax from live tier via calcPosSizes, not the stale sp.positionMax snapshot.
       try{
         var _bal=getAccountBalance();
         var _tier=getCurrentTier(_bal);
         var _c=calcPosSizes(_tier,{useDirect:true,sizingMode:sp.sizingMode,slippagePct:sp.slippagePct,positionMaxPct:sp.positionMaxPct,riskMaxPct:sp.riskMaxPct,positionMaxDollar:sp.positionMaxDollar,riskMaxDollar:sp.riskMaxDollar});
         posMax=_c.positionMax||parseFloat(sp.positionMax)||0;
       }catch(e){posMax=parseFloat(sp.positionMax)||0;}
+      if(riskMax<=0)riskMax=parseFloat(sp.riskMax)||0;
     }
   }catch(e){}
-  // CHANGED: riskMax for the R-outcome term. Prefer the explicit arg (so historical journal
-  // rows can pass their own saved riskMax); fall back to current settings for live callers.
-  var riskMax=parseFloat(riskMaxArg)||0;
-  if(riskMax<=0){try{var st2=localStorage.getItem(SETTINGS_KEY);if(st2){var sp2=JSON.parse(st2);riskMax=parseFloat(sp2.riskMax)||0;}}catch(e){}}
-  // --- Process spine (unchanged): the part the lock must trust ---
-  var processScore=100;
+  return {sentiments:sentiments,ds:ds,posMax:posMax,riskMaxPct:riskMaxPctSetting,riskMax:riskMax};
+}
+// Effective violations for a trade: the stored list, with "Oversized entry" and "Max risk exceeded"
+// re-derived from current data so stale flags drop off after an edit and new breaches are caught.
+function effectiveViolations(t,ctx){
+  ctx=ctx||buildDisciplineCtx();
+  var vs=(t.violations||[]).slice();
+  var pos=parseFloat(t.positionSize)||0;
+  var stampedMax=parseFloat(t.posMaxAtEntry)||0;
+  var _cGm=t.grade==="A"?1:t.grade==="B"?0.75:t.grade==="C"?0.5:1;
+  var liveMax=ctx.posMax*(parseFloat(t.sizeFraction)||1)*_cGm;
+  var effPosMax=t.grade?liveMax:Math.max(stampedMax,liveMax);
+  var overIdx=vs.indexOf("Oversized entry");
+  if(effPosMax>0&&pos>effPosMax){if(overIdx<0)vs.push("Oversized entry");}
+  else if(overIdx>=0){vs.splice(overIdx,1);}
+  var slPnl=(isNaN(parseFloat(t.pnl))?NaN:tradeNetPnl(t)),slPct=parseFloat(t.pctPnl);
+  var sfT=(t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))?parseFloat(t.sizeFraction):1;
+  var rmSet=parseFloat(ctx.riskMax)||0;
+  var effRiskCap=(parseFloat(t.riskCapDollarsAtEntry)>0)?parseFloat(t.riskCapDollarsAtEntry):(rmSet>0?rmSet*sfT:0);
+  var effStopThresh=(parseFloat(t.stopThreshPctAtEntry)>0)?parseFloat(t.stopThreshPctAtEntry):(ctx.riskMaxPct>0?ctx.riskMaxPct*sfT:0);
+  var maxRiskIdx=vs.indexOf("Max risk exceeded");
+  var exceeded=false;
+  if(effRiskCap>0){exceeded=!isNaN(slPnl)&&slPnl<-effRiskCap;}
+  else{exceeded=!isNaN(slPnl)&&slPnl<0&&!isNaN(slPct)&&effStopThresh>0&&slPct<-effStopThresh;}
+  if(exceeded){if(maxRiskIdx<0)vs.push("Max risk exceeded");}
+  else if(maxRiskIdx>=0){vs.splice(maxRiskIdx,1);}
+  return vs;
+}
+// A single trade's discipline score (the "D nn" badge). The day score is the average of these.
+function tradeDisciplineScore(t,ctx){
+  ctx=ctx||buildDisciplineCtx();
+  var ds=ctx.ds;
+  var score=100;
+  score-=effectiveViolations(t,ctx).length*(ds.violationPenalty||15);
+  score-=(t.emotions||[]).filter(function(x){return getEmotionSentiment(x,ctx.sentiments)==="negative";}).length*(ds.negEmotionPenalty||10);
+  if(t.grade==="C")score-=(ds.cGradePenalty||5);
+  return Math.min(100,Math.max(0,score));
+}
+function calcDiscipline(trades,riskMaxArg,opts){
+  var ctx=buildDisciplineCtx(riskMaxArg);
+  var ds=ctx.ds;
+  var riskMax=ctx.riskMax;
+  // CHANGED: The day's process score is now the AVERAGE of the per-trade discipline scores, so the
+  // Daily Summary equals the mean of the "D nn" badges on that day's cards. Previously penalties
+  // from every trade were pooled into one running 100, which made the day score fall far below any
+  // individual trade's score (3 trades at D85 used to yield a day score of 55, not 85).
   var anyViolation=false;
   var dayPnL=0;
+  var perTradeScores=[];
   trades.forEach(function(t){
-    var vs=(t.violations||[]).slice();
-    var pos=parseFloat(t.positionSize)||0;
-    var stampedMax=parseFloat(t.posMaxAtEntry)||0;
-    var _cGm=t.grade==="A"?1:t.grade==="B"?0.75:t.grade==="C"?0.5:1;
-    var liveMax=posMax*(parseFloat(t.sizeFraction)||1)*_cGm;
-    var effPosMax=t.grade?liveMax:Math.max(stampedMax,liveMax);
-    // CHANGED: Symmetric add/remove — stale "Oversized entry" violations from before an edit get
-    // dropped here too, not just by autoAddViolations. Same idea for "Max risk exceeded" below.
-    var overIdx=vs.indexOf("Oversized entry");
-    if(effPosMax>0&&pos>effPosMax){if(overIdx<0)vs.push("Oversized entry");}
-    else if(overIdx>=0){vs.splice(overIdx,1);}
-    // CHANGED: Recompute "Max risk exceeded" using dollar comparison (loss $ vs riskMax × sf).
-    // Prefer the dollar cap stamped at entry; else derive from current settings.riskMax × the
-    // trade's sizeFraction. Legacy %-fallback retained for trades pre-dating the dollar stamp.
-    var slPnl=(isNaN(parseFloat(t.pnl))?NaN:tradeNetPnl(t)),slPct=parseFloat(t.pctPnl);
-    var sfT=(t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))?parseFloat(t.sizeFraction):1;
-    var rmSet=parseFloat(riskMax)||0;
-    var effRiskCap=(parseFloat(t.riskCapDollarsAtEntry)>0)?parseFloat(t.riskCapDollarsAtEntry):(rmSet>0?rmSet*sfT:0);
-    var effStopThresh=(parseFloat(t.stopThreshPctAtEntry)>0)?parseFloat(t.stopThreshPctAtEntry):(riskMaxPctSetting>0?riskMaxPctSetting*sfT:0);
-    var maxRiskIdx=vs.indexOf("Max risk exceeded");
-    var exceeded=false;
-    if(effRiskCap>0){exceeded=!isNaN(slPnl)&&slPnl<-effRiskCap;}
-    else{exceeded=!isNaN(slPnl)&&slPnl<0&&!isNaN(slPct)&&effStopThresh>0&&slPct<-effStopThresh;}
-    if(exceeded){if(maxRiskIdx<0)vs.push("Max risk exceeded");}
-    else if(maxRiskIdx>=0){vs.splice(maxRiskIdx,1);}
-    if(vs.length>0)anyViolation=true;
-    processScore-=vs.length*(ds.violationPenalty||15);
-    processScore-=(t.emotions||[]).filter(function(x){return getEmotionSentiment(x,sentiments)==="negative";}).length*(ds.negEmotionPenalty||10);
-    if(t.grade==="C")processScore-=(ds.cGradePenalty||5);
+    if(effectiveViolations(t,ctx).length>0)anyViolation=true;
+    perTradeScores.push(tradeDisciplineScore(t,ctx));
     dayPnL+=tradeNetPnl(t);
   });
+  var processScore=perTradeScores.length>0?(perTradeScores.reduce(function(a,b){return a+b;},0)/perTradeScores.length):100;
   // CHANGED: Commitment adherence penalties. If a commitment was made for the day, exceeding the
   // committed trade cap and/or self-marking setup deviation each subtract from the process score and
   // count as a violation (so a winning-but-off-plan day forfeits the R bonus, like rule violations do).
@@ -2781,7 +2800,10 @@ function TradeTile(props){
   var rMul=tradeR(t,parseFloat(props.riskMax)||0);
   var hasR=!isNaN(rMul)&&rMul!==0;
   var emos=filterEmotions(t.emotions||[]);
-  var effViolations=(t.violations||[]).slice();
+  // CHANGED: Violation tags come from the canonical effectiveViolations() so the ⚠ tags shown here
+  // match exactly what the D badge and the day score penalize. The card previously re-derived
+  // "Max risk exceeded" from loss % only, which could disagree with the dollar-cap rule.
+  var effViolations=effectiveViolations(t);
   var pos=parseFloat(t.positionSize)||0;
   var stampedPosMax=parseFloat(t.posMaxAtEntry)||0;
   var liveSF=parseFloat(t.sizeFraction)||1;
@@ -2790,18 +2812,6 @@ function TradeTile(props){
   // CHANGED: When a grade is explicitly set, ENFORCE its scaled cap — don't fall back to a
   // higher stamped full-size cap. When no grade set, take the higher of the two (legacy fallback).
   var posMax=t.grade?livePosMax:Math.max(stampedPosMax,livePosMax);
-  // CHANGED: Symmetric — remove stale "Oversized entry" flag when current check says the trade
-  // is within cap (e.g. tier moved up so a previously oversized trade now fits).
-  var _overIdx=effViolations.indexOf("Oversized entry");
-  if(posMax>0&&pos>posMax){if(_overIdx<0)effViolations.push("Oversized entry");}
-  else if(_overIdx>=0){effViolations.splice(_overIdx,1);}
-  var _mrIdx=effViolations.indexOf("Max risk exceeded");
-  // CHANGED: % based — flag when the trade's loss % exceeds the Stop Loss Max % setting.
-  // Prefer stamped stopThreshPctAtEntry; fall back to current settings.riskMaxPct.
-  var _slPct=parseFloat(t.stopThreshPctAtEntry);
-  if(isNaN(_slPct)||_slPct<=0){try{var _sset=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}");_slPct=parseFloat(_sset.riskMaxPct)||0;}catch(e){_slPct=0;}}
-  if(_slPct>0&&!isNaN(pctPnl)&&pctPnl<-_slPct){if(_mrIdx<0)effViolations.push("Max risk exceeded");}
-  else if(_mrIdx>=0){effViolations.splice(_mrIdx,1);}
   var setupChain=[t.setup,t.timeframe,t.candlePattern].filter(function(x){return !!x;});
   var hasSetupInfo=setupChain.length>0;
   var hasTags=emos.length>0||effViolations.length>0;
@@ -2855,14 +2865,9 @@ function TradeTile(props){
         </div>
         <div style={{display:"flex",gap:5,flexShrink:0,alignItems:"center"}}>
           {(function(){
-            var ds=DEFAULT_DISCIPLINE_SCORING;
-            try{var st=JSON.parse(localStorage.getItem("tf-disc-scoring")||"null");if(st)ds=Object.assign({},ds,st);}catch(e){}
-            var sentiments={};try{var opts=JSON.parse(localStorage.getItem("tf-trade-options")||"null");if(opts&&opts.emotionSentiments)sentiments=opts.emotionSentiments;}catch(e){}
-            var score=100;
-            score-=(effViolations||[]).length*(ds.violationPenalty||15);
-            score-=(t.emotions||[]).filter(function(x){return getEmotionSentiment(x,sentiments)==="negative";}).length*(ds.negEmotionPenalty||10);
-            if(t.grade==="C")score-=(ds.cGradePenalty||5);
-            score=Math.max(0,Math.min(100,score));
+            // CHANGED: Use the canonical per-trade score so this badge and the day summary (which
+            // averages these) are computed by the same code path.
+            var score=tradeDisciplineScore(t);
             var th=loadDisciplineLockThreshold();
             var good=score>=th;
             return <span title="Trade discipline score" style={{fontSize:10,padding:"3px 7px",borderRadius:4,background:good?"#14532d":"#7f1d1d",color:good?"#86efac":"#fca5a5",fontWeight:700,letterSpacing:0.5,border:"1px solid "+(good?"#22c55e":"#ef4444")}}>D {Math.round(score)}</span>;
