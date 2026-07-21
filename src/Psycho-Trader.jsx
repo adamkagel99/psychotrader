@@ -7069,7 +7069,9 @@ function EquityCurve(props){
       pts.push({date:d0g.toISOString().slice(0,10),cum:0,peak:0});
     }
     allT.forEach(function(x){
-      cum+=parseFloat(x.t.pnl)||0;
+      // CHANGED: accumulate NET pnl so the curve, its headline total, and the peak match the
+      // Total P&L tile above (which sums net). This was the last site reading raw stored pnl.
+      cum+=tradeNetPnl(x.t);
       if(cum>peak)peak=cum;
       var dd=cum-peak;if(dd<maxDD)maxDD=dd;
       var peakEq=startBal+peak;var ddPct=peakEq>0?(dd/peakEq*100):0;
