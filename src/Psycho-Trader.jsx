@@ -544,7 +544,7 @@ function calcDiscipline(trades,riskMaxArg,opts){
     // CHANGED: Recompute "Max risk exceeded" using dollar comparison (loss $ vs riskMax × sf).
     // Prefer the dollar cap stamped at entry; else derive from current settings.riskMax × the
     // trade's sizeFraction. Legacy %-fallback retained for trades pre-dating the dollar stamp.
-    var slPnl=parseFloat(t.pnl),slPct=parseFloat(t.pctPnl);
+    var slPnl=(isNaN(parseFloat(t.pnl))?NaN:tradeNetPnl(t)),slPct=parseFloat(t.pctPnl);
     var sfT=(t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))?parseFloat(t.sizeFraction):1;
     var rmSet=parseFloat(riskMax)||0;
     var effRiskCap=(parseFloat(t.riskCapDollarsAtEntry)>0)?parseFloat(t.riskCapDollarsAtEntry):(rmSet>0?rmSet*sfT:0);
@@ -559,7 +559,7 @@ function calcDiscipline(trades,riskMaxArg,opts){
     processScore-=vs.length*(ds.violationPenalty||15);
     processScore-=(t.emotions||[]).filter(function(x){return getEmotionSentiment(x,sentiments)==="negative";}).length*(ds.negEmotionPenalty||10);
     if(t.grade==="C")processScore-=(ds.cGradePenalty||5);
-    dayPnL+=parseFloat(t.pnl)||0;
+    dayPnL+=tradeNetPnl(t);
   });
   // CHANGED: Commitment adherence penalties. If a commitment was made for the day, exceeding the
   // committed trade cap and/or self-marking setup deviation each subtract from the process score and
@@ -937,9 +937,14 @@ function buildSessionMap(todayPnL,todayRiskMax,todayTradeCount,todayTrades){
     var trades=Array.isArray(s.trades)?s.trades.filter(function(t){return t&&t.status!=="open";}):[];
     var tc=trades.length||((parseFloat(s.wins)||0)+(parseFloat(s.losses)||0));
     var rTotal=0;
+    // CHANGED: Day P&L is summed from per-trade NET pnl so commission is reflected in the calendar
+    // (and everything else built off this map). Stored s.pnl is gross for any day whose trades were
+    // logged before commissions were configured. Falls back to the stored total only when there are
+    // no closed trades to sum (legacy rows that kept a total but no trade array).
+    var dayPnlNet=trades.length>0?trades.reduce(function(a,t){return a+tradeNetPnl(t);},0):(parseFloat(s.pnl)||0);
     if(trades.length>0){rTotal=dayR(trades,s.riskMax);}
-    else if((parseFloat(s.riskMax)||0)>0){rTotal=(parseFloat(s.pnl)||0)/(parseFloat(s.riskMax)||1);}
-    map[s.date]={pnl:parseFloat(s.pnl)||0,riskMax:parseFloat(s.riskMax)||0,rTotal:rTotal,tradeCount:tc,noTradeDay:!!s.noTradeDay,wasLocked:!!s.wasLocked};
+    else if((parseFloat(s.riskMax)||0)>0){rTotal=dayPnlNet/(parseFloat(s.riskMax)||1);}
+    map[s.date]={pnl:dayPnlNet,riskMax:parseFloat(s.riskMax)||0,rTotal:rTotal,tradeCount:tc,noTradeDay:!!s.noTradeDay,wasLocked:!!s.wasLocked};
   });
   var tc=parseInt(todayTradeCount)||0;
   var todayKey=todayStr();
@@ -1465,7 +1470,7 @@ function getProfitSinceLastWithdrawal(todayPnL){
     var rows=loadJournalRows();
     var today=todayStr();
     var sum=0;
-    rows.forEach(function(r){if(r.date===today)return;sum+=parseFloat(r.pnl)||0;});
+    rows.forEach(function(r){if(r.date===today)return;sum+=entryNetPnl(r);});
     if(typeof todayPnL==="number"&&!isNaN(todayPnL))sum+=todayPnL;
     return sum;
   }
@@ -1477,7 +1482,7 @@ function getProfitSinceLastWithdrawal(todayPnL){
     (r.trades||[]).forEach(function(t){
       if(t&&t.status!=="open"){
         var ca=parseFloat(t.closedAt)||0;
-        if(ca>cutoff)sum+=parseFloat(t.pnl)||0;
+        if(ca>cutoff)sum+=tradeNetPnl(t);
       }
     });
   });
@@ -1490,7 +1495,7 @@ function getProfitSinceLastWithdrawal(todayPnL){
         p.trades.forEach(function(t){
           if(t&&t.status!=="open"){
             var ca=parseFloat(t.closedAt)||0;
-            if(ca>cutoff)sum+=parseFloat(t.pnl)||0;
+            if(ca>cutoff)sum+=tradeNetPnl(t);
           }
         });
       }
@@ -1525,7 +1530,7 @@ function getLastDayR(){
   try{
     var rows=loadJournalRows().filter(function(r){return (r.trades||[]).length>0;}).sort(function(a,b){return new Date(b.date)-new Date(a.date);});
     if(rows.length===0)return {date:null,r:0,pnl:0};
-    var r=rows[0];var pnl=parseFloat(r.pnl)||0;
+    var r=rows[0];var pnl=entryNetPnl(r);
     // CHANGED: Day R uses % formula (sum tradeR across day's trades).
     var trades=(r.trades||[]).filter(function(t){return t&&t.status!=="open";});
     var rMult=trades.length>0?dayR(trades,r.riskMax):0;
@@ -1557,7 +1562,7 @@ function isMonthlyGoalHit(todayLivePnL){
     var todayKey=todayStr();
     var rows=loadJournalRows().filter(function(e){return new Date(e.date)>=moStart;});
     var includesToday=rows.some(function(e){return e.date===todayKey;});
-    var sum=rows.reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0)+(includesToday?0:(parseFloat(todayLivePnL)||0));
+    var sum=rows.reduce(function(s,e){return s+(entryNetPnl(e));},0)+(includesToday?0:(parseFloat(todayLivePnL)||0));
     return sum>=target;
   }catch(e){return false;}
 }
@@ -1578,7 +1583,7 @@ function isWeeklyGoalHit(todayLivePnL){
     var todayKey=todayStr();
     var rows=loadJournalRows().filter(function(e){return new Date(e.date)>=weekStart;});
     var includesToday=rows.some(function(e){return e.date===todayKey;});
-    var sum=rows.reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0)+(includesToday?0:(parseFloat(todayLivePnL)||0));
+    var sum=rows.reduce(function(s,e){return s+(entryNetPnl(e));},0)+(includesToday?0:(parseFloat(todayLivePnL)||0));
     return sum>=target;
   }catch(e){return false;}
 }
@@ -1598,7 +1603,7 @@ function isMonthHalfsizeActive(){
 // instead of totalPnL/settings.riskMax.
 function tradeR(t,riskMaxSetting){
   if(!t||t.status==="open")return 0;
-  var pnl=parseFloat(t.pnl);if(isNaN(pnl))return 0;
+  var pnl=(isNaN(parseFloat(t.pnl))?NaN:tradeNetPnl(t));if(isNaN(pnl))return 0;
   var sf=(t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))?parseFloat(t.sizeFraction):1;
   var base=parseFloat(t.riskMaxAtEntry);
   if(isNaN(base)||base<=0){var cap=parseFloat(t.riskCapDollarsAtEntry);if(!isNaN(cap)&&cap>0&&sf>0)base=cap/sf;}
@@ -1640,7 +1645,7 @@ function MonthlyTargetBanner(props){
   var monthRows=loadJournalRows().filter(function(e){return new Date(e.date)>=moStart;});
   var todayInJournal=monthRows.some(function(e){return e.date===todayKeyLocal;});
   var totalPnL=parseFloat(props.totalPnL)||0;
-  var monthPnLLive=monthRows.reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0)+(todayInJournal?0:totalPnL);
+  var monthPnLLive=monthRows.reduce(function(s,e){return s+(entryNetPnl(e));},0)+(todayInJournal?0:totalPnL);
   if(monthPnLLive<monthlyTarget)return null;
   var halfOn=isMonthHalfsizeActive();
   // CHANGED: Once half-size is ON the banner has served its purpose (it exists to surface the
@@ -1861,7 +1866,7 @@ function computeAccountBalance(liveTotalPnL){
     var rows=loadJournalRows();
     var todayStrV=todayStr();
     var totPnL=0,inJ=false;
-    rows.forEach(function(r){totPnL+=(parseFloat(r.pnl)||0);if(r.date===todayStrV)inJ=true;});
+    rows.forEach(function(r){totPnL+=(entryNetPnl(r));if(r.date===todayStrV)inJ=true;});
     if(!inJ&&liveTotalPnL!=null)totPnL+=parseFloat(liveTotalPnL)||0;
     return transferTotal(loadTransfers())+totPnL;
   }catch(e){return 0;}
@@ -1876,7 +1881,7 @@ function getAccountBalance(){
     var totalPnL=rows.reduce(function(s,e){
       var ts=(e.trades||[]).filter(function(t){return t&&t.status!=="open";});
       if(ts.length>0)return s+ts.reduce(function(a,t){return a+tradeNetPnl(t);},0);
-      return s+(parseFloat(e.pnl)||0);
+      return s+(entryNetPnl(e));
     },0);
     return transferTotal(transfers)+totalPnL;
   }catch(e){return 0;}
@@ -1899,7 +1904,7 @@ function getAccountBalanceAtDate(dateStr){
     var pBal=rows.reduce(function(s,e){
       var d=new Date(e.date);if(isNaN(d.getTime()))return s;
       d.setHours(0,0,0,0);
-      return d<target?s+(parseFloat(e.pnl)||0):s;
+      return d<target?s+(entryNetPnl(e)):s;
     },0);
     return tBal+pBal;
   }catch(e){return 0;}
@@ -1918,7 +1923,7 @@ function PnLChart(props){
   function minToTimeStr(mn){var h=Math.floor(mn/60),mi=Math.floor(mn%60),ampm=h>=12?"PM":"AM",h12=h%12||12;return h12+":"+(mi<10?"0"+mi:mi)+" "+ampm;}
   var points=[{min:START,pnl:0}];var cum=0;
   if(trades&&trades.length>0){
-    trades.slice().filter(function(t){return timeToMin(t.time)!==null;}).sort(function(a,b){return timeToMin(a.time)-timeToMin(b.time);}).forEach(function(t){var mn=timeToMin(t.time);if(!mn)return;mn=Math.max(START,Math.min(END,mn));cum+=parseFloat(t.pnl)||0;points.push({min:mn,pnl:cum});});
+    trades.slice().filter(function(t){return timeToMin(t.time)!==null;}).sort(function(a,b){return timeToMin(a.time)-timeToMin(b.time);}).forEach(function(t){var mn=timeToMin(t.time);if(!mn)return;mn=Math.max(START,Math.min(END,mn));cum+=tradeNetPnl(t);points.push({min:mn,pnl:cum});});
   }
   points.push({min:END,pnl:cum});
   var vals=points.map(function(p){return p.pnl;});var minP=Math.min.apply(null,vals),maxP=Math.max.apply(null,vals);
@@ -2016,7 +2021,7 @@ function DailyPnLBar(props){
       var mk=new Date(d.getFullYear(),d.getMonth(),1);
       var k=mk.getFullYear()+"-"+(mk.getMonth()+1);
       if(!mBuckets[k])mBuckets[k]={date:k,sortKey:mk.getTime(),pnl:0,_rep:e.date};
-      mBuckets[k].pnl+=parseFloat(e.pnl)||0;
+      mBuckets[k].pnl+=entryNetPnl(e);
     });
     sorted=Object.keys(mBuckets).map(function(k){return mBuckets[k];}).sort(function(a,b){return a.sortKey-b.sortKey;});
   }else if(weekly){
@@ -2026,15 +2031,15 @@ function DailyPnLBar(props){
       d.setDate(d.getDate()-d.getDay()); // Sunday of this week
       var k=d.getFullYear()+"-"+(d.getMonth()+1)+"-"+d.getDate();
       if(!buckets[k])buckets[k]={date:k,sortKey:d.getTime(),pnl:0,_rep:e.date};
-      buckets[k].pnl+=parseFloat(e.pnl)||0;
+      buckets[k].pnl+=entryNetPnl(e);
     });
     sorted=Object.keys(buckets).map(function(k){return buckets[k];}).sort(function(a,b){return a.sortKey-b.sortKey;});
   }else{
     sorted=sortedRaw;
   }
-  var pnls=sorted.map(function(e){return parseFloat(e.pnl)||0;});
+  var pnls=sorted.map(function(e){return entryNetPnl(e);});
   // CHANGED: Compute % per day (relative to that day's account balance) so hide-$ can show meaningful percentages.
-  var pcts=sorted.map(function(e){var sb=0;try{sb=getAccountBalanceAtDate(e.date);}catch(x){}return sb>0?((parseFloat(e.pnl)||0)/sb*100):0;});
+  var pcts=sorted.map(function(e){var sb=0;try{sb=getAccountBalanceAtDate(e.date);}catch(x){}return sb>0?((entryNetPnl(e))/sb*100):0;});
   // CHANGED: Compute summary stats for the dashboard-style header above the chart.
   var greenN=pnls.filter(function(v){return v>0;}).length;
   var redN=pnls.filter(function(v){return v<0;}).length;
@@ -2115,7 +2120,7 @@ function DailyPnLBar(props){
         onMouseLeave={function(){setHoverIdx(null);if(bucketMode==="daily")setSharedDate(null);}}>
         {yTicks.map(function(v,i){var y=zeroY-(v/maxAbs)*(chartH/2);return <g key={i}><line x1={PL} y1={y} x2={PL+chartW} y2={y} stroke={v===0?"#334155":"#1e293b"} strokeWidth="1" strokeDasharray={v===0?"":"3,3"}/>{!HIDE_DOLLAR_PNL&&<text x={PL-4} y={y+4} textAnchor="end" fontSize="8" fill="#94a3b8">{v>=0?"+$"+Math.abs(v):"-$"+Math.abs(v)}</text>}</g>;})}
         {sorted.map(function(e,i){
-          var pnl=parseFloat(e.pnl)||0,pct=pcts[i],bx=barX(i),bh=barH(pnl,pct),by=barY(pnl,pct),isHov=effectiveHoverIdx===i;
+          var pnl=entryNetPnl(e),pct=pcts[i],bx=barX(i),bh=barH(pnl,pct),by=barY(pnl,pct),isHov=effectiveHoverIdx===i;
           var color=pnl>=0?"#22c55e":"#ef4444",hc2=pnl>=0?"#4ade80":"#f87171";
           return (
             <g key={i}>
@@ -2132,7 +2137,7 @@ function DailyPnLBar(props){
            paint over it. Also given an opaque fill + border so it's readable against any bar. */}
         {effectiveHoverIdx!=null&&(function(){
           var e=sorted[effectiveHoverIdx];if(!e)return null;
-          var pnl=parseFloat(e.pnl)||0,bx=barX(effectiveHoverIdx),bh=barH(pnl,pcts[effectiveHoverIdx]),by=barY(pnl,pcts[effectiveHoverIdx]);
+          var pnl=entryNetPnl(e),bx=barX(effectiveHoverIdx),bh=barH(pnl,pcts[effectiveHoverIdx]),by=barY(pnl,pcts[effectiveHoverIdx]);
           var color=pnl>=0?"#22c55e":"#ef4444";
           var tx=bx+barW/2,ty=pnl>=0?by-6:by+bh+14;
           var dateStr=fmtDate(e.date),pnlStr=HIDE_DOLLAR_PNL?((function(){var sb=getAccountBalanceAtDate(e.date);var p=sb>0?(pnl/sb*100):0;return (p>=0?"+":"")+p.toFixed(2)+"%";})()):(fmtPnl(pnl));
@@ -2168,7 +2173,7 @@ function MonthYearPicker(props){
         if(!r||!r.date)return;
         var d=new Date(r.date);
         if(isNaN(d.getTime())||d.getFullYear()!==draftYear)return;
-        arr[d.getMonth()]+=parseFloat(r.pnl)||0;
+        arr[d.getMonth()]+=entryNetPnl(r);
       });
     }catch(e){}
     return arr;
@@ -2749,6 +2754,19 @@ function tradeNetPnl(t){
   }
   // No usable price data: fall back to what feesPaid claims.
   return f.inPnl?p:(p-f.fees);
+}
+// CHANGED: NET P&L for a journal day row. Anything that reads a day's stored `pnl` (goal progress,
+// account balance, streaks, calendars, week/month totals, the overview + daily P&L graphs) must go
+// through this, because the stored total is GROSS for any day whose trades were logged before
+// commissions were configured. Recomputes from the day's trades when they're present; falls back to
+// the stored total for legacy rows that kept a total but no trade array. Safe to call on any object:
+// without a trades array it degrades to the previous behavior.
+function entryNetPnl(e){
+  if(!e)return 0;
+  var ts=Array.isArray(e.trades)?e.trades.filter(function(t){return t&&t.status!=="open";}):null;
+  if(ts&&ts.length>0)return ts.reduce(function(s,t){return s+tradeNetPnl(t);},0);
+  var raw=parseFloat(e.pnl);
+  return isNaN(raw)?0:raw;
 }
 function TradeTile(props){
   var t=props.t,i=props.i,onDelete=props.onDelete,onEdit=props.onEdit;
@@ -4156,12 +4174,12 @@ function PerformanceSummary(props){
   if(!hasTodayRow&&liveTrades.length>0)allRows.push({date:todayKey,trades:liveTrades});
   var allTrades=[];allRows.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status!=="open")allTrades.push(t);});});
   if(allTrades.length===0)return null; // nothing to summarize yet
-  var wins=allTrades.filter(function(t){return parseFloat(t.pnl)>0;});
-  var losses=allTrades.filter(function(t){return parseFloat(t.pnl)<0;});
+  var wins=allTrades.filter(function(t){return tradeNetPnl(t)>0;});
+  var losses=allTrades.filter(function(t){return tradeNetPnl(t)<0;});
   var totalPnl=allTrades.reduce(function(s,t){return s+tradeNetPnl(t);},0);
   var winRate=Math.round((wins.length/allTrades.length)*100);
-  var totalWins=wins.reduce(function(s,t){return s+parseFloat(t.pnl);},0);
-  var totalLosses=Math.abs(losses.reduce(function(s,t){return s+parseFloat(t.pnl);},0));
+  var totalWins=wins.reduce(function(s,t){return s+tradeNetPnl(t);},0);
+  var totalLosses=Math.abs(losses.reduce(function(s,t){return s+tradeNetPnl(t);},0));
   var pf=totalLosses>0?(totalWins/totalLosses).toFixed(2):totalWins>0?"∞":"0.00";
   var expValue=totalPnl/allTrades.length;
   // CHANGED: Match PerformanceTab's expectancy formula EXACTLY — average $ per trade as a % of the
@@ -4225,7 +4243,7 @@ function TodayStrip(props){
   (function(){
     var sorted=todayTrades.slice().sort(function(a,b){var ma=parseTimeToMinsOfDay(a.time)||0;var mb=parseTimeToMinsOfDay(b.time)||0;return ma-mb;});
     var c=0,p=0,worst=0;
-    sorted.forEach(function(t){c+=parseFloat(t.pnl)||0;if(c>p)p=c;var dd=c-p;if(dd<worst)worst=dd;});
+    sorted.forEach(function(t){c+=tradeNetPnl(t);if(c>p)p=c;var dd=c-p;if(dd<worst)worst=dd;});
     ddVal=worst;
   })();
   var ddR=riskMax>0?ddVal/riskMax:0;
@@ -4286,14 +4304,14 @@ function GoalsSnapshot(props){
   // CHANGED: Only add livePnL when today's NOT already represented in saved journal rows
   // (avoids double-counting today after Save Day to Journal).
   var todayInRows=rows.some(function(e){return e.date===todayKey;});
-  var weekPnL=rows.filter(function(e){var dd=new Date(e.date);return dd>=wkStart&&dd<=wkEnd;}).reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0)+(todayInRows?0:livePnL);
-  var monthPnL=rows.filter(function(e){return new Date(e.date)>=moStart;}).reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0)+(todayInRows?0:livePnL);
+  var weekPnL=rows.filter(function(e){var dd=new Date(e.date);return dd>=wkStart&&dd<=wkEnd;}).reduce(function(s,e){return s+(entryNetPnl(e));},0)+(todayInRows?0:livePnL);
+  var monthPnL=rows.filter(function(e){return new Date(e.date)>=moStart;}).reduce(function(s,e){return s+(entryNetPnl(e));},0)+(todayInRows?0:livePnL);
   // CHANGED: When today's already saved to journal, prefer the journal entry's pnl over livePnL
   // (livePnL can be 0 after rollover/sync while the journal still has the day's saved total).
   var todayRow=rows.find(function(e){return e.date===todayKey;});
-  var dailyPnL=todayRow?(parseFloat(todayRow.pnl)||0):livePnL;
+  var dailyPnL=todayRow?(entryNetPnl(todayRow)):livePnL;
   var allT=rows.reduce(function(a,e){return a.concat(e.trades||[]);},[]);
-  var allW=allT.filter(function(t){return parseFloat(t.pnl)>0;});
+  var allW=allT.filter(function(t){return tradeNetPnl(t)>0;});
   var oWR=allT.length>0?allW.length/allT.length*100:0;
   var aDisc=rows.length>0?rows.reduce(function(s,e){return s+calcDiscipline(e.trades||[],e.riskMax,e.commitments?{commitments:e.commitments}:{commitment:e.commitment||null});},0)/rows.length:0;
   var monthlyTarget=(parseFloat(goals.monthlyPnL)||0)||((parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(defaultDailyFromMonthly(goals,settings)||0))*tradingDaysThisMonth());
@@ -4411,11 +4429,11 @@ function PerfProgressCard(props){
   if(!hasTodayRow&&liveTrades.length>0&&statsRangeInclude(todayKey,range,_cStart,_cEnd))allRows.push({date:todayKey,trades:liveTrades});
   var allTrades=[];allRows.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status!=="open")allTrades.push(t);});});
   var hasData=allTrades.length>0;
-  var wins=allTrades.filter(function(t){return parseFloat(t.pnl)>0;});
-  var losses=allTrades.filter(function(t){return parseFloat(t.pnl)<0;});
+  var wins=allTrades.filter(function(t){return tradeNetPnl(t)>0;});
+  var losses=allTrades.filter(function(t){return tradeNetPnl(t)<0;});
   var winRate=hasData?Math.round((wins.length/allTrades.length)*100):null;
-  var totalWins=wins.reduce(function(s,t){return s+parseFloat(t.pnl);},0);
-  var totalLosses=Math.abs(losses.reduce(function(s,t){return s+parseFloat(t.pnl);},0));
+  var totalWins=wins.reduce(function(s,t){return s+tradeNetPnl(t);},0);
+  var totalLosses=Math.abs(losses.reduce(function(s,t){return s+tradeNetPnl(t);},0));
   var pf=totalLosses>0?(totalWins/totalLosses).toFixed(2):totalWins>0?"∞":"0.00";
   var pfNum=pf==="∞"?Infinity:parseFloat(pf);
   // CHANGED: Match PerformanceTab's expectancy formula EXACTLY — average $ per trade as a % of the
@@ -4812,7 +4830,7 @@ function TradesTab(props){
     // CHANGED: A past day's riskMax is a historical fact — preserve the entry's own riskMax (only
     // fall back to current settings if absent), and score discipline against that same value.
     var entryRiskMax=(existing.riskMax!=null&&parseFloat(existing.riskMax)>0)?parseFloat(existing.riskMax):(parseFloat(settings.riskMax)||0);
-    var newEntry=Object.assign({},existing,{trades:ut,wins:ut.filter(function(x){return parseFloat(x.pnl)>0;}).length,losses:ut.filter(function(x){return parseFloat(x.pnl)<0;}).length,pnl:ut.reduce(function(s,x){return s+tradeNetPnl(x);},0),disciplineScore:calcDiscipline(ut,entryRiskMax,existing.commitments?{commitments:existing.commitments}:{commitment:existing.commitment||null}),riskMax:entryRiskMax,noTradeDay:ut.length>0?false:!!existing.noTradeDay});
+    var newEntry=Object.assign({},existing,{trades:ut,wins:ut.filter(function(x){return tradeNetPnl(x)>0;}).length,losses:ut.filter(function(x){return tradeNetPnl(x)<0;}).length,pnl:ut.reduce(function(s,x){return s+tradeNetPnl(x);},0),disciplineScore:calcDiscipline(ut,entryRiskMax,existing.commitments?{commitments:existing.commitments}:{commitment:existing.commitment||null}),riskMax:entryRiskMax,noTradeDay:ut.length>0?false:!!existing.noTradeDay});
     try{localStorage.setItem("journal:"+selectedDate.replace(/\//g,"-"),JSON.stringify(newEntry));}catch(e){}
     setPastSessions(function(arr){var found=arr.some(function(x){return x.date===selectedDate;});return found?arr.map(function(x){return x.date===selectedDate?newEntry:x;}):arr.concat([newEntry]);});
     setPastNewTrade(null);
@@ -4830,7 +4848,7 @@ function TradesTab(props){
     var ut=(sourceEntry.trades||[]).map(function(x){return x.id===enriched.id?enriched:x;});
     // CHANGED: Today's riskMax follows current settings (live day); a past day preserves its own.
     var entryRiskMax=isToday?(parseFloat(settings.riskMax)||0):((sourceEntry.riskMax!=null&&parseFloat(sourceEntry.riskMax)>0)?parseFloat(sourceEntry.riskMax):(parseFloat(settings.riskMax)||0));
-    var newEntry=Object.assign({},sourceEntry,{trades:ut,wins:ut.filter(function(x){return parseFloat(x.pnl)>0;}).length,losses:ut.filter(function(x){return parseFloat(x.pnl)<0;}).length,pnl:ut.reduce(function(s,x){return s+tradeNetPnl(x);},0),disciplineScore:calcDiscipline(ut,entryRiskMax,(sourceEntry&&sourceEntry.commitments)?{commitments:sourceEntry.commitments}:(Object.keys(getCommitmentsMap(state)).length?{commitments:getCommitmentsMap(state)}:{commitment:(sourceEntry&&sourceEntry.commitment)||state.commitment||null})),riskMax:entryRiskMax,noTradeDay:ut.length>0?false:!!sourceEntry.noTradeDay});
+    var newEntry=Object.assign({},sourceEntry,{trades:ut,wins:ut.filter(function(x){return tradeNetPnl(x)>0;}).length,losses:ut.filter(function(x){return tradeNetPnl(x)<0;}).length,pnl:ut.reduce(function(s,x){return s+tradeNetPnl(x);},0),disciplineScore:calcDiscipline(ut,entryRiskMax,(sourceEntry&&sourceEntry.commitments)?{commitments:sourceEntry.commitments}:(Object.keys(getCommitmentsMap(state)).length?{commitments:getCommitmentsMap(state)}:{commitment:(sourceEntry&&sourceEntry.commitment)||state.commitment||null})),riskMax:entryRiskMax,noTradeDay:ut.length>0?false:!!sourceEntry.noTradeDay});
     var dateKey=isToday?todayStr():selectedDate;
     var written=safeWriteJournalEntry("journal:"+dateKey.replace(/\//g,"-"),newEntry);
     if(written)newEntry=written;
@@ -4852,7 +4870,7 @@ function TradesTab(props){
     var ut=(sourceEntry.trades||[]).filter(function(x){return x.id!==tradeId;});
     // CHANGED: Today's riskMax follows current settings (live day); a past day preserves its own.
     var entryRiskMax=isToday?(parseFloat(settings.riskMax)||0):((sourceEntry.riskMax!=null&&parseFloat(sourceEntry.riskMax)>0)?parseFloat(sourceEntry.riskMax):(parseFloat(settings.riskMax)||0));
-    var newEntry=Object.assign({},sourceEntry,{trades:ut,wins:ut.filter(function(x){return parseFloat(x.pnl)>0;}).length,losses:ut.filter(function(x){return parseFloat(x.pnl)<0;}).length,pnl:ut.reduce(function(s,x){return s+tradeNetPnl(x);},0),disciplineScore:calcDiscipline(ut,entryRiskMax,(sourceEntry&&sourceEntry.commitments)?{commitments:sourceEntry.commitments}:(Object.keys(getCommitmentsMap(state)).length?{commitments:getCommitmentsMap(state)}:{commitment:(sourceEntry&&sourceEntry.commitment)||state.commitment||null})),riskMax:entryRiskMax,noTradeDay:ut.length>0?false:!!sourceEntry.noTradeDay});
+    var newEntry=Object.assign({},sourceEntry,{trades:ut,wins:ut.filter(function(x){return tradeNetPnl(x)>0;}).length,losses:ut.filter(function(x){return tradeNetPnl(x)<0;}).length,pnl:ut.reduce(function(s,x){return s+tradeNetPnl(x);},0),disciplineScore:calcDiscipline(ut,entryRiskMax,(sourceEntry&&sourceEntry.commitments)?{commitments:sourceEntry.commitments}:(Object.keys(getCommitmentsMap(state)).length?{commitments:getCommitmentsMap(state)}:{commitment:(sourceEntry&&sourceEntry.commitment)||state.commitment||null})),riskMax:entryRiskMax,noTradeDay:ut.length>0?false:!!sourceEntry.noTradeDay});
     var dateKey=isToday?todayStr():selectedDate;
     var written=safeWriteJournalEntry("journal:"+dateKey.replace(/\//g,"-"),newEntry);
     if(written)newEntry=written;
@@ -5158,7 +5176,7 @@ function TradesTab(props){
         </div>
         <div ref={filterMenuRef} style={{position:"relative",flex:1}}>
           <button onClick={function(){setFilterOpen(function(o){return !o;});setSortOpen(false);}} style={{width:"100%",padding:"7px 16px",background:activeFilterCount>0?"#1e1b4b":"#0a0a0f",border:"1px solid "+(activeFilterCount>0?"#6366f1":"#334155"),borderRadius:999,color:activeFilterCount>0?"#a5b4fc":"#94a3b8",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <span>Filter{activeFilterCount>0?" ("+activeFilterCount+") · "+filterResultCount+" result"+(filterResultCount===1?"":"s"):""}{activeFilterCount>0&&filterResultCount>0&&(function(){var src=isAllScope?allGalleryTrades:displayTrades;var sum=src.reduce(function(s,t){return s+(parseFloat(t.pnl)||0);},0);var fmt=HIDE_DOLLAR_PNL?(sum<0?"-$•••":"$•••"):((sum<0?"-$":"$")+Math.abs(Math.round(sum)).toLocaleString());return <span style={{marginLeft:8,color:sum>0?"#86efac":sum<0?"#fca5a5":"#94a3b8",fontWeight:700}}>· {fmt}</span>;})()}</span><span style={{fontSize:12}}>▾</span>
+            <span>Filter{activeFilterCount>0?" ("+activeFilterCount+") · "+filterResultCount+" result"+(filterResultCount===1?"":"s"):""}{activeFilterCount>0&&filterResultCount>0&&(function(){var src=isAllScope?allGalleryTrades:displayTrades;var sum=src.reduce(function(s,t){return s+(tradeNetPnl(t));},0);var fmt=HIDE_DOLLAR_PNL?(sum<0?"-$•••":"$•••"):((sum<0?"-$":"$")+Math.abs(Math.round(sum)).toLocaleString());return <span style={{marginLeft:8,color:sum>0?"#86efac":sum<0?"#fca5a5":"#94a3b8",fontWeight:700}}>· {fmt}</span>;})()}</span><span style={{fontSize:12}}>▾</span>
           </button>
           {filterOpen&&(
             <div style={{position:"absolute",top:"100%",right:0,left:0,background:"#1e293b",border:"1px solid #334155",borderRadius:8,zIndex:300,boxShadow:"0 8px 24px #00000088",marginTop:4,padding:"10px 12px",maxHeight:360,overflowY:"auto"}}>
@@ -5376,10 +5394,10 @@ function TradesTab(props){
       })()))&&(function(){
         var entry=isToday?todayJournalEntry:pastSession;
         var sTrades=entry.trades||[];
-        var sPnl=parseFloat(entry.pnl)||0;
-        var wins=sTrades.filter(function(t){return parseFloat(t.pnl)>0;}).length;
-        var losses=sTrades.filter(function(t){return parseFloat(t.pnl)<0;}).length;
-        var bes=sTrades.filter(function(t){return Math.abs(parseFloat(t.pnl)||0)<0.01;}).length;
+        var sPnl=entryNetPnl(entry);
+        var wins=sTrades.filter(function(t){return tradeNetPnl(t)>0;}).length;
+        var losses=sTrades.filter(function(t){return tradeNetPnl(t)<0;}).length;
+        var bes=sTrades.filter(function(t){return Math.abs(tradeNetPnl(t))<0.01;}).length;
         // CHANGED: Use the stored disciplineScore (kept in sync by the commitment-edit handler + the
         // one-time migration). Recomputing live here can disagree with the journal/performance
         // displays when commitment context differs.
@@ -5720,8 +5738,8 @@ function JournalTab(props){
     var newEntry=Object.assign({},selectedEntry,{
       note:editDraft.note||"",
       trades:ut,
-      wins:ut.filter(function(x){return parseFloat(x.pnl)>0;}).length,
-      losses:ut.filter(function(x){return parseFloat(x.pnl)<0;}).length,
+      wins:ut.filter(function(x){return tradeNetPnl(x)>0;}).length,
+      losses:ut.filter(function(x){return tradeNetPnl(x)<0;}).length,
       pnl:ut.reduce(function(s,x){return s+tradeNetPnl(x);},0),
       disciplineScore:calcDiscipline(ut,entryRiskMax,selectedEntry.commitments?{commitments:selectedEntry.commitments}:{commitment:selectedEntry.commitment||null}),
       riskMax:entryRiskMax
@@ -5751,17 +5769,17 @@ function JournalTab(props){
     // net here keeps Daily Summary == sum of the cards, with fees deducted, regardless of backfill.
     // Falls back to the stored total only when there are no closed trades to sum.
     var _closedForPnl=trades.filter(function(t){return t&&t.status!=="open";});
-    var pnlVal=_closedForPnl.length>0?_closedForPnl.reduce(function(s,t){return s+tradeNetPnl(t);},0):(parseFloat(viewEntry.pnl)||0);
-    var wins=trades.filter(function(t){return parseFloat(t.pnl)>0;}).length;
-    var losses=trades.filter(function(t){return parseFloat(t.pnl)<0;}).length;
+    var pnlVal=_closedForPnl.length>0?_closedForPnl.reduce(function(s,t){return s+tradeNetPnl(t);},0):(entryNetPnl(viewEntry));
+    var wins=trades.filter(function(t){return tradeNetPnl(t)>0;}).length;
+    var losses=trades.filter(function(t){return tradeNetPnl(t)<0;}).length;
     var winRate=trades.length>0?Math.round((wins/trades.length)*100):0;
-    var avgWin=wins>0?(trades.filter(function(t){return parseFloat(t.pnl)>0;}).reduce(function(s,t){return s+parseFloat(t.pnl);},0)/wins):0;
-    var avgLoss=losses>0?Math.abs(trades.filter(function(t){return parseFloat(t.pnl)<0;}).reduce(function(s,t){return s+parseFloat(t.pnl);},0)/losses):0;
+    var avgWin=wins>0?(trades.filter(function(t){return tradeNetPnl(t)>0;}).reduce(function(s,t){return s+tradeNetPnl(t);},0)/wins):0;
+    var avgLoss=losses>0?Math.abs(trades.filter(function(t){return tradeNetPnl(t)<0;}).reduce(function(s,t){return s+tradeNetPnl(t);},0)/losses):0;
     var liveDiscipline=editing?calcDiscipline(trades,(selectedEntry.riskMax!=null&&parseFloat(selectedEntry.riskMax)>0)?parseFloat(selectedEntry.riskMax):(parseFloat(settings.riskMax)||0),selectedEntry.commitments?{commitments:selectedEntry.commitments}:{commitment:selectedEntry.commitment||null}):(selectedEntry.disciplineScore||0);
     // CHANGED: Day % = day P&L ÷ account balance at start of day (consistent across app).
     var sumPct=(function(){var sb=getAccountBalanceAtDate(selectedEntry.date);return sb>0?(pnlVal/sb*100):0;})();
-    var winPcts=trades.filter(function(t){return parseFloat(t.pnl)>0;}).map(function(t){return parseFloat(t.pctPnl);}).filter(function(v){return !isNaN(v);});
-    var lossPcts=trades.filter(function(t){return parseFloat(t.pnl)<0;}).map(function(t){return parseFloat(t.pctPnl);}).filter(function(v){return !isNaN(v);});
+    var winPcts=trades.filter(function(t){return tradeNetPnl(t)>0;}).map(function(t){return parseFloat(t.pctPnl);}).filter(function(v){return !isNaN(v);});
+    var lossPcts=trades.filter(function(t){return tradeNetPnl(t)<0;}).map(function(t){return parseFloat(t.pctPnl);}).filter(function(v){return !isNaN(v);});
     var avgWinPct=winPcts.length>0?(winPcts.reduce(function(s,v){return s+v;},0)/winPcts.length):0;
     var avgLossPct=lossPcts.length>0?Math.abs(lossPcts.reduce(function(s,v){return s+v;},0)/lossPcts.length):0;
     function fmtPct(v,signed){var s=v>=0?"+":"-";return (signed?s:(v<0?"-":""))+Math.abs(v).toFixed(2)+"%";}
@@ -5938,7 +5956,7 @@ function JournalTab(props){
       {(function(){
         var filtered=entries.filter(function(entry){
           if(journalDateFilter&&entry.date!==journalDateFilter)return false;
-          var pnl=parseFloat(entry.pnl)||0;
+          var pnl=entryNetPnl(entry);
           var res=journalFilters.result||[];
           if(res.length===1){if(res[0]==="Green"&&pnl<0)return false;if(res[0]==="Red"&&pnl>=0)return false;}
           var gc=journalFilters.grade||[];
@@ -5953,11 +5971,11 @@ function JournalTab(props){
         if(entries.length===0)return <div style={{textAlign:"center",padding:"40px 20px",borderTop:"1px dashed #1e293b",marginTop:8}}><div style={{fontSize:14,color:"#475569"}}>No journal entries yet</div><div style={{fontSize:12,color:"#64748b",marginTop:4}}>Save your first session to start your journal</div></div>;
         if(filtered.length===0)return <div style={{textAlign:"center",padding:"32px 20px",color:"#475569"}}><div style={{fontSize:14}}>No entries match</div></div>;
         return filtered.map(function(entry){
-          var pnl=parseFloat(entry.pnl)||0;
+          var pnl=entryNetPnl(entry);
           var trades=entry.trades||[];
-          var wins=trades.filter(function(t){return parseFloat(t.pnl)>0;}).length;
-          var losses=trades.filter(function(t){return parseFloat(t.pnl)<0;}).length;
-          var breakevens=trades.filter(function(t){return Math.abs(parseFloat(t.pnl)||0)<0.01;}).length;
+          var wins=trades.filter(function(t){return tradeNetPnl(t)>0;}).length;
+          var losses=trades.filter(function(t){return tradeNetPnl(t)<0;}).length;
+          var breakevens=trades.filter(function(t){return Math.abs(tradeNetPnl(t))<0.01;}).length;
           var winRate=trades.length>0?Math.round((wins/trades.length)*100):0;
           var sumPct=(function(){var sb=getAccountBalanceAtDate(entry.date);return sb>0?(pnl/sb*100):0;})();
           return (
@@ -6240,7 +6258,7 @@ function GoalsTab(props){
   var now=getPT(),y=now.getFullYear(),m=now.getMonth(),d=now.getDate(),day=now.getDay();
   var today=todayStr();
   var todayJournal=rows.find(function(e){return e.date===today;});
-  var todayPnL=todayJournal?(parseFloat(todayJournal.pnl)||0):liveTotalPnL;
+  var todayPnL=todayJournal?(entryNetPnl(todayJournal)):liveTotalPnL;
   var livePnL=todayJournal?0:liveTotalPnL;
 
   // CHANGED: Sun-Sat week boundaries to match the rest of the app.
@@ -6248,12 +6266,12 @@ function GoalsTab(props){
   var wkEnd=new Date(wkStart);wkEnd.setDate(wkStart.getDate()+6);
   var moStart=new Date(y,m,1);
 
-  var weekPnL=rows.filter(function(e){var dd=new Date(e.date);return dd>=wkStart&&dd<=wkEnd;}).reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0)+livePnL;
-  var monthPnL=rows.filter(function(e){return new Date(e.date)>=moStart;}).reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0)+livePnL;
+  var weekPnL=rows.filter(function(e){var dd=new Date(e.date);return dd>=wkStart&&dd<=wkEnd;}).reduce(function(s,e){return s+(entryNetPnl(e));},0)+livePnL;
+  var monthPnL=rows.filter(function(e){return new Date(e.date)>=moStart;}).reduce(function(s,e){return s+(entryNetPnl(e));},0)+livePnL;
   var dailyPnL=todayPnL;
 
   var allT=rows.reduce(function(a,e){return a.concat(e.trades||[]);},[]);
-  var allW=allT.filter(function(t){return parseFloat(t.pnl)>0;});
+  var allW=allT.filter(function(t){return tradeNetPnl(t)>0;});
   var oWR=allT.length>0?allW.length/allT.length*100:0;
   var aDisc=rows.length>0?rows.reduce(function(s,e){return s+calcDiscipline(e.trades||[],e.riskMax,e.commitments?{commitments:e.commitments}:{commitment:e.commitment||null});},0)/rows.length:0;
   // CHANGED: This-week discipline avg, computed identically to the weekly challenge (Sunday-based,
@@ -6263,7 +6281,7 @@ function GoalsTab(props){
   var aDiscWeek=discWeekDays.length>0?discWeekDays.reduce(function(s,e){return s+calcDiscipline(e.trades||[],e.riskMax,e.commitments?{commitments:e.commitments}:{commitment:e.commitment||null});},0)/discWeekDays.length:0;
   // CHANGED: This-week win rate (same Sunday-based week start), so Goals can show weekly vs all-time.
   var weekTrades=rows.filter(function(e){return new Date(e.date)>=discWeekStart;}).reduce(function(a,e){return a.concat(e.trades||[]);},[]);
-  var weekWins=weekTrades.filter(function(t){return parseFloat(t.pnl)>0;}).length;
+  var weekWins=weekTrades.filter(function(t){return tradeNetPnl(t)>0;}).length;
   var wWR=weekTrades.length>0?weekWins/weekTrades.length*100:0;
 
   var monthlyTarget=(parseFloat(goals.monthlyPnL)||0)||((parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(defaultDailyFromMonthly(goals,settings)||0))*tradingDaysThisMonth());
@@ -6299,7 +6317,7 @@ function GoalsTab(props){
   })();
 
   var transferTotalVal=transferTotal(loadTransfers());
-  var totalAllPnL=rows.reduce(function(s,e){return s+(parseFloat(e.pnl)||0);},0)+liveTotalPnL;
+  var totalAllPnL=rows.reduce(function(s,e){return s+(entryNetPnl(e));},0)+liveTotalPnL;
   // CHANGED: Use canonical balance helper to avoid double-counting today's live P&L if already saved to journal.
   var currentAccount=computeAccountBalance(liveTotalPnL);
 
@@ -6329,9 +6347,9 @@ function GoalsTab(props){
     if(hasFilter||optionMetrics.indexOf(g.metric)>=0){
       var trades=getTradesForPeriod(g.period||"all");
       if(hasFilter)trades=trades.filter(function(t){return matchesFilter(t,g.filterField,g.filterValue);});
-      if(g.metric==="pnl"||g.metric==="pnl_filtered")return trades.reduce(function(s,t){return s+(parseFloat(t.pnl)||0);},0);
+      if(g.metric==="pnl"||g.metric==="pnl_filtered")return trades.reduce(function(s,t){return s+(tradeNetPnl(t));},0);
       if(g.metric==="trades"||g.metric==="trades_filtered")return trades.length;
-      if(g.metric==="winrate"||g.metric==="winrate_filtered"){var w=trades.filter(function(t){return parseFloat(t.pnl)>0;}).length;return trades.length>0?parseFloat((w/trades.length*100).toFixed(1)):0;}
+      if(g.metric==="winrate"||g.metric==="winrate_filtered"){var w=trades.filter(function(t){return tradeNetPnl(t)>0;}).length;return trades.length>0?parseFloat((w/trades.length*100).toFixed(1)):0;}
       return trades.length;
     }
     if(g.metric==="pnl"){
@@ -7063,7 +7081,7 @@ function EquityCurve(props){
     if(pts.length===0){
       cum=0;peak=0;maxDD=0;maxDDPct=0;
       entries.forEach(function(r){
-        cum+=parseFloat(r.pnl)||0;
+        cum+=entryNetPnl(r);
         if(cum>peak)peak=cum;
         var dd=cum-peak;if(dd<maxDD)maxDD=dd;
         var peakEq2=startBal+peak;var ddPct2=peakEq2>0?(dd/peakEq2*100):0;
@@ -7079,7 +7097,7 @@ function EquityCurve(props){
       pts.push({date:d0.toISOString().slice(0,10),cum:0,peak:0});
     }
     entries.forEach(function(r){
-      cum+=parseFloat(r.pnl)||0;
+      cum+=entryNetPnl(r);
       if(cum>peak)peak=cum;
       var dd=cum-peak;
       if(dd<maxDD)maxDD=dd;
@@ -7200,7 +7218,7 @@ function WhatsWorkingPanel(props){
     var key=(t.setup||"").trim()||((t.assetClass?ASSET_CLASSES[t.assetClass]?ASSET_CLASSES[t.assetClass].label:t.assetClass:"")+" (no setup)").trim();
     if(!key)key="Untagged";
     if(!groups[key])groups[key]={n:0,wins:0,losses:0,pnl:0,pctSum:0,pctN:0};
-    var p=parseFloat(t.pnl)||0;
+    var p=tradeNetPnl(t);
     groups[key].n++;
     groups[key].pnl+=p;
     var pc=parseFloat(t.pctPnl);if(!isNaN(pc)){groups[key].pctSum+=pc;groups[key].pctN++;}
@@ -7250,7 +7268,7 @@ function RMultipleHistogram(props){
     var rowRisk=parseFloat(r.riskMax)||fallback;
     (r.trades||[]).forEach(function(t){
       if(!t||t.status==="open")return;
-      var pnl=parseFloat(t.pnl);if(isNaN(pnl))return;
+      var pnl=(isNaN(parseFloat(t.pnl))?NaN:tradeNetPnl(t));if(isNaN(pnl))return;
       var rv=tradeR(t,rowRisk);
       if(!isFinite(rv))return;
       Rs.push(rv);
@@ -7380,7 +7398,7 @@ function DisciplineScatter(props){
         score-=(t.emotions||[]).filter(function(x){return getEmotionSentiment(x,_sen)==="negative";}).length*(_ds.negEmotionPenalty||10);
         if(t.grade==="C")score-=(_ds.cGradePenalty||5);
         score=Math.max(0,Math.min(100,score));
-        var pnl=parseFloat(t.pnl)||0;
+        var pnl=tradeNetPnl(t);
         var rv=tradeR(t,parseFloat(r.riskMax)||0);
         pts.push({date:r.date,score:score,pnl:pnl,pct:sb>0?(pnl/sb*100):0,r:rv,n:1});
       });
@@ -7391,7 +7409,7 @@ function DisciplineScatter(props){
       if(trades.length===0)return;
       var score=parseFloat(r.disciplineScore);
       if(isNaN(score))score=calcDiscipline(trades,parseFloat(r.riskMax)||0);
-      var dayPnl=parseFloat(r.pnl)||0;
+      var dayPnl=entryNetPnl(r);
       var sb=0;try{sb=getAccountBalanceAtDate(r.date);}catch(e){}
       // CHANGED: Day R = sum of each trade's R against its own (sf-scaled) risk cap. Matches the
       // canonical dayR() the Today strip and rest of the app use. Previously divided dayPnl by the
@@ -7518,7 +7536,7 @@ function StreakTracker(props){
   var rows=(props.rows||[]).slice();
   // CHANGED: Count days that either have closed trades OR a non-zero stored pnl (covers legacy
   // entries whose trades array was emptied but whose pnl snapshot is intact).
-  rows=rows.filter(function(r){return (r.trades||[]).some(function(t){return t&&t.status!=="open";})||((parseFloat(r.pnl)||0)!==0);});
+  rows=rows.filter(function(r){return (r.trades||[]).some(function(t){return t&&t.status!=="open";})||((entryNetPnl(r))!==0);});
   if(rows.length<2)return null;
   // Sort ascending by date (already sorted earlier, but be defensive).
   rows.sort(function(a,b){return new Date(a.date)-new Date(b.date);});
@@ -7527,7 +7545,7 @@ function StreakTracker(props){
   var bestWin=0,bestLose=0,bestDisc=0;
   var cw=0,cl=0,cd=0;
   rows.forEach(function(r){
-    var pnl=parseFloat(r.pnl)||0;
+    var pnl=entryNetPnl(r);
     if(pnl>0){cw++;cl=0;}else if(pnl<0){cl++;cw=0;}else{cw=0;cl=0;}
     if(cw>bestWin)bestWin=cw;if(cl>bestLose)bestLose=cl;
     if(discScore(r)>=thr){cd++;if(cd>bestDisc)bestDisc=cd;}else cd=0;
@@ -7592,7 +7610,7 @@ function SessionDayHeatmap(props){
       var derivedSid=getSessionForTrade(t);
       var sidx=derivedSid?sessions.findIndex(function(s){return s.id===derivedSid;}):-1;
       if(sidx<0)sidx=OUT_IDX; // CHANGED: route to "Out of session" instead of skipping.
-      var pnl=parseFloat(t.pnl)||0;
+      var pnl=tradeNetPnl(t);
       grid[sidx][di].pnl+=pnl;
       grid[sidx][di].n++;
       if(pnl>0)grid[sidx][di].wins++;
@@ -7794,8 +7812,8 @@ function PerformanceTab(props){
     var todayIdx=allRows.findIndex(function(r){return r.date===todayDateStr;});
     if(todayIdx<0){
       var liveTrades=props.state&&props.state.trades?props.state.trades.filter(function(t){return t.status!=="open";}):[];
-      var liveWins=liveTrades.filter(function(t){return parseFloat(t.pnl)>0;}).length;
-      var liveLosses=liveTrades.filter(function(t){return parseFloat(t.pnl)<0;}).length;
+      var liveWins=liveTrades.filter(function(t){return tradeNetPnl(t)>0;}).length;
+      var liveLosses=liveTrades.filter(function(t){return tradeNetPnl(t)<0;}).length;
       var liveRiskMax=parseFloat((props.settings&&props.settings.riskMax))||0;
       allRows.push({date:todayDateStr,pnl:liveTotalPnL,trades:liveTrades,wins:liveWins,losses:liveLosses,riskMax:liveRiskMax,disciplineScore:calcDiscipline(liveTrades,liveRiskMax,{commitments:getCommitmentsMap(props.state)})});
     }
@@ -7859,7 +7877,7 @@ function PerformanceTab(props){
   var allTrades=[];filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status!=="open")allTrades.push(t);});});
   // CHANGED: trading day = row with closed trades OR a non-zero stored pnl (covers entries whose
   // trades array was emptied by an older rollover bug but whose saved pnl is still correct).
-  var tradingDays=filtered.filter(function(r){return (r.trades||[]).some(function(t){return t.status!=="open";})||((parseFloat(r.pnl)||0)!==0);}).length;
+  var tradingDays=filtered.filter(function(r){return (r.trades||[]).some(function(t){return t.status!=="open";})||((entryNetPnl(r))!==0);}).length;
   var avgTradesPerDay=tradingDays>0?(allTrades.length/tradingDays):0;
   // CHANGED: Total P&L now sums per-trade pnl (matching EquityCurve exactly) so the headline %
   // and the curve's final % agree. Falls back to the row's stored pnl snapshot only when a row
@@ -7867,11 +7885,11 @@ function PerformanceTab(props){
   var totalPnl=filtered.reduce(function(s,r){
     var ct=(r.trades||[]).filter(function(t){return t&&t.status!=="open";});
     if(ct.length>0)return s+ct.reduce(function(a,t){return a+tradeNetPnl(t);},0);
-    return s+(parseFloat(r.pnl)||0);
+    return s+(entryNetPnl(r));
   },0);
-  var wins=allTrades.filter(function(t){return parseFloat(t.pnl)>0;});
-  var losses=allTrades.filter(function(t){return parseFloat(t.pnl)<0;});
-  var breakevens=allTrades.filter(function(t){return Math.abs(parseFloat(t.pnl)||0)<0.01;});
+  var wins=allTrades.filter(function(t){return tradeNetPnl(t)>0;});
+  var losses=allTrades.filter(function(t){return tradeNetPnl(t)<0;});
+  var breakevens=allTrades.filter(function(t){return Math.abs(tradeNetPnl(t))<0.01;});
   // CHANGED: No-trade days are deliberate breakeven days (zero trades, net $0) — tracked alongside BE.
   var noTradeDays=filtered.filter(function(r){return r.noTradeDay&&(r.trades||[]).filter(function(t){return t.status!=="open";}).length===0;});
   // CHANGED: Per-session no-trade tally. Counts explicit `entry.noTradeSessions[sid]` entries
@@ -7918,8 +7936,8 @@ function PerformanceTab(props){
     return s+n;
   },0);
   var breakevenRate=allTrades.length>0?Math.round((breakevens.length/allTrades.length)*100):0;
-  var totalWins=wins.reduce(function(s,t){return s+parseFloat(t.pnl);},0);
-  var totalLosses=Math.abs(losses.reduce(function(s,t){return s+parseFloat(t.pnl);},0));
+  var totalWins=wins.reduce(function(s,t){return s+tradeNetPnl(t);},0);
+  var totalLosses=Math.abs(losses.reduce(function(s,t){return s+tradeNetPnl(t);},0));
   var avgWin=wins.length>0?totalWins/wins.length:0;
   var avgLoss=losses.length>0?totalLosses/losses.length:0;
   var pf=totalLosses>0?(totalWins/totalLosses).toFixed(2):totalWins>0?"∞":"0.00";
@@ -8007,7 +8025,7 @@ function PerformanceTab(props){
         var pcts=allTrades.map(function(t){return parseFloat(t.pctPnl);}).filter(function(v){return !isNaN(v);});
         var expPct=pcts.length?(pcts.reduce(function(s,v){return s+v;},0)/pcts.length):0;
         var coachRisk=parseFloat(settings.riskMax)||0;
-        var rVals=[];filtered.forEach(function(e){var rr=parseFloat(e.riskMax)||coachRisk;(e.trades||[]).forEach(function(t){if(t&&t.status!=="open"&&rr>0)rVals.push((parseFloat(t.pnl)||0)/rr);});});
+        var rVals=[];filtered.forEach(function(e){var rr=parseFloat(e.riskMax)||coachRisk;(e.trades||[]).forEach(function(t){if(t&&t.status!=="open"&&rr>0)rVals.push((tradeNetPnl(t))/rr);});});
         var expR=rVals.length?(rVals.reduce(function(s,v){return s+v;},0)/rVals.length):0;
         // Discipline → outcome link: avg trade % on high-discipline days vs low-discipline days.
         var discThr=loadDisciplineLockThreshold();
@@ -8063,24 +8081,24 @@ function PerformanceTab(props){
           <div style={{columnCount:props.mobile?1:3,columnGap:16}}>
           {(function(){
             // Equity sparkline: running cumulative P&L by day.
-            var eq=[],c=0;filtered.forEach(function(r){c+=parseFloat(r.pnl)||0;eq.push(c);});
+            var eq=[],c=0;filtered.forEach(function(r){c+=entryNetPnl(r);eq.push(c);});
             var pfn=parseFloat(pf);
             var pfColor=pf==="∞"||pfn>1?"#22c55e":pfn<1?"#ef4444":"#94a3b8";
             // CHANGED: Helpers for running metrics — each compute(slice) returns a single value
             // representing the metric value as of the END of `slice`. Used by MetricChart.
-            function computeWR(slice){var w=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status==="open"||parseFloat(t.pnl)===0)return;n++;if(parseFloat(t.pnl)>0)w++;});});return n>0?(w/n*100):null;}
-            function computeLR(slice){var l=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status==="open"||parseFloat(t.pnl)===0)return;n++;if(parseFloat(t.pnl)<0)l++;});});return n>0?(l/n*100):null;}
-            function computeBE(slice){var b=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status==="open")return;n++;if(parseFloat(t.pnl)===0)b++;});});return n>0?(b/n*100):null;}
-            function computePF(slice){var w=0,l=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){var p=parseFloat(t.pnl);if(isNaN(p)||t.status==="open")return;if(p>0)w+=p;else if(p<0)l+=Math.abs(p);});});if(l===0)return w>0?10:null;return w/l;}
+            function computeWR(slice){var w=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status==="open"||(isNaN(parseFloat(t.pnl))?NaN:tradeNetPnl(t))===0)return;n++;if(tradeNetPnl(t)>0)w++;});});return n>0?(w/n*100):null;}
+            function computeLR(slice){var l=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status==="open"||(isNaN(parseFloat(t.pnl))?NaN:tradeNetPnl(t))===0)return;n++;if(tradeNetPnl(t)<0)l++;});});return n>0?(l/n*100):null;}
+            function computeBE(slice){var b=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status==="open")return;n++;if((isNaN(parseFloat(t.pnl))?NaN:tradeNetPnl(t))===0)b++;});});return n>0?(b/n*100):null;}
+            function computePF(slice){var w=0,l=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){var p=(isNaN(parseFloat(t.pnl))?NaN:tradeNetPnl(t));if(isNaN(p)||t.status==="open")return;if(p>0)w+=p;else if(p<0)l+=Math.abs(p);});});if(l===0)return w>0?10:null;return w/l;}
             // CHANGED: Trades chart plots PER-DAY counts (last entry in slice), not cumulative.
             function computeTradeCount(slice){if(slice.length===0)return 0;var r=slice[slice.length-1];var n=0;(r.trades||[]).forEach(function(t){if(t.status!=="open")n++;});return n;}
-            function computeAvgWin(slice){var w=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){var p=parseFloat(t.pnl);if(!isNaN(p)&&p>0&&t.status!=="open"){w+=p;n++;}});});return n>0?(w/n):null;}
-            function computeAvgLoss(slice){var l=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){var p=parseFloat(t.pnl);if(!isNaN(p)&&p<0&&t.status!=="open"){l+=p;n++;}});});return n>0?(l/n):null;}
-            function computeExp(slice){var sum=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){var p=parseFloat(t.pnl);if(!isNaN(p)&&t.status!=="open"){sum+=p;n++;}});});return n>0?(sum/n):null;}
+            function computeAvgWin(slice){var w=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){var p=(isNaN(parseFloat(t.pnl))?NaN:tradeNetPnl(t));if(!isNaN(p)&&p>0&&t.status!=="open"){w+=p;n++;}});});return n>0?(w/n):null;}
+            function computeAvgLoss(slice){var l=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){var p=(isNaN(parseFloat(t.pnl))?NaN:tradeNetPnl(t));if(!isNaN(p)&&p<0&&t.status!=="open"){l+=p;n++;}});});return n>0?(l/n):null;}
+            function computeExp(slice){var sum=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){var p=(isNaN(parseFloat(t.pnl))?NaN:tradeNetPnl(t));if(!isNaN(p)&&t.status!=="open"){sum+=p;n++;}});});return n>0?(sum/n):null;}
             // CHANGED: % variants — used when HIDE_DOLLAR_PNL is on. Average the per-trade pctPnl
             // values, which already reflect each trade's % return — that's the meaningful "avg %".
-            function computeAvgWinPct(slice){var w=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){var pp=parseFloat(t.pctPnl),pl=parseFloat(t.pnl);if(!isNaN(pp)&&!isNaN(pl)&&pl>0&&t.status!=="open"){w+=pp;n++;}});});return n>0?(w/n):null;}
-            function computeAvgLossPct(slice){var l=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){var pp=parseFloat(t.pctPnl),pl=parseFloat(t.pnl);if(!isNaN(pp)&&!isNaN(pl)&&pl<0&&t.status!=="open"){l+=pp;n++;}});});return n>0?(l/n):null;}
+            function computeAvgWinPct(slice){var w=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){var pp=parseFloat(t.pctPnl),pl=(isNaN(parseFloat(t.pnl))?NaN:tradeNetPnl(t));if(!isNaN(pp)&&!isNaN(pl)&&pl>0&&t.status!=="open"){w+=pp;n++;}});});return n>0?(w/n):null;}
+            function computeAvgLossPct(slice){var l=0,n=0;slice.forEach(function(r){(r.trades||[]).forEach(function(t){var pp=parseFloat(t.pctPnl),pl=(isNaN(parseFloat(t.pnl))?NaN:tradeNetPnl(t));if(!isNaN(pp)&&!isNaN(pl)&&pl<0&&t.status!=="open"){l+=pp;n++;}});});return n>0?(l/n):null;}
             // CHANGED: Expectancy as a percentage now uses avg $ pnl / avg position size across
             // the cumulative slice — same formula the KPI tile uses, so the chart's running
             // readout matches the tile value at the end of the range.
@@ -8088,7 +8106,7 @@ function PerformanceTab(props){
               var sum=0,n=0,posSum=0,posN=0;
               slice.forEach(function(r){(r.trades||[]).forEach(function(t){
                 if(t.status==="open")return;
-                var p=parseFloat(t.pnl);if(!isNaN(p)){sum+=p;n++;}
+                var p=(isNaN(parseFloat(t.pnl))?NaN:tradeNetPnl(t));if(!isNaN(p)){sum+=p;n++;}
                 var ps=parseFloat(t.positionSize);if(!isNaN(ps)&&ps>0){posSum+=ps;posN++;}
               });});
               if(n===0||posN===0)return null;
@@ -8282,7 +8300,7 @@ function PerformanceTab(props){
             }
             var setupG={},tfG={},cpG={},indG={};
             allTrades.forEach(function(t){
-              var p=parseFloat(t.pnl)||0,pp=parseFloat(t.pctPnl);
+              var p=tradeNetPnl(t),pp=parseFloat(t.pctPnl);
               function bump(g,k){if(!g[k])g[k]={n:0,w:0,pnl:0,pcts:[]};g[k].n++;g[k].pnl+=p;if(p>0)g[k].w++;if(!isNaN(pp))g[k].pcts.push(pp);}
               if(t.setup)bump(setupG,t.setup);
               // CHANGED: Add timeframe breakdown — same row format as setups/patterns/indicators.
@@ -8302,7 +8320,7 @@ function PerformanceTab(props){
                   if(!v)return;
                   if(!groups[v])groups[v]={n:0,w:0,pcts:[]};
                   groups[v].n++;
-                  if((parseFloat(t.pnl)||0)>0)groups[v].w++;
+                  if((tradeNetPnl(t))>0)groups[v].w++;
                   var pp=parseFloat(t.pctPnl);if(!isNaN(pp))groups[v].pcts.push(pp);
                 });
               });
@@ -8381,7 +8399,7 @@ function PerformanceTab(props){
               vs.forEach(function(v){
                 if(!groups[v])groups[v]={n:0,lossN:0,lossPnl:0,lossPcts:[]};
                 groups[v].n++;
-                var p=parseFloat(t.pnl)||0;
+                var p=tradeNetPnl(t);
                 var pp=parseFloat(t.pctPnl);
                 // CHANGED: Track only the LOSING trades for this violation. We surface average loss —
                 // not win rate or expectancy — so the breakdown highlights the cost of rule-breaking
@@ -8452,7 +8470,7 @@ function PerformanceTab(props){
               var n=0,w=0,l=0,lossPnl=0,lossPcts=[];
               allTrades.forEach(function(t){
                 if(!filterFn(t))return;
-                n++;var p=parseFloat(t.pnl)||0;
+                n++;var p=tradeNetPnl(t);
                 if(p>0)w++;else if(p<0){l++;lossPnl+=p;var pp=parseFloat(t.pctPnl);if(!isNaN(pp))lossPcts.push(pp);}
               });
               var lr=n>0?Math.round((l/n)*100):0;
@@ -8494,7 +8512,7 @@ function PerformanceTab(props){
             var beSpark=filtered.map(function(r){
               var ct=(r.trades||[]).filter(function(t){return t&&t.status!=="open";});
               if(ct.length===0)return 0;
-              var be=ct.filter(function(t){return Math.abs(parseFloat(t.pnl)||0)<0.01;}).length;
+              var be=ct.filter(function(t){return Math.abs(tradeNetPnl(t))<0.01;}).length;
               return Math.round((be/ct.length)*100);
             });
             return <>
@@ -8503,7 +8521,7 @@ function PerformanceTab(props){
             <StatRow label="Win/Loss/BE Split" value={wins.length+"/"+(losses.length)+"/"+breakevens.length} color="#64748b"/>
             {breakevens.length>0&&(
               <>
-                <StatRow label="Avg Breakeven Cost" value={HIDE_DOLLAR_PNL?"$•••":"$"+(breakevens.reduce(function(s,t){return s+(Math.abs(parseFloat(t.pnl)||0));},0)/breakevens.length).toFixed(2)}/>
+                <StatRow label="Avg Breakeven Cost" value={HIDE_DOLLAR_PNL?"$•••":"$"+(breakevens.reduce(function(s,t){return s+(Math.abs(tradeNetPnl(t)));},0)/breakevens.length).toFixed(2)}/>
                 <StatRow label="Breakeven Frequency" value={(breakevenRate>0?breakevenRate:"0")+"%"} last color={breakevenRate>10?"#fbbf24":"#94a3b8"}/>
               </>
             )}
@@ -8547,7 +8565,7 @@ function PerformanceTab(props){
             {(function(){
               // Compute WR + total P&L for out-of-session trades in range.
               var wins=0,losses=0,total=0,pnlSum=0;
-              filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(!t||t.status==="open")return;var sid=null;try{sid=getSessionForTrade(t);}catch(e){}if(sid)return;total++;var pv=parseFloat(t.pnl)||0;pnlSum+=pv;if(pv>0)wins++;else if(pv<0)losses++;});});
+              filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(!t||t.status==="open")return;var sid=null;try{sid=getSessionForTrade(t);}catch(e){}if(sid)return;total++;var pv=tradeNetPnl(t);pnlSum+=pv;if(pv>0)wins++;else if(pv<0)losses++;});});
               var wr=total>0?Math.round((wins/total)*100):0;
               var pnlFmt=HIDE_DOLLAR_PNL?"":((pnlSum>=0?"+$":"-$")+Math.abs(Math.round(pnlSum)).toLocaleString());
               return (<>
@@ -9227,7 +9245,7 @@ function SettingsTab(props){
                   var changed=false,sumPnl=0;
                   entry.trades=entry.trades.map(function(t){
                     scanned++;
-                    if(t.status==="open"){sumPnl+=parseFloat(t.pnl)||0;return t;}
+                    if(t.status==="open"){sumPnl+=tradeNetPnl(t);return t;}
                     // CHANGED: Synthesize entries/exits from legacy top-level fields (contracts,
                     // entryPrice, exitPrice, avgEntry, avgExit) so trades saved under the older
                     // data model still get recalculated.
@@ -9242,12 +9260,12 @@ function SettingsTab(props){
                         exts=exts||[{contracts:String(ct),price:String(xp),time:t.closedAt||null}];
                       }
                     }
-                    if(!ents||!exts||!exts.length){if(t.status!=="open"){sumPnl+=parseFloat(t.pnl)||0;}return t;}
+                    if(!ents||!exts||!exts.length){if(t.status!=="open"){sumPnl+=tradeNetPnl(t);}return t;}
                     // CHANGED: Coerce a missing/empty assetClass to the user's default so legacy
                     // trades still resolve to a commission bucket. Without this the fee stays $0.
                     var effClass=t.assetClass&&String(t.assetClass).trim()?t.assetClass:(settings.defaultAssetClass||"options");
-                    var r;try{r=doRecalc(ents,exts,effClass,t.instrument,t.direction);}catch(e){console.error("doRecalc failed",t.id,e);sumPnl+=parseFloat(t.pnl)||0;return t;}
-                    if(r.pnl===""){sumPnl+=parseFloat(t.pnl)||0;return t;}
+                    var r;try{r=doRecalc(ents,exts,effClass,t.instrument,t.direction);}catch(e){console.error("doRecalc failed",t.id,e);sumPnl+=tradeNetPnl(t);return t;}
+                    if(r.pnl===""){sumPnl+=tradeNetPnl(t);return t;}
                     changed=true;updated++;
                     var nt=Object.assign({},t,{assetClass:effClass,entries:r.entries||ents,exits:r.exits||exts,contracts:r.contracts||t.contracts,positionSize:r.positionSize||t.positionSize,pnl:r.pnl,pctPnl:r.pctPnl,feesPaid:r.feesPaid});
                     sumPnl+=parseFloat(nt.pnl)||0;
@@ -9785,20 +9803,34 @@ function App(props){
         if(typeof k!=="string"||k.indexOf("journal:")!==0)continue;
         var raw=localStorage.getItem(k);if(!raw)continue;
         var e=null;try{e=JSON.parse(raw);}catch(err){continue;}
-        if(!e||!e.noTradeDay)continue;
+        if(!e)continue;
         var closed=(e.trades||[]).filter(function(t){return t&&t.status!=="open";});
-        if(closed.length===0)continue;
-        var rm=parseFloat(e.riskMax)||0;
-        var fixed=Object.assign({},e,{
-          noTradeDay:false,
-          autoNoTrade:false,
-          pnl:closed.reduce(function(s,t){return s+(parseFloat(t.pnl)||0);},0),
-          wins:closed.filter(function(t){return parseFloat(t.pnl)>0;}).length,
-          losses:closed.filter(function(t){return parseFloat(t.pnl)<0;}).length,
-          disciplineScore:calcDiscipline(closed,rm,e.commitments?{commitments:e.commitments}:{commitment:e.commitment||null})
-        });
-        delete fixed.noTradeLoggedAt;
-        safeWriteJournalEntry(k,fixed);
+        var patch=null;
+        // CHANGED: Re-sync the STORED day total to the sum of its trades' NET pnl. A day saved
+        // before commissions were configured (or whose trades were recalculated afterwards) keeps
+        // a GROSS total, so every view reading the stored day figure — calendar cells, Today's /
+        // Week P&L goals, the equity curve, the journal day summary — showed gross while views
+        // that sum the trades showed net. Rewriting the stored total makes them all agree.
+        // Idempotent: only writes on a real mismatch.
+        if(closed.length>0){
+          var netSum=closed.reduce(function(s,t){return s+tradeNetPnl(t);},0);
+          var storedPnl=parseFloat(e.pnl);
+          if(isNaN(storedPnl)||Math.abs(storedPnl-netSum)>0.005)patch=Object.assign({},e,{pnl:netSum});
+        }
+        if(e.noTradeDay&&closed.length>0){
+          var rm=parseFloat(e.riskMax)||0;
+          patch=Object.assign({},patch||e,{
+            noTradeDay:false,
+            autoNoTrade:false,
+            pnl:closed.reduce(function(s,t){return s+(tradeNetPnl(t));},0),
+            wins:closed.filter(function(t){return tradeNetPnl(t)>0;}).length,
+            losses:closed.filter(function(t){return tradeNetPnl(t)<0;}).length,
+            disciplineScore:calcDiscipline(closed,rm,e.commitments?{commitments:e.commitments}:{commitment:e.commitment||null})
+          });
+          delete patch.noTradeLoggedAt;
+        }
+        if(!patch)continue;
+        safeWriteJournalEntry(k,patch);
         healed++;
       }
       if(healed>0){try{bumpReloadKey();}catch(e){}}
@@ -9904,8 +9936,8 @@ function App(props){
           commitment:state.commitment||null,
           commitments:_commMap,
           noTradeSessions:state.noTradeSessions||{},
-          wins:closedT.filter(function(t){return parseFloat(t.pnl)>0;}).length,
-          losses:closedT.filter(function(t){return parseFloat(t.pnl)<0;}).length,
+          wins:closedT.filter(function(t){return tradeNetPnl(t)>0;}).length,
+          losses:closedT.filter(function(t){return tradeNetPnl(t)<0;}).length,
           riskMax:riskMaxN,
           disciplineScore:discScore,
           // CHANGED: Snapshot today's filtered economic events into the journal entry so the day
@@ -10017,7 +10049,7 @@ function App(props){
   // same size as trading at $10.5k, until the balance clears the next tier's 5% buffer. This
   // matches the Scale Milestones table the user sees in Settings.
   useEffect(function(){
-    var live=(state.trades||[]).filter(function(t){return t.status!=="open";}).reduce(function(s,t){return s+(parseFloat(t.pnl)||0);},0);
+    var live=(state.trades||[]).filter(function(t){return t.status!=="open";}).reduce(function(s,t){return s+(tradeNetPnl(t));},0);
     var computedAcct=computeAccountBalance(live);
     var tierBase=getCurrentTier(computedAcct);
     var p={sizingMode:settings.sizingMode,slippagePct:settings.slippagePct,positionMaxPct:settings.positionMaxPct,riskMaxPct:settings.riskMaxPct,positionMaxDollar:settings.positionMaxDollar,riskMaxDollar:settings.riskMaxDollar};
@@ -10052,8 +10084,8 @@ function App(props){
             existing.trades.forEach(function(t){if(t&&t.id!=null&&!seen[t.id])mergedTrades.push(t);});
           }
           var pnl=mergedTrades.reduce(function(s,t){return s+tradeNetPnl(t);},0);
-          var wins=mergedTrades.filter(function(t){return parseFloat(t.pnl)>0;}).length;
-          var losses=mergedTrades.filter(function(t){return parseFloat(t.pnl)<0;}).length;
+          var wins=mergedTrades.filter(function(t){return tradeNetPnl(t)>0;}).length;
+          var losses=mergedTrades.filter(function(t){return tradeNetPnl(t)<0;}).length;
           var rolloverRiskMax=parseFloat(settings.riskMax)||(existing&&existing.riskMax)||0;
           var entry=Object.assign({},existing||{},{
             date:state.date,
@@ -10302,7 +10334,7 @@ function App(props){
   function autoAddViolations(t,posMax){
     var v=(t.violations||[]).slice();
     var pos=parseFloat(t.positionSize)||0;
-    var pnlNum=parseFloat(t.pnl);
+    var pnlNum=(isNaN(parseFloat(t.pnl))?NaN:tradeNetPnl(t));
     var pctNum=parseFloat(t.pctPnl);
     var riskMaxPct=(settings&&settings.riskMaxPct!=null)?parseFloat(settings.riskMaxPct):33;
     // CHANGED: Use the trade's stamped sizeFraction as-is if present — it reflects the effective SF
@@ -10396,9 +10428,9 @@ function App(props){
         var closedTrades=ut.filter(function(x){return x.status!=="open";});
         var updated=Object.assign({},entry,{
           trades:closedTrades,
-          wins:closedTrades.filter(function(x){return parseFloat(x.pnl)>0;}).length,
-          losses:closedTrades.filter(function(x){return parseFloat(x.pnl)<0;}).length,
-          pnl:closedTrades.reduce(function(sum,x){return sum+(parseFloat(x.pnl)||0);},0),
+          wins:closedTrades.filter(function(x){return tradeNetPnl(x)>0;}).length,
+          losses:closedTrades.filter(function(x){return tradeNetPnl(x)<0;}).length,
+          pnl:closedTrades.reduce(function(sum,x){return sum+(tradeNetPnl(x));},0),
           disciplineScore:calcDiscipline(closedTrades,(entry.riskMax!=null&&parseFloat(entry.riskMax)>0)?parseFloat(entry.riskMax):(parseFloat(settings.riskMax)||0),{commitment:entry.commitment||null}),
           // CHANGED: Snapshot the day's filtered economic events into the journal entry. For
           // edits to today, refreshes the snapshot. For past-day edits, keeps the existing snapshot.
@@ -10452,9 +10484,9 @@ function App(props){
         var closedTrades=ut.filter(function(x){return x.status!=="open";});
         var updated=Object.assign({},entry,{
           trades:closedTrades,
-          wins:closedTrades.filter(function(x){return parseFloat(x.pnl)>0;}).length,
-          losses:closedTrades.filter(function(x){return parseFloat(x.pnl)<0;}).length,
-          pnl:closedTrades.reduce(function(sum,x){return sum+(parseFloat(x.pnl)||0);},0),
+          wins:closedTrades.filter(function(x){return tradeNetPnl(x)>0;}).length,
+          losses:closedTrades.filter(function(x){return tradeNetPnl(x)<0;}).length,
+          pnl:closedTrades.reduce(function(sum,x){return sum+(tradeNetPnl(x));},0),
           disciplineScore:calcDiscipline(closedTrades,(entry.riskMax!=null&&parseFloat(entry.riskMax)>0)?parseFloat(entry.riskMax):(parseFloat(settings.riskMax)||0),{commitment:entry.commitment||null}),
           // CHANGED: Snapshot the day's filtered economic events into the journal entry. For
           // edits to today, refreshes the snapshot. For past-day edits, keeps the existing snapshot.
