@@ -9805,6 +9805,9 @@ function App(props){
   useEffect(function(){
     try{
       var healed=0;
+      // One-time migration to the average-of-per-trade-scores discipline model.
+      var discMigrationNeeded=false;
+      try{discMigrationNeeded=localStorage.getItem("pt-disc-avg-model-v1")!=="1";}catch(e){}
       for(var i=0;i<localStorage.length;i++){
         var k=localStorage.key(i);
         if(typeof k!=="string"||k.indexOf("journal:")!==0)continue;
@@ -9823,6 +9826,19 @@ function App(props){
           var netSum=closed.reduce(function(s,t){return s+tradeNetPnl(t);},0);
           var storedPnl=parseFloat(e.pnl);
           if(isNaN(storedPnl)||Math.abs(storedPnl-netSum)>0.005)patch=Object.assign({},e,{pnl:netSum});
+          // CHANGED: Re-sync the STORED day discipline score too. It's persisted on the entry, so a
+          // reload alone kept showing the score computed under the OLD pooled model (every trade's
+          // penalties subtracted from a single 100). Recomputing migrates every day to the
+          // average-of-per-trade-scores model without re-saving each day by hand.
+          // Version-flagged: calcDiscipline -> getAccountBalance -> loadJournalRows, so running it
+          // for every entry on every load would be O(n^2). New/edited days already use the new
+          // model via calcDiscipline on save, so a one-time pass is sufficient.
+          if(discMigrationNeeded){
+            var rmD=parseFloat(e.riskMax)||0;
+            var freshDisc=calcDiscipline(closed,rmD,e.commitments?{commitments:e.commitments}:{commitment:e.commitment||null});
+            var storedDisc=parseFloat(e.disciplineScore);
+            if(isNaN(storedDisc)||Math.abs(storedDisc-freshDisc)>0.005)patch=Object.assign({},patch||e,{disciplineScore:freshDisc});
+          }
         }
         if(e.noTradeDay&&closed.length>0){
           var rm=parseFloat(e.riskMax)||0;
@@ -9840,6 +9856,7 @@ function App(props){
         safeWriteJournalEntry(k,patch);
         healed++;
       }
+      if(discMigrationNeeded){try{localStorage.setItem("pt-disc-avg-model-v1","1");}catch(e){}}
       if(healed>0){try{bumpReloadKey();}catch(e){}}
     }catch(e){console.error("No-trade/trades conflict heal failed:",e);}
   },[props.syncTick]);
