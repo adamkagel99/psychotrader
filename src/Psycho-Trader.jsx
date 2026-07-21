@@ -9805,9 +9805,13 @@ function App(props){
   useEffect(function(){
     try{
       var healed=0;
-      // One-time migration to the average-of-per-trade-scores discipline model.
-      var discMigrationNeeded=false;
-      try{discMigrationNeeded=localStorage.getItem("pt-disc-avg-model-v1")!=="1";}catch(e){}
+      // CHANGED: Discipline migration is tracked PER ENTRY via a `discModel` marker rather than one
+      // global flag. A global flag was consumed on the first (pre-pull) load, so when the cloud pull
+      // then restored the old stored scores the migration refused to re-run — the new score flashed
+      // and reverted. With a per-entry marker, any entry arriving without it (including one restored
+      // from the cloud later) gets recomputed, and already-migrated entries cost nothing to skip.
+      var cloudActive=(typeof window!=="undefined"&&typeof window.__psychoSyncRestore==="function");
+      var syncReady=(!cloudActive||syncReadyRef.current);
       for(var i=0;i<localStorage.length;i++){
         var k=localStorage.key(i);
         if(typeof k!=="string"||k.indexOf("journal:")!==0)continue;
@@ -9833,11 +9837,10 @@ function App(props){
           // Version-flagged: calcDiscipline -> getAccountBalance -> loadJournalRows, so running it
           // for every entry on every load would be O(n^2). New/edited days already use the new
           // model via calcDiscipline on save, so a one-time pass is sufficient.
-          if(discMigrationNeeded){
+          if(syncReady&&e.discModel!=="avg"){
             var rmD=parseFloat(e.riskMax)||0;
             var freshDisc=calcDiscipline(closed,rmD,e.commitments?{commitments:e.commitments}:{commitment:e.commitment||null});
-            var storedDisc=parseFloat(e.disciplineScore);
-            if(isNaN(storedDisc)||Math.abs(storedDisc-freshDisc)>0.005)patch=Object.assign({},patch||e,{disciplineScore:freshDisc});
+            patch=Object.assign({},patch||e,{disciplineScore:freshDisc,discModel:"avg"});
           }
         }
         if(e.noTradeDay&&closed.length>0){
@@ -9856,7 +9859,6 @@ function App(props){
         safeWriteJournalEntry(k,patch);
         healed++;
       }
-      if(discMigrationNeeded){try{localStorage.setItem("pt-disc-avg-model-v1","1");}catch(e){}}
       if(healed>0){try{bumpReloadKey();}catch(e){}}
     }catch(e){console.error("No-trade/trades conflict heal failed:",e);}
   },[props.syncTick]);
