@@ -535,7 +535,12 @@ function effectiveViolations(t,ctx){
   var pos=parseFloat(t.positionSize)||0;
   var stampedMax=parseFloat(t.posMaxAtEntry)||0;
   var _cGm=t.grade==="A"?1:t.grade==="B"?0.75:t.grade==="C"?0.5:1;
-  var liveMax=ctx.posMax*(parseFloat(t.sizeFraction)||1)*_cGm;
+  // CHANGED: Cap the effective size fraction at 0.5 while half-size is in force (for trades taken
+  // at/after it was enabled). Without this the stamped sizeFraction of 1 measured the trade against
+  // the full cap and oversized entries went unflagged.
+  var _sfEff=parseFloat(t.sizeFraction)||1;
+  if(halfSizeAppliesTo(t))_sfEff=Math.min(_sfEff,0.5);
+  var liveMax=ctx.posMax*_sfEff*_cGm;
   var effPosMax=t.grade?liveMax:Math.max(stampedMax,liveMax);
   var overIdx=vs.indexOf("Oversized entry");
   if(effPosMax>0&&pos>effPosMax){if(overIdx<0)vs.push("Oversized entry");}
@@ -1648,7 +1653,37 @@ function applyHalfsizeToTarget(target){
   }catch(e){}
   return n;
 }
-function setMonthHalfsizeActive(on){try{if(on){localStorage.setItem("tf-month-halfsize-active",getCurrentMonthKey());localStorage.removeItem("tf-month-halfsize-manual-off");}else{localStorage.removeItem("tf-month-halfsize-active");localStorage.setItem("tf-month-halfsize-manual-off",getCurrentMonthKey());}}catch(e){}}
+function setMonthHalfsizeActive(on){try{if(on){localStorage.setItem("tf-month-halfsize-active",getCurrentMonthKey());localStorage.removeItem("tf-month-halfsize-manual-off");if(!localStorage.getItem("tf-month-halfsize-since"))localStorage.setItem("tf-month-halfsize-since",String(Date.now()));}else{localStorage.removeItem("tf-month-halfsize-active");localStorage.removeItem("tf-month-halfsize-since");localStorage.setItem("tf-month-halfsize-manual-off",getCurrentMonthKey());}}catch(e){}}
+// CHANGED: Half-size must actually TIGHTEN the oversize check. The cap was derived from the trade's
+// stamped sizeFraction alone, which stays 1 for trades logged while half-size is on — so a trade was
+// measured against the FULL position cap and an oversized entry slipped through unflagged even
+// though Settings showed the halved cap.
+// tf-month-halfsize-since records when half-size was switched on so the halved cap applies only from
+// that point forward and never retroactively flags trades taken at full size. When it's unknown
+// (half-size auto-engaged on a goal hit before this was tracked) we fall back to the start of the
+// current month, matching the feature's own "halved this month" semantics.
+function halfSizeSinceMs(){
+  try{
+    var v=parseInt(localStorage.getItem("tf-month-halfsize-since")||"",10);
+    if(!isNaN(v)&&v>0)return v;
+  }catch(e){}
+  var d=getPT();
+  return new Date(d.getFullYear(),d.getMonth(),1).getTime();
+}
+function tradeStartMs(t){
+  if(!t)return NaN;
+  var cands=[];
+  if(Array.isArray(t.entries)){t.entries.forEach(function(e){var n=parseFloat(e&&e.time);if(!isNaN(n)&&n>0)cands.push(n);});}
+  [t.openedAt,t.time,t.id].forEach(function(v){var n=parseFloat(v);if(!isNaN(n)&&n>0)cands.push(n);});
+  if(cands.length===0)return NaN;
+  return Math.min.apply(null,cands);
+}
+function halfSizeAppliesTo(t){
+  if(!isMonthHalfsizeActive())return false;
+  var ms=tradeStartMs(t);
+  if(isNaN(ms))return true; // live/unsaved trade being sized right now
+  return ms>=halfSizeSinceMs();
+}
 function isMonthGoalBannerDismissed(){try{return localStorage.getItem("tf-month-goal-banner-dismissed")===getCurrentMonthKey();}catch(e){return false;}}
 function dismissMonthGoalBanner(){try{localStorage.setItem("tf-month-goal-banner-dismissed",getCurrentMonthKey());}catch(e){}}
 // CHANGED: Monthly target banner extracted as a component so it can render globally (above the
@@ -10370,9 +10405,12 @@ function App(props){
     if(isNaN(sf)||sf<=0){
       sf=1;
       if(t.sessionId){try{var sess=getSessions(settings).find(function(s){return s.id===t.sessionId;});if(sess&&sess.sizeFraction!=null)sf=parseFloat(sess.sizeFraction)||1;}catch(e){}}
-      try{var lk=checkDisciplineLock(state.trades,state.commitment,getCommitmentsMap(state));if(lk&&lk.locked)sf=Math.min(sf,0.5);}catch(e){}
-      if(isMonthHalfsizeActive())sf=Math.min(sf,0.5);
     }
+    // CHANGED: Half-size is a standing constraint, so it caps the effective fraction even when the
+    // trade carries a stamped sizeFraction of 1 (which is what trades logged during half-size get).
+    // halfSizeAppliesTo() scopes this to trades taken at/after half-size was switched on, so
+    // pre-half-size trades are never retroactively flagged.
+    if(halfSizeAppliesTo(t))sf=Math.min(sf,0.5);
     // CHANGED: Grade scales the effective cap — A=1.0, B=0.75, C=0.50. Trades sized to a lower
     // grade must fit that grade's tighter cap.
     var _gm=t.grade==="A"?1:t.grade==="B"?0.75:t.grade==="C"?0.5:1;
