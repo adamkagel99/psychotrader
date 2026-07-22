@@ -1184,18 +1184,31 @@ function SessionCommitmentReview(props){
 function SessionNoTradePanel(props){
   var data=props.data;
   var isLogged=!!data;
-  // CHANGED: If the session's window has ended and no data yet, treat it as an implicit
-  // auto no-trade session. Panel starts read-only ("Auto no-trade session") with an "Add notes"
-  // affordance; only sessions that haven't yet ended (or explicitly cleared) show the "Skip?" prompt.
+  // CHANGED: Collapsing a session UNMOUNTS this panel, which used to discard any notes typed but
+  // not yet submitted (they lived only in component state until "Log no-trade for this session").
+  // In-progress edits are now mirrored to a per-day/per-session draft key, restored on mount, and
+  // cleared on save/cancel — so notes survive collapse/expand, tab switches, and reloads.
+  var draftKey="pt-nt-draft:"+(props.dateKey||"today")+":"+props.sessionId;
+  var draft=(function(){try{var raw=localStorage.getItem(draftKey);return raw?JSON.parse(raw):null;}catch(e){return null;}})();
   var isAutoNoTrade=!isLogged&&props.sessionEnded;
-  var [editing,setEditing]=useState(!isLogged&&!isAutoNoTrade);
-  var [reasons,setReasons]=useState((data&&data.reasons)||[]);
-  var [reason,setReason]=useState((data&&data.reason)||"");
-  var [shots,setShots]=useState((data&&data.shots)||[]);
+  var [editing,setEditing]=useState(!!draft||(!isLogged&&!isAutoNoTrade));
+  var [reasons,setReasons]=useState((draft&&draft.reasons)||(data&&data.reasons)||[]);
+  var [reason,setReason]=useState((draft&&draft.reason)||(data&&data.reason)||"");
+  var [shots,setShots]=useState((draft&&draft.shots)||(data&&data.shots)||[]);
   var [uploading,setUploading]=useState(false);
   var fileRef=useRef(null);
-  function save(){props.onSave(props.sessionId,{reasons:reasons,reason:reason,shots:shots});setEditing(false);}
-  function cancel(){setReasons((data&&data.reasons)||[]);setReason((data&&data.reason)||"");setShots((data&&data.shots)||[]);setEditing(false);}
+  // Mirror in-progress edits to the draft key. Screenshots are included but the write is guarded:
+  // if base64 images blow the storage quota we fall back to persisting the text only, so typed
+  // notes are never lost just because an image was too large.
+  useEffect(function(){
+    if(!editing)return;
+    var payload={reasons:reasons,reason:reason,shots:shots};
+    try{localStorage.setItem(draftKey,JSON.stringify(payload));}
+    catch(e){try{localStorage.setItem(draftKey,JSON.stringify({reasons:reasons,reason:reason,shots:[]}));}catch(e2){}}
+  },[editing,reasons,reason,shots,draftKey]);
+  function clearDraft(){try{localStorage.removeItem(draftKey);}catch(e){}}
+  function save(){clearDraft();props.onSave(props.sessionId,{reasons:reasons,reason:reason,shots:shots});setEditing(false);}
+  function cancel(){clearDraft();setReasons((data&&data.reasons)||[]);setReason((data&&data.reason)||"");setShots((data&&data.shots)||[]);setEditing(false);}
   // Read-only view: user has logged, OR the session has ended without any logging (auto state).
   if((isLogged||isAutoNoTrade)&&!editing){
     var effReasons=(data&&data.reasons)||[];
@@ -5697,7 +5710,7 @@ function TradesTab(props){
                 </div>
               )}
               {!isOutOfSession&&<SessionCommitmentReview sessionId={gk} sessionLabel={hdr.label} session={enabledSess.find(function(x){return x.id===gk;})} sessionTrades={g.items.map(function(p){return p.t;})} sessionEnded={sessionEnded(gk)} isToday={isToday} state={props.state} setState={props.setState} todayJournalEntry={todayJournalEntry} setTodayJournalEntry={setTodayJournalEntry} pastSession={pastSession} setPastSessions={setPastSessions} bumpReloadKey={props.bumpReloadKey}/>}
-              {isEmpty&&isRelevantSession&&<SessionNoTradePanel sessionId={gk} sessionLabel={hdr.label} data={ntSessions[gk]} sessionEnded={sessionEnded(gk)} onSave={saveSessionNoTrade} onClear={clearSessionNoTrade} setNoTradeViewer={setNoTradeViewer}/>}
+              {isEmpty&&isRelevantSession&&<SessionNoTradePanel dateKey={isToday?todayStr():selectedDate} sessionId={gk} sessionLabel={hdr.label} data={ntSessions[gk]} sessionEnded={sessionEnded(gk)} onSave={saveSessionNoTrade} onClear={clearSessionNoTrade} setNoTradeViewer={setNoTradeViewer}/>}
               </>)}
             </div>
           );
