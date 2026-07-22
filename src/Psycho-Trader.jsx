@@ -9872,10 +9872,10 @@ function App(props){
           // Version-flagged: calcDiscipline -> getAccountBalance -> loadJournalRows, so running it
           // for every entry on every load would be O(n^2). New/edited days already use the new
           // model via calcDiscipline on save, so a one-time pass is sufficient.
-          if(syncReady&&e.discModel!=="avg"){
+          if(syncReady&&e.discModel!=="avg2"){
             var rmD=parseFloat(e.riskMax)||0;
             var freshDisc=calcDiscipline(closed,rmD,e.commitments?{commitments:e.commitments}:{commitment:e.commitment||null});
-            patch=Object.assign({},patch||e,{disciplineScore:freshDisc,discModel:"avg"});
+            patch=Object.assign({},patch||e,{disciplineScore:freshDisc,discModel:"avg2"});
           }
         }
         if(e.noTradeDay&&closed.length>0){
@@ -10036,7 +10036,12 @@ function App(props){
   // and restamp posMaxAtEntry on all historical trades. Skips silently on storage quota errors.
   useEffect(function(){
     try{
-      if(localStorage.getItem("tf-oversize-migrated-v4"))return;
+      // CHANGED: Wait for the cloud pull before migrating. Running pre-pull set the completion flag
+      // against local data that the pull then replaced, so the restamped violations were lost and
+      // the migration refused to re-run. Re-runs on syncTick until it has post-pull data.
+      var _cloud=(typeof window!=="undefined"&&typeof window.__psychoSyncRestore==="function");
+      if(_cloud&&!syncReadyRef.current)return;
+      if(localStorage.getItem("tf-oversize-migrated-v5"))return;
       // CHANGED: Use live-tier position cap (matches saveTrade + Computed) instead of stale settings snapshot.
       var _lt=getCurrentTier(computeAccountBalance(0));
       var _lc=calcPosSizes(_lt,{useDirect:true,sizingMode:settings.sizingMode,slippagePct:settings.slippagePct,positionMaxPct:settings.positionMaxPct,riskMaxPct:settings.riskMaxPct,positionMaxDollar:settings.positionMaxDollar,riskMaxDollar:settings.riskMaxDollar});
@@ -10098,11 +10103,11 @@ function App(props){
         var newLive=state.trades.map(function(tr){var r=fixTrade(tr);if(r.changed)liveChanged=true;return r.t;});
         if(liveChanged)setState(function(prev){return Object.assign({},prev,{trades:newLive});});
       }
-      try{localStorage.setItem("tf-oversize-migrated-v4","1");}catch(e){}
+      try{localStorage.setItem("tf-oversize-migrated-v5","1");}catch(e){}
       bumpReloadKey();
     }catch(e){}
   // eslint-disable-next-line
-  },[]);
+  },[props.syncTick]);
   // Persist hide-dollar setting globally.
   useEffect(function(){setHideDollarPnL(!!settings.hideDollarPnL);},[settings.hideDollarPnL]);
   // CHANGED: Recalc derived position/risk from the user's CURRENT TIER (banded scaling), not the
