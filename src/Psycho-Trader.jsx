@@ -7676,9 +7676,9 @@ function SessionDayHeatmap(props){
     <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid #1e293b",borderRadius:10,display:"flex",flexDirection:"column",height:"100%",boxSizing:"border-box"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10,gap:8}}>
         <div>
-          <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{hp?(hp.s.name+" · "+hp.d):"Session × Day (WR)"}</div>
+          <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{hp?(hp.s.name+" · "+hp.d):"Session × Day (P&L)"}</div>
           {hp?(
-            <div style={{fontSize:18,fontWeight:700,color:hp.c.n>0?(hp.c.wins/hp.c.n>=0.5?"#22c55e":"#ef4444"):"#94a3b8",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{hp.c.n>0?Math.round(hp.c.wins/hp.c.n*100):0}% wr<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:6}}>{hp.c.n}t · {HIDE_DOLLAR_PNL?((hp.c.n>0?((hp.c.rSum/hp.c.n>=0?"+":"")+(hp.c.rSum/hp.c.n).toFixed(2)):"0.00")+"R"):fmt(hp.c.pnl)}</span></div>
+            <div style={{fontSize:18,fontWeight:700,color:hp.c.n>0?(hp.c.pnl>=0?"#22c55e":"#ef4444"):"#94a3b8",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{HIDE_DOLLAR_PNL?((hp.c.rSum>=0?"+":"")+hp.c.rSum.toFixed(2)+"R"):fmt(hp.c.pnl)}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:6}}>{hp.c.n}t · {hp.c.n>0?Math.round(hp.c.wins/hp.c.n*100):0}% wr</span></div>
           ):(
             <div style={{fontSize:14,fontWeight:600,color:"#94a3b8",marginTop:2}}>Tap a cell to inspect</div>
           )}
@@ -7692,15 +7692,22 @@ function SessionDayHeatmap(props){
           dayLabels.forEach(function(d,di){
             var c=grid[si][di];
             var isHover=hover&&hover.s===si&&hover.d===di;
-            // CHANGED: Color intensity now driven by WIN RATE distance from 50%, not P&L magnitude.
-            // 50% wr → neutral; 100% → full green; 0% → full red. Sample size still gates display.
-            var wr=c.n>0?(c.wins/c.n):0.5;
-            var dev=Math.abs(wr-0.5)*2; // 0 at 50%, 1 at 0% or 100%
-            var alpha=c.n===0?0:Math.max(0.18,dev);
-            var bg=c.n===0?"#0a0a0f":(wr>=0.5?"rgba(34,197,94,"+alpha+")":"rgba(239,68,68,"+alpha+")");
+            // CHANGED: Color now reflects P&L (sign = green/red, intensity = magnitude relative to
+            // the largest absolute P&L in the grid). Previously it keyed off win-rate distance from
+            // 50%, which could paint a slot bright green while it actually lost money (many small
+            // wins, one big loss). The cell label follows the same metric so color and number agree.
+            var alpha=c.n===0?0:Math.max(0.18,Math.abs(c.pnl)/maxAbs);
+            var bg=c.n===0?"#0a0a0f":(c.pnl>=0?"rgba(34,197,94,"+alpha+")":"rgba(239,68,68,"+alpha+")");
+            var cellLabel=(function(){
+              if(c.n===0)return "";
+              if(HIDE_DOLLAR_PNL)return ((c.rSum>=0?"+":"")+c.rSum.toFixed(1)+"R");
+              var a=Math.abs(c.pnl);
+              var s=a>=1000?((a/1000).toFixed(a>=10000?0:1)+"k"):String(Math.round(a));
+              return (c.pnl>=0?"+":"−")+s;
+            })();
             children.push(
               <button key={si+"-"+di} onClick={function(){setHover(isHover?null:{s:si,d:di});}} onMouseEnter={function(){if(c.n>0)setHover({s:si,d:di});}} onMouseLeave={function(){setHover(null);}} style={{height:36,background:bg,border:isHover?"1.5px solid #fff":"1px solid "+(c.n===0?"#1e293b":"#334155"),borderRadius:4,cursor:c.n>0?"pointer":"default",fontFamily:"inherit",padding:0,display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}>
-                {c.n>0&&<span style={{fontSize:11,fontWeight:700,color:"#fff",fontVariantNumeric:"tabular-nums",textShadow:"0 1px 2px rgba(0,0,0,0.6)",lineHeight:1}}>{Math.round(c.wins/c.n*100)}%</span>}
+                {c.n>0&&<span style={{fontSize:11,fontWeight:700,color:"#fff",fontVariantNumeric:"tabular-nums",textShadow:"0 1px 2px rgba(0,0,0,0.6)",lineHeight:1}}>{cellLabel}</span>}
               </button>
             );
           });
@@ -8829,6 +8836,7 @@ function SettingsTab(props){
   function persistChecklist(items){setChecklistItems(items);saveChecklistItems(items);if(props.onChecklistChange)props.onChecklistChange();}
   function persistDiscScoring(ds){setDiscScoring(ds);saveDisciplineScoring(ds);}
   // CHANGED: Normal accounting — Deposit = +$ (adds to balance), Withdrawal = -$ (subtracts). Account balance now reflects actual capital.
+  var [resetTarget,setResetTarget]=useState("10000");
   function addTransfer(){
     var rawAmt=parseFloat(transferDraft.amount);
     if(isNaN(rawAmt)||rawAmt===0)return;
@@ -9057,6 +9065,36 @@ function SettingsTab(props){
           );
         })()}
         {/* Type toggle */}
+        {/* CHANGED: One-time balance reset. Balance is derived (transfers + all journal P&L), so it
+           can't be "set" directly without destroying history. This records a single dated adjustment
+           transfer for exactly the difference, which makes the balance read the target while leaving
+           every trade and journal entry untouched — and it stays visible in the list below, so it can
+           be deleted to undo. */}
+        {(function(){
+          var current=getAccountBalance();
+          var target=parseFloat(resetTarget);
+          var diff=(!isNaN(target))?(target-current):NaN;
+          return (
+            <div style={{marginBottom:10,padding:"9px 11px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:6}}>
+              <div style={{fontSize:12,color:"#e2e8f0",fontWeight:700,marginBottom:2}}>Reset balance</div>
+              <div style={{fontSize:11,color:"#64748b",marginBottom:7}}>Current: ${current.toFixed(2)} — logs one adjustment transfer to hit your target. Trades and journal history are not modified.</div>
+              <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                <input type="number" step="0.01" value={resetTarget} onChange={function(e){setResetTarget(e.target.value);}} placeholder="10000" style={Object.assign({},fld,{padding:"6px 9px",fontSize:13,width:120})}/>
+                <button disabled={isNaN(diff)||Math.abs(diff)<0.005} onClick={function(){
+                  if(isNaN(diff)||Math.abs(diff)<0.005)return;
+                  if(!window.confirm("Log an adjustment of "+(diff>=0?"+$":"-$")+Math.abs(diff).toFixed(2)+" so your balance reads $"+target.toFixed(2)+"?\n\nNo trades or journal entries are changed. You can delete this transfer to undo."))return;
+                  var n=getNow();
+                  var ds=n.getFullYear()+"-"+(n.getMonth()+1).toString().padStart(2,"0")+"-"+n.getDate().toString().padStart(2,"0");
+                  var t={id:Date.now(),date:ds,type:diff>=0?"deposit":"withdrawal",amount:diff,note:"Balance reset to $"+target.toFixed(2)};
+                  var nt=transfers.concat([t]);
+                  setTransfers(nt);saveTransfers(nt);
+                  if(props.bumpReloadKey)props.bumpReloadKey();
+                }} style={{padding:"6px 12px",background:(isNaN(diff)||Math.abs(diff)<0.005)?"#1e293b":"#4f46e5",border:"none",borderRadius:5,color:(isNaN(diff)||Math.abs(diff)<0.005)?"#64748b":"#fff",fontSize:12,fontWeight:600,cursor:(isNaN(diff)||Math.abs(diff)<0.005)?"not-allowed":"pointer",fontFamily:"inherit"}}>Reset</button>
+                {!isNaN(diff)&&Math.abs(diff)>=0.005&&<span style={{fontSize:11,color:diff>=0?"#86efac":"#fca5a5",fontVariantNumeric:"tabular-nums"}}>adjustment {diff>=0?"+":"−"}${Math.abs(diff).toFixed(2)}</span>}
+              </div>
+            </div>
+          );
+        })()}
         <div style={{display:"flex",gap:6,marginBottom:8}}>
           {[{id:"deposit",label:"Deposit (+$)",color:"#ef4444",bg:"#7f1d1d"},{id:"withdrawal",label:"Withdrawal (-$)",color:"#22c55e",bg:"#14532d"}].map(function(o){
             var active=transferDraft.type===o.id;
