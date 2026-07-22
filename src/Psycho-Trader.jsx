@@ -7532,7 +7532,7 @@ function DisciplineScatter(props){
           {hp?(
             <div style={{fontSize:20,fontWeight:700,color:hp.r>=0?"#22c55e":"#ef4444",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{fmtR(hp.r)}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:6}}>{hp.n}t</span></div>
           ):(
-            <div style={{fontSize:20,fontWeight:700,color:pts.length<30?"#475569":(r<-0.2?"#22c55e":r>0.2?"#ef4444":"#94a3b8"),marginTop:2,fontVariantNumeric:"tabular-nums"}}>r = {r.toFixed(2)}<span style={{fontSize:10,color:pts.length<30?"#64748b":"#94a3b8",fontWeight:500,marginLeft:6,fontStyle:pts.length<30?"italic":"normal"}}>{pts.length<30?("low sample · "+pts.length+"/30"):(Math.abs(r)<0.2?"weak":Math.abs(r)<0.5?"moderate":"strong")+" link"}</span></div>
+            <div style={{fontSize:20,fontWeight:700,color:pts.length<30?"#475569":(r>0.2?"#22c55e":r<-0.2?"#ef4444":"#94a3b8"),marginTop:2,fontVariantNumeric:"tabular-nums"}}>r = {r.toFixed(2)}<span style={{fontSize:10,color:pts.length<30?"#64748b":"#94a3b8",fontWeight:500,marginLeft:6,fontStyle:pts.length<30?"italic":"normal"}}>{pts.length<30?("low sample · "+pts.length+"/30"):(Math.abs(r)<0.2?"weak":Math.abs(r)<0.5?"moderate":"strong")+" link"}</span></div>
           )}
         </div>
         <div style={{textAlign:"right",fontSize:10,color:"#94a3b8",lineHeight:1.55}}>
