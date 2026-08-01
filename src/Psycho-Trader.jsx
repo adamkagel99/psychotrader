@@ -1638,18 +1638,47 @@ function isMonthHalfsizeActive(){
 // risk-unit at the time the trade was placed (stamped sizeFraction). dayR sums per-trade R's
 // — self-corrects across mixed-size days and matches what the journal shows. Use these
 // instead of totalPnL/settings.riskMax.
+// Per-trade R uses the trade's OWN risk unit — correct for judging that single trade.
 function tradeR(t,riskMaxSetting){
   if(!t||t.status==="open")return 0;
   var pnl=(isNaN(parseFloat(t.pnl))?NaN:tradeNetPnl(t));if(isNaN(pnl))return 0;
-  var sf=(t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))?parseFloat(t.sizeFraction):1;
-  var base=parseFloat(t.riskMaxAtEntry);
-  if(isNaN(base)||base<=0){var cap=parseFloat(t.riskCapDollarsAtEntry);if(!isNaN(cap)&&cap>0&&sf>0)base=cap/sf;}
-  if(isNaN(base)||base<=0)base=parseFloat(riskMaxSetting)||0;
-  var rm=base*sf;
+  var rm=tradeRiskUnit(t,riskMaxSetting);
   return rm>0?pnl/rm:0;
 }
+// The dollar risk unit (1R) for a trade: its stamped risk-max-at-entry × sizeFraction, falling back
+// to the stamped dollar cap, then the passed setting.
+function tradeRiskUnit(t,riskMaxSetting){
+  var sf=(t&&t.sizeFraction!=null&&!isNaN(parseFloat(t.sizeFraction)))?parseFloat(t.sizeFraction):1;
+  var base=parseFloat(t&&t.riskMaxAtEntry);
+  if(isNaN(base)||base<=0){var cap=parseFloat(t&&t.riskCapDollarsAtEntry);if(!isNaN(cap)&&cap>0&&sf>0)base=cap/sf;}
+  if(isNaN(base)||base<=0)base=parseFloat(riskMaxSetting)||0;
+  return base*sf;
+}
+// CHANGED: A DAY'S R must be measured against ONE risk unit — the risk cap as of the day's START —
+// not each trade's own unit. Risk Max is a % of balance, so a trade taken after a big loss is sized
+// against a shrunken balance and gets a smaller 1R; dividing its P&L by that inflated the summed
+// day R wildly (a ~+0.4R day could read as +21R). We now pick a single day-level risk unit from the
+// earliest trade (by entry/open time), so every trade that day is expressed in the same R, and the
+// day's R equals dayPnL / dayStartRiskUnit.
+function dayRiskUnit(trades,riskMaxSetting){
+  var arr=(trades||[]).filter(function(t){return t&&t.status!=="open";});
+  if(arr.length===0)return parseFloat(riskMaxSetting)||0;
+  var earliest=null,best=Infinity;
+  arr.forEach(function(t){
+    var ms=tradeStartMs(t);
+    var key=isNaN(ms)?Infinity:ms;
+    if(key<best){best=key;earliest=t;}
+  });
+  if(!earliest)earliest=arr[0];
+  var u=tradeRiskUnit(earliest,riskMaxSetting);
+  return u>0?u:(parseFloat(riskMaxSetting)||0);
+}
 function dayR(trades,riskMaxSetting){
-  return (trades||[]).reduce(function(s,t){return s+tradeR(t,riskMaxSetting);},0);
+  var arr=(trades||[]).filter(function(t){return t&&t.status!=="open";});
+  var unit=dayRiskUnit(arr,riskMaxSetting);
+  if(!(unit>0))return 0;
+  var pnl=arr.reduce(function(s,t){return s+(isNaN(parseFloat(t.pnl))?0:tradeNetPnl(t));},0);
+  return pnl/unit;
 }
 // CHANGED: When half-size trading is committed for the rest of the month, daily and weekly P&L
 // targets are halved to match the lower expected output. Monthly target is unchanged — it's
