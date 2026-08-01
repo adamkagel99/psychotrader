@@ -3394,7 +3394,9 @@ function TradeForm(props){
             <div style={{minWidth:0,display:"flex",flexDirection:"column"}}>
               <label style={lbl}>Setup Grade</label>
               <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5,flex:1}}>
-                {["A","B","C"].map(function(g){return <button key={g} onClick={function(){upd("grade",g);}} style={{width:"100%",padding:"10px 12px",background:trade.grade===g?(g==="A"?"#14532d":g==="B"?"#713f12":"#7f1d1d"):"#0a0a0f",border:"1px solid "+(trade.grade===g?(g==="A"?"#22c55e":g==="B"?"#f59e0b":"#ef4444"):"#334155"),borderRadius:8,color:trade.grade===g?"#fff":"#64748b",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",boxSizing:"border-box"}}>{g}</button>;})}
+                {/* CHANGED: C grade removed from the picker (A/B only). Scoring logic for C is kept
+                   elsewhere so any pre-existing C-graded trades still render and score correctly. */}
+                {["A","B"].map(function(g){return <button key={g} onClick={function(){upd("grade",g);}} style={{width:"100%",padding:"10px 12px",background:trade.grade===g?(g==="A"?"#14532d":"#713f12"):"#0a0a0f",border:"1px solid "+(trade.grade===g?(g==="A"?"#22c55e":"#f59e0b"):"#334155"),borderRadius:8,color:trade.grade===g?"#fff":"#64748b",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",boxSizing:"border-box"}}>{g}</button>;})}
               </div>
               {(function(){
                 var gc=settings&&settings.gradeCriteria;
