@@ -1457,34 +1457,37 @@ function getWithdrawnInDays(withdrawn){var dt=getDailyTarget();return dt>0?(with
 // completion counts now — no point values, no rank tiers.
 // Lifetime challenge completions are tallied across weeks and stored in gamification data.
 function getChallengeCompletions(){var d=loadGamificationData();return d.challengeCompletions||0;}
-// How many ranks earned = how many withdrawals unlocked (1 per tier crossed).
-// CHANGED: Ranks/points are now a COSMETIC progression badge only — they no longer gate or grant
-// withdrawals. The withdrawal allowance below depends solely on account growth (profit since last
-// withdrawal). getRanksEarned/getWithdrawalsRemaining were removed as they served only the old gate.
-// CHANGED: Withdrawal allowance = flat % of profit earned SINCE the last withdrawal.
-// Ranks gate ACCESS (must be >= Bronze); the allowance amount is a flat % of recent profit.
-var WITHDRAWAL_ALLOWANCE_PCT=30; // legacy default — overridden by user's saved pct (see getter below).
-// CHANGED: User-editable allowance percentage. Stored in localStorage; defaults to 30%.
+// ============================================================================
+// WITHDRAWAL ALLOWANCE — rewritten from scratch.
+//
+// Concept: your "allowance" is a suggested amount to withdraw = a % of the profit you've earned
+// but NOT yet withdrawn ("undrawn profit"). It is a soft guide, never a hard limit.
+//
+// Undrawn profit is computed with a chronological PROFIT POOL:
+//   • realized trade P&L (net of fees) ADDS to the pool as it happens,
+//   • each withdrawal DRAINS the pool but never below zero,
+//   • deposits are ignored (funding is not profit),
+//   • events before the optional start cutoff (tf-allowance-since) are skipped.
+// Draining-to-zero is what makes it correct: a withdrawal larger than the profit available at that
+// moment is returning CAPITAL, and the excess must NOT be charged against future profit. A partial
+// withdrawal simply leaves the remainder in the pool.
+//
+// Settings:
+//   tf-allowance-pct      — the % (default 40). "0" or "off" disables.
+//   tf-allowance-enabled  — "1"/"0" master toggle.
+//   tf-allowance-since     — optional ms timestamp; profit/withdrawals before it are ignored, so a
+//                            messy historical account can start the counter fresh from a chosen date.
+// ============================================================================
+var WITHDRAWAL_ALLOWANCE_PCT=40;
 function getWithdrawalAllowancePct(){try{var v=parseFloat(localStorage.getItem("tf-allowance-pct"));return isNaN(v)||v<=0?WITHDRAWAL_ALLOWANCE_PCT:v;}catch(e){return WITHDRAWAL_ALLOWANCE_PCT;}}
-// CHANGED: Raw getter — returns the user's stored pct as-is (including 0 to disable). Defaults to WITHDRAWAL_ALLOWANCE_PCT only when unset/NaN.
 function getWithdrawalAllowancePctRaw(){try{var s=localStorage.getItem("tf-allowance-pct");if(s===null||s==="")return WITHDRAWAL_ALLOWANCE_PCT;var v=parseFloat(s);return isNaN(v)?WITHDRAWAL_ALLOWANCE_PCT:Math.max(0,v);}catch(e){return WITHDRAWAL_ALLOWANCE_PCT;}}
 function setWithdrawalAllowancePct(v){try{localStorage.setItem("tf-allowance-pct",String(v));}catch(e){}}
-// CHANGED: User-toggleable enable/disable for the allowance feature. When disabled, no allowance
-// is suggested anywhere and the payout nudge banner won't fire. Defaults to enabled.
 function getAllowanceEnabled(){try{var v=localStorage.getItem("tf-allowance-enabled");return v===null||v==="1";}catch(e){return true;}}
 function setAllowanceEnabled(on){try{localStorage.setItem("tf-allowance-enabled",on?"1":"0");}catch(e){}}
-// CHANGED: Month-to-date withdrawals (abs sum of negative transfers dated this month).
-function getMonthWithdrawn(){
-  try{
-    var d=new Date();var y=d.getFullYear(),m=d.getMonth();
-    return (loadTransfers()||[]).reduce(function(s,t){
-      var dt=new Date(t.date);if(isNaN(dt.getTime()))return s;
-      if(dt.getFullYear()!==y||dt.getMonth()!==m)return s;
-      var a=parseFloat(t.amount)||0;return a<0?s+Math.abs(a):s;
-    },0);
-  }catch(e){return 0;}
-}
-// CHANGED: Monthly withdrawal target the user set in Goals.
+function getAllowanceSince(){try{var v=parseFloat(localStorage.getItem("tf-allowance-since"));return isNaN(v)?0:v;}catch(e){return 0;}}
+function setAllowanceSinceNow(){try{localStorage.setItem("tf-allowance-since",String(Date.now()));}catch(e){}}
+function clearAllowanceSince(){try{localStorage.removeItem("tf-allowance-since");}catch(e){}}
+
 function getMonthlyWithdrawalTarget(){try{var g=JSON.parse(localStorage.getItem(GOALS_KEY)||"{}");return parseFloat(g.monthlyWithdrawals)||0;}catch(e){return 0;}}
 function getLastWithdrawalDate(){
   var ws=loadTransfers().filter(function(t){return String(t.type||"").toLowerCase()==="withdrawal";});
@@ -1493,70 +1496,65 @@ function getLastWithdrawalDate(){
   ws.forEach(function(t){var d=new Date(t.date);if(!isNaN(d.getTime())){if(!latest||d>latest)latest=d;}});
   return latest;
 }
-// Undrawn profit — CHANGED: computed as a chronological "profit pool". We walk realized profit
-// events and withdrawals in time order; profit adds to the pool, each withdrawal DRAWS from it but
-// only down to zero. This does two things the prior versions got wrong:
-//   • A partial withdrawal leaves the remainder (fixed the reset-to-0-on-any-withdrawal bug).
-//   • A withdrawal larger than the profit available at that moment only consumes the profit — the
-//     excess is returned CAPITAL and does NOT eat into future profit. Simply doing
-//     (lifetimeProfit − allWithdrawals) counted capital-return withdrawals against profit and made
-//     the allowance wildly wrong (hugely negative or, with different signs, far too high).
-// Deposits never enter the pool (funding isn't profit). Result is the profit you've earned but not
-// yet taken out. Name kept for call-site compatibility.
-function getProfitSinceLastWithdrawal(todayPnL){
-  var events=[];
+
+// The single source of truth: undrawn profit ($). liveTodayPnL is optional and only used as a
+// fallback when today's trades aren't individually readable from storage.
+function getUndrawnProfit(liveTodayPnL){
+  var since=getAllowanceSince();
   var today=todayStr();
-  // Realized profit events (net of fees), timestamped by closedAt.
+  var events=[];
+  // Realized trade P&L, timestamped by closedAt.
+  var todaySeen=false;
   loadJournalRows().forEach(function(r){
-    if(r.date===today)return; // today handled live below
     (r.trades||[]).forEach(function(t){
-      if(t&&t.status!=="open"){
-        var p=tradeNetPnl(t); if(!isNaN(p))events.push({ts:parseFloat(t.closedAt)||0,amt:p,kind:"pnl"});
-      }
+      if(!t||t.status==="open")return;
+      var p=tradeNetPnl(t); if(isNaN(p))return;
+      var ts=parseFloat(t.closedAt)||parseFloat(t.id)||0;
+      if(r.date===today)todaySeen=true;
+      events.push({ts:ts,amt:p,kind:"pnl"});
     });
   });
-  // Live today's closed trades.
+  // Live today's closed trades from active state (may not be in a journal row yet).
   try{
     var s=localStorage.getItem(STORAGE_KEY);
     if(s){
       var st=JSON.parse(s);
       if(st&&st.date===today&&Array.isArray(st.trades)){
         st.trades.forEach(function(t){
-          if(t&&t.status!=="open"){var p=tradeNetPnl(t);if(!isNaN(p))events.push({ts:parseFloat(t.closedAt)||Date.now(),amt:p,kind:"pnl"});}
+          if(!t||t.status==="open")return;
+          // Avoid double-counting if today's row already contributed above.
+          if(todaySeen)return;
+          var p=tradeNetPnl(t); if(isNaN(p))return;
+          events.push({ts:parseFloat(t.closedAt)||Date.now(),amt:p,kind:"pnl"});
         });
+        if(!todaySeen&&st.trades.every(function(t){return !t||t.status==="open";})&&typeof liveTodayPnL==="number"&&!isNaN(liveTodayPnL)&&liveTodayPnL!==0){
+          events.push({ts:Date.now(),amt:liveTodayPnL,kind:"pnl"});
+        }
       }
     }
   }catch(e){}
-  // Withdrawals, timestamped by id (Date.now() at creation) or falling back to the date.
+  // Withdrawals.
   (loadTransfers()||[]).forEach(function(t){
     if(String(t.type||"").toLowerCase()!=="withdrawal")return;
     var amt=Math.abs(parseFloat(t.amount)||0); if(amt<=0)return;
     var ts=parseFloat(t.id)||0; if(!ts){var dd=new Date(t.date);ts=isNaN(dd.getTime())?0:dd.getTime();}
     events.push({ts:ts,amt:amt,kind:"wd"});
   });
-  // Chronological pass. Withdrawals before any profit (or exceeding the pool) just floor at 0.
+  // Apply the optional start cutoff, then run the pool in time order.
+  events=events.filter(function(e){return e.ts>=since;});
   events.sort(function(a,b){return a.ts-b.ts;});
   var pool=0;
-  events.forEach(function(e){
-    if(e.kind==="pnl")pool+=e.amt;
-    else pool=Math.max(0,pool-e.amt);
-  });
+  events.forEach(function(e){pool=(e.kind==="pnl")?pool+e.amt:Math.max(0,pool-e.amt);});
   return pool>0?pool:0;
 }
-// Dollar allowance available right now. CHANGED: withdrawals are now gated purely by account growth —
-// the points/rank system no longer controls access. If there's positive profit since the last
-// withdrawal, you can withdraw a flat % of it. Achievements/Challenges are motivational only.
-function getWithdrawalAllowance(todayPnL){
-  // CHANGED: Honor the enable/disable toggle. When disabled, no suggested allowance anywhere.
+// Back-compat alias (older call sites / naming).
+function getProfitSinceLastWithdrawal(liveTodayPnL){return getUndrawnProfit(liveTodayPnL);}
+
+function getWithdrawalAllowance(liveTodayPnL){
   if(!getAllowanceEnabled())return 0;
-  var profit=getProfitSinceLastWithdrawal(todayPnL);
-  if(profit<=0)return 0;
-  // Allowance is a flat % of profit since the last withdrawal — the "counter". It is NOT capped
-  // by the Monthly Withdrawal goal: that goal is a savings plan, and capping to it silently
-  // zeroed the allowance once the goal was exceeded (showing "$0" + a false "no profit" note
-  // even when real profit existed). The monthly goal now only drives the informational 🎯 note
-  // and Home banner, never the allowance amount.
-  return profit*(getWithdrawalAllowancePct()/100);
+  var undrawn=getUndrawnProfit(liveTodayPnL);
+  if(undrawn<=0)return 0;
+  return undrawn*(getWithdrawalAllowancePct()/100);
 }
 // CHANGED: Optional allowance-target notification. The user sets a $ target; when the live allowance
 // reaches it, a banner appears on Home. We persist the target and a "dismissed-at-target" marker so
@@ -9059,17 +9057,22 @@ function SettingsTab(props){
             </>
           );
         })()}
-        {/* CHANGED: Withdrawals are growth-gated — allowance is 30% of profit since last withdrawal. Ranks/points are cosmetic and not referenced here. */}
+        {/* Withdrawal allowance — rebuilt. Suggested = pct% of UNDRAWN PROFIT (profit earned but not
+           yet withdrawn). Recomputes live off the transfers state + liveTotalPnL, so adding a
+           withdrawal updates it immediately without a reload. */}
         {transferDraft.type==="withdrawal"&&(function(){
-          var profit=getProfitSinceLastWithdrawal(props.liveTotalPnL);
-          var allowance=getWithdrawalAllowance(props.liveTotalPnL);
-          var lastDate=getLastWithdrawalDate();
+          // Referencing `transfers` here ties this IIFE to the transfer state, so it recomputes the
+          // moment a withdrawal is added/removed.
+          var _txCount=(transfers||[]).length; void _txCount;
+          var enabled=getAllowanceEnabled();
+          var undrawn=getUndrawnProfit(props.liveTotalPnL);
+          var allowance=enabled?undrawn*(getWithdrawalAllowancePct()/100):0;
           var entered=Math.abs(parseFloat(transferDraft.amount)||0);
-          // CHANGED: Require the difference to be at least 1¢ — float precision was making
-          // exact-equal withdrawals trigger "Over allowance by $0" warnings.
           var overAllowance=allowance>0&&(entered-allowance)>=0.01;
           var unlocked=allowance>0;
+          var since=getAllowanceSince();
           var fmt=function(n){return "$"+Math.round(n).toLocaleString();};
+          if(!enabled)return null;
           return (
             <div style={{marginBottom:12,padding:"10px 12px",background:unlocked?"#0f1f2a":"#1c1108",border:"1px solid "+(unlocked?"#166534":"#713f12"),borderRadius:8}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -9077,38 +9080,25 @@ function SettingsTab(props){
                 <span style={{fontSize:16,fontWeight:800,color:unlocked?"#22c55e":"#f59e0b"}}>{fmt(allowance)}</span>
               </div>
               <div style={{fontSize:11,color:"#64748b",marginTop:5,lineHeight:1.5}}>
-                {getWithdrawalAllowancePct()}% of {fmt(Math.max(0,profit))} profit{lastDate?" since last withdrawal":" (all-time)"}
+                {getWithdrawalAllowancePct()}% of {fmt(undrawn)} undrawn profit{since>0?" (since reset)":""}
               </div>
-              {(function(){
-                // CHANGED: Notify when allowance meets/exceeds the Monthly Withdrawal goal.
-                var mwt=0;try{var g=JSON.parse(localStorage.getItem(GOALS_KEY)||"{}");mwt=parseFloat(g.monthlyWithdrawals)||0;}catch(e){}
-                if(!(mwt>0&&allowance>=mwt))return null;
-                return <div style={{marginTop:8,padding:"7px 10px",background:"#14532d",border:"1px solid #22c55e",borderRadius:6,display:"flex",alignItems:"center",gap:8}}>
-                  <span style={{fontSize:14}}>🎯</span>
-                  <span style={{fontSize:12,color:"#86efac",fontWeight:600,lineHeight:1.4}}>Allowance covers your ${Math.round(mwt).toLocaleString()} monthly withdrawal goal — you're clear to cash out.</span>
-                </div>;
-              })()}
-              {allowance<=0&&<div style={{fontSize:11,color:"#fdba74",marginTop:5}}>No profit{lastDate?" since your last withdrawal":""} yet, so the suggested allowance is $0. You can still log this — it's just a guide.</div>}
-              {overAllowance&&<div style={{fontSize:11,color:"#fca5a5",marginTop:5}}>Over allowance by {fmt(entered-allowance)} — you can still log it, but it exceeds the {getWithdrawalAllowancePct()}% guide.</div>}
-              {/* CHANGED: Inline editable % of profit. Updates the allowance readout immediately
-                 via local state mirror, persists on Set. The home banner is now driven by the
-                 Monthly Withdrawal goal, not a separate $ target. */}
+              {allowance<=0&&<div style={{fontSize:11,color:"#fdba74",marginTop:5}}>No undrawn profit yet, so the suggested allowance is $0. You can still log this — it's just a guide.</div>}
+              {overAllowance&&<div style={{fontSize:11,color:"#fca5a5",marginTop:5}}>Over allowance by {fmt(entered-allowance)} — you can still log it, but it exceeds the {getWithdrawalAllowancePct()}% guide. A partial withdrawal leaves the rest available.</div>}
               <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid #1e293b44"}}>
-                {/* CHANGED: Enable/disable allowance entirely. When off, the suggested allowance
-                   reads 0 everywhere and the payout nudge stops firing. */}
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
                   <label style={{fontSize:11,color:"#94a3b8",fontWeight:600}}>Allowance suggestions</label>
-                  <button onClick={function(){setAllowanceEnabled(!getAllowanceEnabled());if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"3px 10px",background:getAllowanceEnabled()?"#14532d":"#1e293b",border:"1px solid "+(getAllowanceEnabled()?"#22c55e":"#334155"),borderRadius:4,color:getAllowanceEnabled()?"#86efac":"#94a3b8",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{getAllowanceEnabled()?"On":"Off"}</button>
+                  <button onClick={function(){setAllowanceEnabled(!getAllowanceEnabled());if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"3px 10px",background:"#14532d",border:"1px solid #22c55e",borderRadius:4,color:"#86efac",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>On</button>
                 </div>
-                {getAllowanceEnabled()&&<>
-                  <label style={{fontSize:11,color:"#94a3b8",fontWeight:600,display:"block",marginBottom:5}}>Allowance % of profit</label>
-                  <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                    <input type="number" value={allowancePctInput} onChange={function(e){var v=e.target.value;setAllowancePctInput(v);var n=parseFloat(v);if(!isNaN(n)&&n>0)setWithdrawalAllowancePct(n);}} placeholder="30" style={Object.assign({},fld,{width:80,flex:"none"})}/>
-                    <span style={{fontSize:13,color:"#64748b"}}>%</span>
-                    <button onClick={function(){var n=parseFloat(allowancePctInput);if(!isNaN(n)&&n>0){setWithdrawalAllowancePct(n);}if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"7px 14px",background:"#4f46e5",border:"none",borderRadius:5,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>Set</button>
-                  </div>
-                  <div style={{fontSize:11,color:"#64748b",marginTop:6}}>Banner on Home fires when your monthly withdrawal goal is hit.</div>
-                </>}
+                <label style={{fontSize:11,color:"#94a3b8",fontWeight:600,display:"block",marginBottom:5}}>Allowance % of undrawn profit</label>
+                <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                  <input type="number" value={allowancePctInput} onChange={function(e){var v=e.target.value;setAllowancePctInput(v);var n=parseFloat(v);if(!isNaN(n)&&n>0)setWithdrawalAllowancePct(n);}} placeholder="40" style={Object.assign({},fld,{width:80,flex:"none"})}/>
+                  <span style={{fontSize:13,color:"#64748b"}}>%</span>
+                  <button onClick={function(){var n=parseFloat(allowancePctInput);if(!isNaN(n)&&n>0){setWithdrawalAllowancePct(n);}if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"7px 14px",background:"#4f46e5",border:"none",borderRadius:5,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>Set</button>
+                </div>
+                <div style={{display:"flex",gap:8,alignItems:"center",marginTop:8,flexWrap:"wrap"}}>
+                  <span style={{fontSize:11,color:"#64748b"}}>Counter tracks profit earned minus profit withdrawn.</span>
+                  <button onClick={function(){if(window.confirm(since>0?"Clear the reset point? The allowance will count your full trading history again.":"Start the allowance counter from now? Profit and withdrawals before this moment will be ignored, so the counter begins at $0 of undrawn profit."))(function(){if(since>0)clearAllowanceSince();else setAllowanceSinceNow();if(props.bumpReloadKey)props.bumpReloadKey();})();}} style={{padding:"4px 10px",background:"none",border:"1px solid #475569",borderRadius:5,color:"#94a3b8",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>{since>0?"Clear reset":"Reset counter to now"}</button>
+                </div>
               </div>
             </div>
           );
