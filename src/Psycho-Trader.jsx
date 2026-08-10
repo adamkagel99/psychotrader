@@ -1493,52 +1493,41 @@ function getLastWithdrawalDate(){
   ws.forEach(function(t){var d=new Date(t.date);if(!isNaN(d.getTime())){if(!latest||d>latest)latest=d;}});
   return latest;
 }
-// Profit-since-last-withdrawal — CHANGED: timestamp-based, using each withdrawal's `id`
-// (which is Date.now() at creation) as the cutoff. Trades' `closedAt` is also a timestamp, so we
-// simply sum the P&L of every closed trade whose closedAt is strictly after the latest withdrawal
-// timestamp. This correctly handles same-day withdraw-then-trade scenarios and stays robust even
-// if the user has historically over-withdrawn (the counter resets at each withdrawal).
+// Undrawn profit — CHANGED: this is now "profit you haven't withdrawn yet", not "profit since the
+// last withdrawal timestamp". The old version summed only trades closed AFTER the most recent
+// withdrawal, so ANY withdrawal — even $1 of a much larger suggested allowance — reset the base to
+// $0 and discarded the remainder. Now it's cumulative realized profit minus cumulative withdrawals
+// (deposits don't count as profit and don't reduce it), so taking less than suggested leaves the
+// remainder available and the allowance keeps reflecting it. Never negative (over-withdrawing past
+// profit floors at 0). Kept the name for call-site compatibility.
 function getProfitSinceLastWithdrawal(todayPnL){
-  var ws=loadTransfers().filter(function(t){return String(t.type||"").toLowerCase()==="withdrawal";});
-  var cutoff=0;
-  ws.forEach(function(t){var id=parseFloat(t.id)||0;if(id>cutoff)cutoff=id;});
-  // No withdrawals yet → all-time profit applies. Fall back to lifetime pnl + live today pnl.
-  if(cutoff===0){
-    var rows=loadJournalRows();
-    var today=todayStr();
-    var sum=0;
-    rows.forEach(function(r){if(r.date===today)return;sum+=entryNetPnl(r);});
-    if(typeof todayPnL==="number"&&!isNaN(todayPnL))sum+=todayPnL;
-    return sum;
-  }
-  // Sum closed-trade pnl across all journal rows where closedAt > cutoff.
-  var sum=0;
+  var transfers=loadTransfers()||[];
+  var withdrawnTotal=transfers.reduce(function(s,t){
+    if(String(t.type||"").toLowerCase()!=="withdrawal")return s;
+    var a=parseFloat(t.amount)||0; // withdrawals are stored negative
+    return s+Math.abs(a);
+  },0);
+  // Total realized profit across all closed trades (net of fees), plus today's live P&L.
+  var totalProfit=0;
   var today=todayStr();
   loadJournalRows().forEach(function(r){
     if(r.date===today)return; // today handled live below
-    (r.trades||[]).forEach(function(t){
-      if(t&&t.status!=="open"){
-        var ca=parseFloat(t.closedAt)||0;
-        if(ca>cutoff)sum+=tradeNetPnl(t);
-      }
-    });
+    (r.trades||[]).forEach(function(t){if(t&&t.status!=="open")totalProfit+=tradeNetPnl(t);});
   });
-  // Live today: load state from localStorage to get closedAt timestamps (todayPnL alone lacks them).
+  var todayCounted=false;
   try{
     var s=localStorage.getItem(STORAGE_KEY);
     if(s){
       var p=JSON.parse(s);
       if(p&&p.date===today&&Array.isArray(p.trades)){
-        p.trades.forEach(function(t){
-          if(t&&t.status!=="open"){
-            var ca=parseFloat(t.closedAt)||0;
-            if(ca>cutoff)sum+=tradeNetPnl(t);
-          }
-        });
+        p.trades.forEach(function(t){if(t&&t.status!=="open")totalProfit+=tradeNetPnl(t);});
+        todayCounted=true;
       }
     }
   }catch(e){}
-  return sum;
+  if(!todayCounted&&typeof todayPnL==="number"&&!isNaN(todayPnL))totalProfit+=todayPnL;
+  var undrawn=totalProfit-withdrawnTotal;
+  return undrawn>0?undrawn:0;
 }
 // Dollar allowance available right now. CHANGED: withdrawals are now gated purely by account growth —
 // the points/rank system no longer controls access. If there's positive profit since the last
@@ -3206,15 +3195,12 @@ function TradeForm(props){
     // CHANGED: When the user switches asset class, clear the pre-trade checklist's checked state.
     setPretradeChecked({});
   },[assetClassId]);
-  // CHANGED: Resolve pre-trade checklist for current asset class + selected setup.
-  var pretradeItems=getPretradeItemsForClass(assetClassId,trade.setup||"");
-  // CHANGED: Skip pretrade checklist gate when editing an existing saved trade.
+  // CHANGED: Pre-trade checklist removed. The form is no longer gated by it — pretradeComplete is
+  // always true so the lock wrapper and Save button stay enabled. (Kept the variable so downstream
+  // references compile without touching each one.) The Pre-MARKET checklist is unaffected.
+  var pretradeItems=[];
   var isExistingTrade=!!(trade.id&&(trade.entries||[]).length>0);
-  var pretradeComplete=isExistingTrade||pretradeItems.length===0||pretradeItems.every(function(it){
-    var checked=!!pretradeChecked[it.key];
-    // Inverted items pass when UNchecked (the question is in negative form like "Are candles overlapping?").
-    return it.inverted?!checked:checked;
-  });
+  var pretradeComplete=true;
   var unitLabel=assetClass.unit;
   var unitLabelSingular=assetClass.unitSingular;
   // CHANGED: Per-asset-class quantity and price labels for leg inputs.
@@ -3331,27 +3317,8 @@ function TradeForm(props){
               <Dropdown value={trade.setup||""} onChange={function(v){upd("setup",v);setPretradeChecked({});}} placeholder="Select setup..." options={[{v:"",l:"Select setup..."}].concat(opts.setup.map(function(s){return {v:s,l:s};}))} style={compactFld}/>
             </div>
           )}
-          {/* CHANGED: Pre-trade checklist for the current asset class. Form below is locked until complete. */}
-          {/* CHANGED: Pre-trade checklist hidden when editing an existing trade. */}
-          {!isExistingTrade&&pretradeItems.length>0&&(
-            <div style={{marginBottom:sectionMb,padding:"10px 12px",background:pretradeComplete?"#0a1f10":"#1c1509",border:"1px solid "+(pretradeComplete?"#166534":"#713f12"),borderRadius:8}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                <span style={{fontSize:11,color:pretradeComplete?"#86efac":"#fdba74",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Pre-Trade Checklist</span>
-                <span style={{fontSize:11,color:pretradeComplete?"#86efac":"#fdba74",fontWeight:600,fontVariantNumeric:"tabular-nums"}}>{(function(){var n=pretradeItems.filter(function(it){var c=!!pretradeChecked[it.key];return it.inverted?!c:c;}).length;return n+"/"+pretradeItems.length;})()}</span>
-              </div>
-              {pretradeItems.map(function(it){
-                var checked=!!pretradeChecked[it.key];
-                var passes=it.inverted?!checked:checked;
-                return (
-                  <label key={it.key} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 0",cursor:"pointer",fontSize:13,color:passes?"#86efac":"#cbd5e1"}}>
-                    <ToggleSwitch checked={checked} onChange={function(v){setPretradeChecked(function(prev){return Object.assign({},prev,{[it.key]:v});});}}/>
-                    <span style={{flex:1}}>{it.label}{it.inverted&&<span style={{fontSize:10,color:"#fdba74",marginLeft:6,fontStyle:"italic"}}>(should NOT apply)</span>}</span>
-                  </label>
-                );
-              })}
-              {!pretradeComplete&&<div style={{fontSize:11,color:"#fdba74",fontStyle:"italic",marginTop:6}}>Complete the checklist to unlock the form.</div>}
-            </div>
-          )}
+          {/* CHANGED: Pre-Trade Checklist removed entirely. The form is no longer gated by a
+             per-trade checklist; only the daily Pre-Market Checklist remains (on the Trades tab). */}
           {/* CHANGED: Lock wrapper. Disables interaction until pre-trade checklist is complete. */}
           <div style={{pointerEvents:pretradeComplete?"auto":"none",opacity:pretradeComplete?1:0.4,transition:"opacity 0.2s"}}>
           {(assetClass.showStrike||assetClass.showExpiry)&&(
