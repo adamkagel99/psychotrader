@@ -4634,16 +4634,14 @@ function DashboardTab(props){
         var threshold=getStreakNudgeThreshold();
         if(streak<threshold)return null;
         if(streakNudgeDismissedAt()>=streak)return null;
-        var allowance=getWithdrawalAllowance(totalPnL);
-        var fmt=function(n){return "$"+Math.round(n).toLocaleString();};
         return (
           <div style={{marginBottom:12,padding:"12px 16px",background:"linear-gradient(135deg,#064e3b,#065f46)",border:"1px solid #10b981",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
             <div style={{minWidth:0}}>
               <div style={{fontSize:13,fontWeight:800,color:"#fff",display:"flex",alignItems:"center",gap:7}}>💰 {streak}-day green streak — pay yourself</div>
-              <div style={{fontSize:11,color:"#a7f3d0",marginTop:3,lineHeight:1.5}}>Lock in some of these gains before greed cranks up size. Suggested withdrawal: {fmt(allowance)}.</div>
+              <div style={{fontSize:11,color:"#a7f3d0",marginTop:3,lineHeight:1.5}}>Lock in some of these gains before greed cranks up size.</div>
             </div>
             <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0}}>
-              {props.onWithdraw&&allowance>0&&<button onClick={function(){props.onWithdraw(Math.round(allowance));}} style={{padding:"6px 12px",background:"#022c22",border:"1px solid #10b981",borderRadius:6,color:"#a7f3d0",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Withdraw →</button>}
+              {props.onWithdraw&&<button onClick={function(){props.onWithdraw("");}} style={{padding:"6px 12px",background:"#022c22",border:"1px solid #10b981",borderRadius:6,color:"#a7f3d0",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Withdraw →</button>}
               <button onClick={function(){dismissStreakNudge(streak);if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"#0a0a0f44",border:"1px solid #065f46",borderRadius:6,color:"#a7f3d0",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Dismiss</button>
             </div>
           </div>
@@ -9055,52 +9053,6 @@ function SettingsTab(props){
               </div>
               {/* CHANGED: Half-size trading toggle moved to Position Sizing Parameters section. */}
             </>
-          );
-        })()}
-        {/* Withdrawal allowance — rebuilt. Suggested = pct% of UNDRAWN PROFIT (profit earned but not
-           yet withdrawn). Recomputes live off the transfers state + liveTotalPnL, so adding a
-           withdrawal updates it immediately without a reload. */}
-        {transferDraft.type==="withdrawal"&&(function(){
-          // Referencing `transfers` here ties this IIFE to the transfer state, so it recomputes the
-          // moment a withdrawal is added/removed.
-          var _txCount=(transfers||[]).length; void _txCount;
-          var enabled=getAllowanceEnabled();
-          var undrawn=getUndrawnProfit(props.liveTotalPnL);
-          var allowance=enabled?undrawn*(getWithdrawalAllowancePct()/100):0;
-          var entered=Math.abs(parseFloat(transferDraft.amount)||0);
-          var overAllowance=allowance>0&&(entered-allowance)>=0.01;
-          var unlocked=allowance>0;
-          var since=getAllowanceSince();
-          var fmt=function(n){return "$"+Math.round(n).toLocaleString();};
-          if(!enabled)return null;
-          return (
-            <div style={{marginBottom:12,padding:"10px 12px",background:unlocked?"#0f1f2a":"#1c1108",border:"1px solid "+(unlocked?"#166534":"#713f12"),borderRadius:8}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <span style={{fontSize:11,color:unlocked?"#86efac":"#fdba74",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>{unlocked?"Suggested allowance":"No allowance yet"}</span>
-                <span style={{fontSize:16,fontWeight:800,color:unlocked?"#22c55e":"#f59e0b"}}>{fmt(allowance)}</span>
-              </div>
-              <div style={{fontSize:11,color:"#64748b",marginTop:5,lineHeight:1.5}}>
-                {getWithdrawalAllowancePct()}% of {fmt(undrawn)} undrawn profit{since>0?" (since reset)":""}
-              </div>
-              {allowance<=0&&<div style={{fontSize:11,color:"#fdba74",marginTop:5}}>No undrawn profit yet, so the suggested allowance is $0. You can still log this — it's just a guide.</div>}
-              {overAllowance&&<div style={{fontSize:11,color:"#fca5a5",marginTop:5}}>Over allowance by {fmt(entered-allowance)} — you can still log it, but it exceeds the {getWithdrawalAllowancePct()}% guide. A partial withdrawal leaves the rest available.</div>}
-              <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid #1e293b44"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                  <label style={{fontSize:11,color:"#94a3b8",fontWeight:600}}>Allowance suggestions</label>
-                  <button onClick={function(){setAllowanceEnabled(!getAllowanceEnabled());if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"3px 10px",background:"#14532d",border:"1px solid #22c55e",borderRadius:4,color:"#86efac",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>On</button>
-                </div>
-                <label style={{fontSize:11,color:"#94a3b8",fontWeight:600,display:"block",marginBottom:5}}>Allowance % of undrawn profit</label>
-                <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                  <input type="number" value={allowancePctInput} onChange={function(e){var v=e.target.value;setAllowancePctInput(v);var n=parseFloat(v);if(!isNaN(n)&&n>0)setWithdrawalAllowancePct(n);}} placeholder="40" style={Object.assign({},fld,{width:80,flex:"none"})}/>
-                  <span style={{fontSize:13,color:"#64748b"}}>%</span>
-                  <button onClick={function(){var n=parseFloat(allowancePctInput);if(!isNaN(n)&&n>0){setWithdrawalAllowancePct(n);}if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"7px 14px",background:"#4f46e5",border:"none",borderRadius:5,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>Set</button>
-                </div>
-                <div style={{display:"flex",gap:8,alignItems:"center",marginTop:8,flexWrap:"wrap"}}>
-                  <span style={{fontSize:11,color:"#64748b"}}>Counter tracks profit earned minus profit withdrawn.</span>
-                  <button onClick={function(){if(window.confirm(since>0?"Clear the reset point? The allowance will count your full trading history again.":"Start the allowance counter from now? Profit and withdrawals before this moment will be ignored, so the counter begins at $0 of undrawn profit."))(function(){if(since>0)clearAllowanceSince();else setAllowanceSinceNow();if(props.bumpReloadKey)props.bumpReloadKey();})();}} style={{padding:"4px 10px",background:"none",border:"1px solid #475569",borderRadius:5,color:"#94a3b8",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>{since>0?"Clear reset":"Reset counter to now"}</button>
-                </div>
-              </div>
-            </div>
           );
         })()}
         {/* Type toggle */}
