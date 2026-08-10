@@ -2889,6 +2889,11 @@ function TradeTile(props){
   // CHANGED: When a grade is explicitly set, ENFORCE its scaled cap — don't fall back to a
   // higher stamped full-size cap. When no grade set, take the higher of the two (legacy fallback).
   var posMax=t.grade?livePosMax:Math.max(stampedPosMax,livePosMax);
+  // CHANGED: The orange "oversized" color now comes from the SAME canonical check that drives the
+  // ⚠ Oversized entry tag and the D score (effectiveViolations), instead of a locally recomputed
+  // posMax. The local version applied the grade multiplier and used the current props.posMax, so a
+  // within-cap trade (no violation, D 100) could still be painted orange — a contradiction.
+  var _isOversized=effectiveViolations(t).indexOf("Oversized entry")>=0;
   var setupChain=[t.setup,t.timeframe,t.candlePattern].filter(function(x){return !!x;});
   var hasSetupInfo=setupChain.length>0;
   var hasTags=emos.length>0||effViolations.length>0;
@@ -2992,7 +2997,7 @@ function TradeTile(props){
           {!isNaN(avgEntry)&&!isNaN(avgExit)&&(
             <div style={{display:"flex",flexDirection:"column",alignItems:"center",flexShrink:0,gap:1}}>
               {pos>0
-                ?<div style={{fontSize:16,fontWeight:700,color:(posMax>0&&pos>posMax)?"#fb923c":"#94a3b8",lineHeight:1,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{fmtPositionDisplay(pos)}</div>
+                ?<div style={{fontSize:16,fontWeight:700,color:_isOversized?"#fb923c":"#94a3b8",lineHeight:1,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{fmtPositionDisplay(pos)}</div>
                 :<div style={{color:"#475569",fontSize:18,fontWeight:600,lineHeight:1}}>→</div>}
               {contractsText&&<div style={{fontSize:13,color:"#64748b",fontWeight:600,letterSpacing:0.2,whiteSpace:"nowrap"}}>{contractsText}</div>}
             </div>
@@ -8769,12 +8774,21 @@ function HelpGuide(){
       <Flow steps={["Pre-market checklist","Commit (per session)","Log trades","Session review","Day summary"]}/>
       <p style={p}>Complete the checklist first — position & risk stay hidden until it's done. Commit to <span style={em}>this session's</span> max trades + setups; it appears 15 min before session start and locks once committed. Cards render in chronological order, grouped by session. Session ends when its window closes OR trade cap is hit; commitment review appears then.</p>
 
-      <div style={section}>The Half-Size Lock</div>
-      <Card color="#7f1d1d">
-        <div style={{fontSize:13,color:"#fca5a5",fontWeight:700,marginBottom:6}}>⚠ Discipline score below threshold</div>
-        <div style={{fontSize:12,color:"#94a3b8",lineHeight:1.55}}>Every day gets scored /100. Rules violated, negative emotions, exceeding commitment → deductions. Fall below the lock threshold (default 85) and <span style={em}>position + risk auto-halve for the next full trading day</span>. Weekend serves as cooldown. Lock is immutable — later recomputes can't undo it. Past days that triggered a lock carry a <span style={em}>⚠ HALF-SIZE TRIGGERED</span> badge in the Day Summary.</div>
+      <div style={section}>Discipline Score</div>
+      <Card color="#334155">
+        <div style={{fontSize:13,color:"#e2e8f0",fontWeight:700,marginBottom:6}}>Day score = average of each trade's D score</div>
+        <div style={{fontSize:12,color:"#94a3b8",lineHeight:1.55}}>Every trade is scored /100 — deductions for rule violations (oversized entry, max risk exceeded) and negative emotions. The day's <span style={em}>DISCIPLINE</span> figure is the <span style={em}>average</span> of those per-trade scores (plus any commitment penalties), so a clean day of many trades reads high instead of collapsing as trades add up. The <span style={em}>D nn</span> badge on a card and the day score always agree — they're the same calculation.</div>
       </Card>
-      <p style={p}>Hard stops (session daily loss/gain limits) and the "Oversized entry" violation scale to the half-size cap. Half-size can also be manually toggled or auto-engaged on weekly/monthly goal hit.</p>
+      <p style={p}>Days whose score falls below your lock threshold (default 85) get a red <span style={em}>D</span> marker on the calendar and a <span style={em}>⚠ DISCIPLINE BROKEN</span> badge in the Day Summary. This is now purely a <span style={em}>marker</span> — it flags the day, it does not change your sizing.</p>
+
+      <div style={section}>Half-Size Trading</div>
+      <Card color="#a16207">
+        <div style={{fontSize:13,color:"#fcd34d",fontWeight:700,marginBottom:6}}>🔒 A tool you turn on — never forced</div>
+        <div style={{fontSize:12,color:"#94a3b8",lineHeight:1.55}}>Half-size halves your position & risk caps for the rest of the month. Toggle it in <span style={em}>Position Sizing Parameters</span>. When you break discipline the app <span style={em}>suggests</span> half-size for the next day via a banner (with a button that jumps to the toggle), and hitting a weekly/monthly P&L goal suggests it too — but nothing auto-halves your size against your will. While it's on, the "Oversized entry" check and session R stops scale to the halved cap, and it applies only to trades taken after you enabled it.</div>
+      </Card>
+
+      <div style={section}>Fees</div>
+      <p style={p}>Set a per-contract commission per asset class. Every P&L in the app — trade cards, Daily Summary, calendar, goals, equity curve, Performance — is <span style={em}>net of fees</span>. Each card shows the fee deducted (e.g. <Chip bg="#0a0a0f" br="#334155" c="#94a3b8">fees −$1.21</Chip>). If you set commissions after logging trades, use <span style={em}>Apply commissions to saved trades</span> in Settings to write fees into the stored history.</p>
 
       <div style={section}>Position Sizing</div>
       <p style={p}>Set <span style={em}>Risk Max % of Balance</span> and <span style={em}>Stop Loss Max %</span>; the app derives position and risk caps at every account tier. Caps then scale by:</p>
@@ -8783,17 +8797,18 @@ function HelpGuide(){
         <span style={{color:"#475569"}}>×</span>
         <Chip bg="#1e1b4b" br="#4338ca" c="#a5b4fc">Session SF</Chip>
         <span style={{color:"#475569"}}>×</span>
-        <Chip bg="#3a1010" br="#7f1d1d" c="#fca5a5">½ if locked</Chip>
+        <Chip bg="#3a2a08" br="#a16207" c="#fcd34d">½ if half-size on</Chip>
       </div>
       <p style={p}>The <span style={em}>Computed</span> readout in Settings, the trade form's Position/Risk display, and the Pre-Market Checklist sizing hint all use the same live calc — no drift.</p>
 
       <div style={section}>Understanding R</div>
       <Card color="#334155">
-        <div style={{fontSize:13,color:"#e2e8f0",fontWeight:700,marginBottom:6}}>R = trade % return ÷ Stop-Loss Max %</div>
-        <div style={{fontSize:12,color:"#94a3b8",lineHeight:1.55}}>R is a size-independent way of scoring a trade. If your Stop Loss Max is 30%, then a stopped-out trade is exactly <span style={em}>−1R</span>, a full-loss (30% down) whether it was full or half size. A trade that runs 60% is +2R. R judges the <span style={em}>quality of the setup</span> (how far price moved vs your planned risk), not how much dollar risk you took.</div>
+        <div style={{fontSize:13,color:"#e2e8f0",fontWeight:700,marginBottom:6}}>Per trade: R = trade % return ÷ Stop-Loss Max %</div>
+        <div style={{fontSize:12,color:"#94a3b8",lineHeight:1.55}}>R is a size-independent way of scoring a trade. If your Stop Loss Max is 30%, a stopped-out trade is exactly <span style={em}>−1R</span> whether full or half size; a trade that runs 60% is +2R. R judges the <span style={em}>quality of the setup</span> (how far price moved vs planned risk), not the dollars risked.</div>
       </Card>
-      <Flow steps={["Stop-Loss Max % from Position Sizing","= 1R unit","Every trade measured in R"]}/>
-      <p style={p}>Where you'll see R: the trade card headline when Hide $ is on, R-multiple histogram, Discipline × Performance scatter, gain/loss stop banner, calendar month totals, session gain/loss stops (expressed in R), and the R Return filter in Journal. Because R uses the % stop threshold rather than a $ figure, historical trades stay comparable even after your risk-max % changes.</p>
+      <p style={p}><span style={em}>Day R</span> is a single figure for the whole day: the day's <span style={em}>net P&L ÷ one risk unit</span> (the 1× risk you started the day with). It is not the sum of each trade's R — mixing full-size and half-size trades made that sum misleading, so a near-flat day could read as +20R. Day R now tracks the day's actual result.</p>
+      <Flow steps={["Day net P&L","÷ day-start risk unit","= Day R"]}/>
+      <p style={p}>Where you'll see R: the trade card headline when Hide $ is on, the R-multiple histogram, the Discipline × Performance scatter, the gain/loss stop banner, calendar month totals, and the R Return filter in Journal.</p>
 
       <div style={section}>Session Strategy</div>
       <p style={p}>Define sessions (e.g. Options Morning, Options Afternoon) with times, size fraction, max trades, R stops, days-of-week. Each trade auto-attributes by its <span style={em}>actual start time</span>. Off-hours trades bucket into <Chip bg="#1c1408" br="#a16207" c="#fcd34d">Out of Session · Before ⟨session⟩</Chip> or <Chip bg="#1c1408" br="#a16207" c="#fcd34d">Out of Session · After</Chip> — chronologically placed in the journal.</p>
@@ -8812,11 +8827,20 @@ function HelpGuide(){
       <Row icon="🔍" title="Sort &amp; Filter">Persist across reloads. Filter by direction, setup, timeframe, grade, emotion, violations (including <Chip bg="#111118" br="#334155" c="#cbd5e1">None</Chip>), and R-return buckets.</Row>
       <Row icon="🗂" title="All Trades">Cross-day view grouped by session under each date. Filter chip shows result count + summed P&L.</Row>
 
+      <div style={section}>Grading Setups</div>
+      <p style={p}>Grade each trade <Chip bg="#14532d" br="#22c55e" c="#86efac">A</Chip> or <Chip bg="#713f12" br="#f59e0b" c="#fcd34d">B</Chip> against criteria you define in <span style={em}>Setup Grade Criteria</span>. A is your ideal execution; B is valid but imperfect. Grade shows on the card and feeds the discipline score and Performance breakdowns.</p>
+
+      <div style={section}>Reading the Heatmap</div>
+      <p style={p}>The <span style={em}>Session × Day</span> grid on Performance colors by <span style={em}>P&L</span> — green for profitable slots, red for losing ones, intensity by size relative to your biggest slot. The cell shows that slot's P&L; tap it for trade count and win rate. Rows are your sessions, columns Mon–Fri.</p>
+
       <div style={section}>Economic Events</div>
-      <p style={p}>Import a batch (Investing.com CSV) once a week; events persist <span style={em}>Sunday through Saturday</span> and auto-clear on the next Sunday. Filter by currency + impact — both persist independently across imports.</p>
+      <p style={p}>Import a batch (Investing.com CSV) once a week; events persist <span style={em}>Sunday through Saturday</span> and auto-clear on the next Sunday. Filter by currency + impact — both persist independently across imports, and the Journal shows each day's events using those same filters.</p>
 
       <div style={section}>Withdrawals</div>
-      <p style={p}>Allowance = <span style={em}>configurable %</span> of profit since last withdrawal (default 30%). Toggle allowance suggestions on/off in Balance settings. Transfers list all deposits and withdrawals with running totals.</p>
+      <p style={p}>Allowance = <span style={em}>configurable %</span> of profit since your last withdrawal (default 40%). It's a flat % of profit — no monthly-goal cap. Toggle allowance suggestions on/off in Balance settings. Transfers list all deposits and withdrawals with running totals.</p>
+
+      <div style={section}>Balance</div>
+      <p style={p}>Balance is derived: deposits − withdrawals + net P&L across all journal days. It's never edited directly. To align it with your broker, use <span style={em}>Reset balance</span> in Balance settings — it logs one dated adjustment transfer for the difference, leaving every trade untouched. Note: your broker's "total return" is unrealized + time-weighted and won't match a realized journal; compare against realized P&L.</p>
 
       <div style={section}>Data &amp; Sync</div>
       <p style={p}>Cloud-synced via Supabase — signs you in across devices. Import / Export JSON snapshots in Settings. Some UI state (filters, collapse) stays device-local.</p>
@@ -9667,81 +9691,6 @@ function SettingsTab(props){
         })}
         {/* CHANGED: Add new session button. */}
         <button onClick={addSession} disabled={isStrategyLocked()} style={{width:"100%",padding:"9px",background:"#1e1b4b",border:"1px dashed #4338ca",borderRadius:6,color:"#a5b4fc",fontSize:13,fontWeight:600,cursor:isStrategyLocked()?"not-allowed":"pointer",fontFamily:"inherit",opacity:isStrategyLocked()?0.4:1}}>+ Add Session</button>
-      </SettingsSection>
-
-      <SettingsSection title="Pre-Trade Checklist">
-        <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Per-asset-class checklist shown in the trade form. Assign a Setup to make an item appear only for that setup; leave blank to show for all setups. The form is locked until every visible item is satisfied.</div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:8,marginBottom:10}}>
-          <div>
-            <label style={lbl}>Asset class</label>
-            <Dropdown value={pretradeEditClass} onChange={function(v){setPretradeEditClass(v);}} options={ASSET_CLASS_ORDER.map(function(c){return {v:c,l:ASSET_CLASSES[c].label};})}/>
-          </div>
-          <div>
-            <label style={lbl}>Filter by setup</label>
-            <Dropdown value={pretradeFilterSetup} onChange={function(v){setPretradeFilterSetup(v);}} options={[{v:"",l:"All items"},{v:"__none__",l:"All setups (unassigned)"}].concat(((tradeOptions&&tradeOptions.setup)||[]).map(function(s){return {v:s,l:s};}))}/>
-          </div>
-        </div>
-        {(function(){
-          var allItems=pretradeMap[pretradeEditClass]||[];
-          var setupOpts=(tradeOptions&&tradeOptions.setup)||[];
-          // CHANGED: Filter items by selected setup.
-          // "" = show all · "__none__" = only unassigned · specific setup = that setup PLUS unassigned (all-setups) items, since those apply universally.
-          var items=pretradeFilterSetup===""?allItems:(pretradeFilterSetup==="__none__"?allItems.filter(function(it){return !it.setup;}):allItems.filter(function(it){return !it.setup||it.setup===pretradeFilterSetup;}));
-          return (
-            <div>
-              {pretradeFilterSetup!==""&&(
-                <div style={{fontSize:11,color:"#a5b4fc",marginBottom:8,fontStyle:"italic"}}>Showing {items.length} of {allItems.length} items{pretradeFilterSetup==="__none__"?" (unassigned only)":" for \""+pretradeFilterSetup+"\" (includes all-setups items)"}</div>
-              )}
-              {items.length>0&&(
-                <div style={{display:"grid",gridTemplateColumns:"auto 1fr 90px 110px auto",gap:6,marginBottom:6,alignItems:"center",paddingBottom:6,borderBottom:"1px solid #1e293b"}}>
-                  <span style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Invert</span>
-                  <span style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Item</span>
-                  <span style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Category</span>
-                  <span style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Setup</span>
-                  <span/>
-                </div>
-              )}
-              {items.map(function(item){
-                return (
-                  <div key={item.key} style={{display:"grid",gridTemplateColumns:"auto 1fr 90px 110px auto",gap:6,marginBottom:6,alignItems:"center"}}>
-                    <ToggleSwitch checked={!!item.inverted} onChange={function(v){var ns=allItems.map(function(x){return x.key===item.key?Object.assign({},x,{inverted:v}):x;});var nm=Object.assign({},pretradeMap);nm[pretradeEditClass]=ns;persistPretrade(nm);}}/>
-                    <input value={item.label} onChange={function(e){var v=e.target.value;var ns=allItems.map(function(x){return x.key===item.key?Object.assign({},x,{label:v}):x;});var nm=Object.assign({},pretradeMap);nm[pretradeEditClass]=ns;persistPretrade(nm);}} style={Object.assign({},fld,{padding:"6px 9px",fontSize:13})}/>
-                    <input value={item.cat||""} onChange={function(e){var v=e.target.value;var ns=allItems.map(function(x){return x.key===item.key?Object.assign({},x,{cat:v}):x;});var nm=Object.assign({},pretradeMap);nm[pretradeEditClass]=ns;persistPretrade(nm);}} placeholder="Category" style={Object.assign({},fld,{padding:"6px 9px",fontSize:13})}/>
-                    <Dropdown value={item.setup||""} onChange={function(v){var ns=allItems.map(function(x){return x.key===item.key?Object.assign({},x,{setup:v}):x;});var nm=Object.assign({},pretradeMap);nm[pretradeEditClass]=ns;persistPretrade(nm);}} options={[{v:"",l:"All setups"}].concat(setupOpts.map(function(s){return {v:s,l:s};}))}/>
-                    <button onClick={function(){
-                      setPretradeMap(function(prev){
-                        var arr=(prev[pretradeEditClass]||[]).filter(function(x){return x.key!==item.key;});
-                        var nm=Object.assign({},prev);nm[pretradeEditClass]=arr;
-                        savePretradeChecklist(nm);
-                        return nm;
-                      });
-                    }} aria-label={"Delete "+item.label} style={{padding:"5px 9px",background:"#7f1d1d33",border:"1px solid #7f1d1d",borderRadius:4,color:"#fca5a5",fontSize:13,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>
-                  </div>
-                );
-              })}
-              {items.length===0&&<div style={{fontSize:12,color:"#64748b",fontStyle:"italic",padding:"6px 0"}}>No items yet for this asset class.</div>}
-              {/* Add-item row */}
-              <div style={{display:"grid",gridTemplateColumns:"auto 1fr 90px 110px auto",gap:6,marginTop:10,paddingTop:10,borderTop:"1px solid #1e293b",alignItems:"center"}}>
-                <ToggleSwitch checked={!!newPretradeItem.inverted} onChange={function(v){setNewPretradeItem(function(d){return Object.assign({},d,{inverted:v});});}}/>
-                <input value={newPretradeItem.label} onChange={function(e){setNewPretradeItem(function(d){return Object.assign({},d,{label:e.target.value});});}} placeholder="New item label..." style={Object.assign({},fld,{padding:"6px 9px",fontSize:13})}/>
-                <input value={newPretradeItem.cat} onChange={function(e){setNewPretradeItem(function(d){return Object.assign({},d,{cat:e.target.value});});}} placeholder="Category" style={Object.assign({},fld,{padding:"6px 9px",fontSize:13})}/>
-                <Dropdown value={newPretradeItem.setup!==undefined&&newPretradeItem.setup!==""?newPretradeItem.setup:(pretradeFilterSetup&&pretradeFilterSetup!=="__none__"?pretradeFilterSetup:"")} onChange={function(v){setNewPretradeItem(function(d){return Object.assign({},d,{setup:v});});}} options={[{v:"",l:"All setups"}].concat(setupOpts.map(function(s){return {v:s,l:s};}))}/>
-                <button onClick={function(){
-                  var label=(newPretradeItem.label||"").trim();
-                  if(!label)return;
-                  // CHANGED: If a setup filter is active, default the new item to that setup.
-                  var itemSetup=newPretradeItem.setup||((pretradeFilterSetup&&pretradeFilterSetup!=="__none__")?pretradeFilterSetup:"");
-                  var newItem={key:"pt_"+pretradeEditClass+"_"+Date.now()+"_"+Math.random().toString(36).slice(2,6),label:label,cat:newPretradeItem.cat||"",inverted:!!newPretradeItem.inverted,setup:itemSetup};
-                  var arr=(pretradeMap[pretradeEditClass]||[]).concat([newItem]);
-                  var nm=Object.assign({},pretradeMap);nm[pretradeEditClass]=arr;
-                  setPretradeMap(nm);
-                  savePretradeChecklist(nm);
-                  setNewPretradeItem({label:"",cat:"",inverted:false,setup:""});
-                }} style={{padding:"5px 9px",background:"#4f46e5",border:"none",borderRadius:4,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ Add</button>
-              </div>
-            </div>
-          );
-        })()}
       </SettingsSection>
 
       <SettingsSection title="Trade Form Options">
