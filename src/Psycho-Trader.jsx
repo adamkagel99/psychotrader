@@ -1493,41 +1493,55 @@ function getLastWithdrawalDate(){
   ws.forEach(function(t){var d=new Date(t.date);if(!isNaN(d.getTime())){if(!latest||d>latest)latest=d;}});
   return latest;
 }
-// Undrawn profit — CHANGED: this is now "profit you haven't withdrawn yet", not "profit since the
-// last withdrawal timestamp". The old version summed only trades closed AFTER the most recent
-// withdrawal, so ANY withdrawal — even $1 of a much larger suggested allowance — reset the base to
-// $0 and discarded the remainder. Now it's cumulative realized profit minus cumulative withdrawals
-// (deposits don't count as profit and don't reduce it), so taking less than suggested leaves the
-// remainder available and the allowance keeps reflecting it. Never negative (over-withdrawing past
-// profit floors at 0). Kept the name for call-site compatibility.
+// Undrawn profit — CHANGED: computed as a chronological "profit pool". We walk realized profit
+// events and withdrawals in time order; profit adds to the pool, each withdrawal DRAWS from it but
+// only down to zero. This does two things the prior versions got wrong:
+//   • A partial withdrawal leaves the remainder (fixed the reset-to-0-on-any-withdrawal bug).
+//   • A withdrawal larger than the profit available at that moment only consumes the profit — the
+//     excess is returned CAPITAL and does NOT eat into future profit. Simply doing
+//     (lifetimeProfit − allWithdrawals) counted capital-return withdrawals against profit and made
+//     the allowance wildly wrong (hugely negative or, with different signs, far too high).
+// Deposits never enter the pool (funding isn't profit). Result is the profit you've earned but not
+// yet taken out. Name kept for call-site compatibility.
 function getProfitSinceLastWithdrawal(todayPnL){
-  var transfers=loadTransfers()||[];
-  var withdrawnTotal=transfers.reduce(function(s,t){
-    if(String(t.type||"").toLowerCase()!=="withdrawal")return s;
-    var a=parseFloat(t.amount)||0; // withdrawals are stored negative
-    return s+Math.abs(a);
-  },0);
-  // Total realized profit across all closed trades (net of fees), plus today's live P&L.
-  var totalProfit=0;
+  var events=[];
   var today=todayStr();
+  // Realized profit events (net of fees), timestamped by closedAt.
   loadJournalRows().forEach(function(r){
     if(r.date===today)return; // today handled live below
-    (r.trades||[]).forEach(function(t){if(t&&t.status!=="open")totalProfit+=tradeNetPnl(t);});
+    (r.trades||[]).forEach(function(t){
+      if(t&&t.status!=="open"){
+        var p=tradeNetPnl(t); if(!isNaN(p))events.push({ts:parseFloat(t.closedAt)||0,amt:p,kind:"pnl"});
+      }
+    });
   });
-  var todayCounted=false;
+  // Live today's closed trades.
   try{
     var s=localStorage.getItem(STORAGE_KEY);
     if(s){
-      var p=JSON.parse(s);
-      if(p&&p.date===today&&Array.isArray(p.trades)){
-        p.trades.forEach(function(t){if(t&&t.status!=="open")totalProfit+=tradeNetPnl(t);});
-        todayCounted=true;
+      var st=JSON.parse(s);
+      if(st&&st.date===today&&Array.isArray(st.trades)){
+        st.trades.forEach(function(t){
+          if(t&&t.status!=="open"){var p=tradeNetPnl(t);if(!isNaN(p))events.push({ts:parseFloat(t.closedAt)||Date.now(),amt:p,kind:"pnl"});}
+        });
       }
     }
   }catch(e){}
-  if(!todayCounted&&typeof todayPnL==="number"&&!isNaN(todayPnL))totalProfit+=todayPnL;
-  var undrawn=totalProfit-withdrawnTotal;
-  return undrawn>0?undrawn:0;
+  // Withdrawals, timestamped by id (Date.now() at creation) or falling back to the date.
+  (loadTransfers()||[]).forEach(function(t){
+    if(String(t.type||"").toLowerCase()!=="withdrawal")return;
+    var amt=Math.abs(parseFloat(t.amount)||0); if(amt<=0)return;
+    var ts=parseFloat(t.id)||0; if(!ts){var dd=new Date(t.date);ts=isNaN(dd.getTime())?0:dd.getTime();}
+    events.push({ts:ts,amt:amt,kind:"wd"});
+  });
+  // Chronological pass. Withdrawals before any profit (or exceeding the pool) just floor at 0.
+  events.sort(function(a,b){return a.ts-b.ts;});
+  var pool=0;
+  events.forEach(function(e){
+    if(e.kind==="pnl")pool+=e.amt;
+    else pool=Math.max(0,pool-e.amt);
+  });
+  return pool>0?pool:0;
 }
 // Dollar allowance available right now. CHANGED: withdrawals are now gated purely by account growth —
 // the points/rank system no longer controls access. If there's positive profit since the last
