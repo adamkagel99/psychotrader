@@ -875,7 +875,17 @@ function getFocusStates(settings){
   });
   return out;
 }
-function defaultSettings(){return {accountSize:0,positionMin:0,positionMax:0,riskMin:0,riskMax:0,gainMultiplier:5,timezone:"America/Los_Angeles",sessions:defaultSessionsForTz("America/Los_Angeles"),tradingWindows:[{start:60,end:1020}],slippagePct:20,positionMaxPct:7.5,positionMaxDollar:500,riskMaxPct:33,riskMaxDollar:165,sizingMode:"pct",hideDollarPnL:false,enabledAssetClasses:defaultEnabledAssetClasses(),assetClassSettings:defaultAssetClassSettings(),defaultAssetClass:"options",defaultInstruments:{},focusStates:defaultFocusStates()};}
+function defaultSettings(){return {accountSize:0,positionMin:0,positionMax:0,riskMin:0,riskMax:0,gainMultiplier:5,timezone:"America/Los_Angeles",sessions:defaultSessionsForTz("America/Los_Angeles"),tradingWindows:[{start:60,end:1020}],slippagePct:20,positionMaxPct:7.5,positionMaxDollar:500,riskMaxPct:33,riskMaxDollar:165,sizingMode:"pct",hideDollarPnL:false,enabledAssetClasses:defaultEnabledAssetClasses(),assetClassSettings:defaultAssetClassSettings(),defaultAssetClass:"options",defaultInstruments:{},focusStates:defaultFocusStates(),enabledGrades:["A","B"]};}
+// Grade metadata — order + colors. C exists for legacy trades but is off by default.
+var ALL_GRADES=["A","B","C"];
+var GRADE_COLORS={A:"#22c55e",B:"#f59e0b",C:"#ef4444"};
+// Which grades are enabled (shown in the trade form + criteria editor). Defaults to A/B. Any grade
+// already used by an existing trade is implicitly kept visible where relevant so history stays legible.
+function getEnabledGrades(settings){
+  var e=settings&&settings.enabledGrades;
+  if(Array.isArray(e))return ALL_GRADES.filter(function(g){return e.indexOf(g)>=0;});
+  return ["A","B"];
+}
 
 var HIDE_DOLLAR_PNL=false;
 function setHideDollarPnL(v){HIDE_DOLLAR_PNL=!!v;}
@@ -3380,7 +3390,7 @@ function TradeForm(props){
               <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5,flex:1}}>
                 {/* CHANGED: C grade removed from the picker (A/B only). Scoring logic for C is kept
                    elsewhere so any pre-existing C-graded trades still render and score correctly. */}
-                {["A","B"].map(function(g){return <button key={g} onClick={function(){upd("grade",g);}} style={{width:"100%",padding:"10px 12px",background:trade.grade===g?(g==="A"?"#14532d":"#713f12"):"#0a0a0f",border:"1px solid "+(trade.grade===g?(g==="A"?"#22c55e":"#f59e0b"):"#334155"),borderRadius:8,color:trade.grade===g?"#fff":"#64748b",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",boxSizing:"border-box"}}>{g}</button>;})}
+                {getEnabledGrades(settings).map(function(g){var gc=GRADE_COLORS[g];return <button key={g} onClick={function(){upd("grade",g);}} style={{width:"100%",padding:"10px 12px",background:trade.grade===g?(g==="A"?"#14532d":g==="B"?"#713f12":"#7f1d1d"):"#0a0a0f",border:"1px solid "+(trade.grade===g?gc:"#334155"),borderRadius:8,color:trade.grade===g?"#fff":"#64748b",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",boxSizing:"border-box"}}>{g}</button>;})}
               </div>
               {(function(){
                 var gc=settings&&settings.gradeCriteria;
@@ -9251,12 +9261,33 @@ function SettingsTab(props){
       </SettingsSection>
 
       <SettingsSection title="Setup Grade Criteria">
-        <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Checklist items shown below the A/B/C buttons in the trade form when a grade is selected. Each item is a visual reminder of what qualifies each grade.</div>
-        {["A","B","C"].map(function(g){
+        <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Turn each grade on or off, and define the checklist items shown below the grade buttons in the trade form. Only enabled grades appear in the form.</div>
+        {/* Per-grade enable toggles */}
+        {(function(){
+          var enabled=getEnabledGrades(settings);
+          return <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+            {ALL_GRADES.map(function(g){
+              var on=enabled.indexOf(g)>=0;
+              var color=GRADE_COLORS[g];
+              function toggleGrade(){
+                setSettings(function(s){
+                  var cur=getEnabledGrades(s);
+                  var next=on?cur.filter(function(x){return x!==g;}):ALL_GRADES.filter(function(x){return cur.indexOf(x)>=0||x===g;});
+                  if(next.length===0)return s; // never allow zero grades
+                  return Object.assign({},s,{enabledGrades:next});
+                });
+              }
+              return <button key={g} onClick={toggleGrade} style={{padding:"7px 14px",background:on?(g==="A"?"#14532d":g==="B"?"#713f12":"#7f1d1d"):"#0a0a0f",border:"1px solid "+(on?color:"#334155"),borderRadius:8,color:on?"#fff":"#64748b",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:6}}>
+                <span>{g}</span><span style={{fontSize:10,fontWeight:600,color:on?color:"#475569"}}>{on?"ON":"OFF"}</span>
+              </button>;
+            })}
+          </div>;
+        })()}
+        {getEnabledGrades(settings).map(function(g){
           var gc=(settings&&settings.gradeCriteria)||{};
           var raw=gc[g];
           var items=Array.isArray(raw)?raw:(typeof raw==="string"&&raw?raw.split(/\r?\n/).map(function(x){return x.trim();}).filter(Boolean):[]);
-          var color=g==="A"?"#22c55e":g==="B"?"#f59e0b":"#ef4444";
+          var color=GRADE_COLORS[g];
           function update(next){setSettings(function(s){var n=Object.assign({},s.gradeCriteria||{});n[g]=next;return Object.assign({},s,{gradeCriteria:n});});}
           return <div key={g} style={{marginBottom:14,paddingBottom:12,borderBottom:"1px solid #1e293b"}}>
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
