@@ -887,6 +887,30 @@ function getEnabledGrades(settings){
   return ["A","B"];
 }
 
+// Grade criteria are keyed PER SETUP: settings.gradeCriteria[setupName][grade] = [items].
+// The old shape was flat — settings.gradeCriteria[grade] = [items] (shared across all setups).
+// isFlatGradeCriteria detects the legacy flat shape so we can migrate it once (copying the shared
+// lists onto every existing setup) and so readers can fall back gracefully.
+function toCriteriaList(raw){
+  if(Array.isArray(raw))return raw.slice();
+  if(typeof raw==="string"&&raw)return raw.split(/\r?\n/).map(function(x){return x.trim();}).filter(Boolean);
+  return [];
+}
+function isFlatGradeCriteria(gc){
+  if(!gc||typeof gc!=="object")return false;
+  // Flat if it has grade keys (A/B/C) at the top level.
+  return ALL_GRADES.some(function(g){return Object.prototype.hasOwnProperty.call(gc,g);});
+}
+// Criteria list for a given setup + grade. Returns [] when setup is empty or has no list.
+function getSetupGradeCriteria(settings,setup,grade){
+  var gc=settings&&settings.gradeCriteria;
+  if(!gc||!setup||!grade)return [];
+  if(isFlatGradeCriteria(gc))return toCriteriaList(gc[grade]); // legacy: shared list applies to all setups
+  var perSetup=gc[setup];
+  if(!perSetup)return [];
+  return toCriteriaList(perSetup[grade]);
+}
+
 var HIDE_DOLLAR_PNL=false;
 function setHideDollarPnL(v){HIDE_DOLLAR_PNL=!!v;}
 function fmtMoney(n){if(HIDE_DOLLAR_PNL)return "$•••";var v=Math.abs(parseFloat(n)||0);return "$"+v.toFixed(2);}
@@ -3393,22 +3417,24 @@ function TradeForm(props){
                 {getEnabledGrades(settings).map(function(g){var gc=GRADE_COLORS[g];return <button key={g} onClick={function(){upd("grade",g);}} style={{width:"100%",padding:"10px 12px",background:trade.grade===g?(g==="A"?"#14532d":g==="B"?"#713f12":"#7f1d1d"):"#0a0a0f",border:"1px solid "+(trade.grade===g?gc:"#334155"),borderRadius:8,color:trade.grade===g?"#fff":"#64748b",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",boxSizing:"border-box"}}>{g}</button>;})}
               </div>
               {(function(){
-                var gc=settings&&settings.gradeCriteria;
-                if(!trade.grade||!gc)return null;
-                var raw=gc[trade.grade];
-                var items=Array.isArray(raw)?raw:(typeof raw==="string"&&raw?raw.split(/\r?\n/).map(function(x){return x.trim();}).filter(Boolean):[]);
+                // CHANGED: Grade criteria are now per-setup. Show nothing until BOTH a setup and a
+                // grade are chosen; the checklist is the criteria defined for that setup + grade.
+                if(!trade.grade||!trade.setup)return null;
+                var items=getSetupGradeCriteria(settings,trade.setup,trade.grade);
                 if(items.length===0)return null;
                 var c=trade.grade==="A"?"#22c55e":trade.grade==="B"?"#f59e0b":"#ef4444";
                 var checkedMap=trade.gradeChecked||{};
-                var checked=checkedMap[trade.grade]||[];
+                var ckey=trade.setup+"|"+trade.grade;
+                var checked=checkedMap[ckey]||[];
                 function toggle(ix){
                   var next=checked.slice();
                   var i=next.indexOf(ix);
                   if(i>=0)next.splice(i,1);else next.push(ix);
-                  var nm=Object.assign({},checkedMap);nm[trade.grade]=next;
+                  var nm=Object.assign({},checkedMap);nm[ckey]=next;
                   upd("gradeChecked",nm);
                 }
                 return <div style={{marginTop:5,padding:"7px 10px",background:"#0a0a0f",border:"1px solid #1e293b",borderLeft:"3px solid "+c,borderRadius:5}}>
+                  <div style={{fontSize:9,color:"#475569",letterSpacing:0.5,textTransform:"uppercase",fontWeight:600,marginBottom:4}}>{trade.setup} · {trade.grade} criteria</div>
                   {items.map(function(it,ix){
                     var isChecked=checked.indexOf(ix)>=0;
                     return <div key={ix} onClick={function(){toggle(ix);}} style={{display:"flex",alignItems:"flex-start",gap:7,fontSize:11,color:isChecked?"#64748b":"#cbd5e1",lineHeight:1.4,padding:"3px 0",cursor:"pointer",userSelect:"none",textDecoration:isChecked?"line-through":"none"}}>
@@ -8892,6 +8918,19 @@ function SettingsTab(props){
   function persistDiscScoring(ds){setDiscScoring(ds);saveDisciplineScoring(ds);}
   // CHANGED: Normal accounting — Deposit = +$ (adds to balance), Withdrawal = -$ (subtracts). Account balance now reflects actual capital.
   var [resetTarget,setResetTarget]=useState("10000");
+  // CHANGED: Grade criteria are per-setup now. Track which setup is being edited, and run a one-time
+  // migration copying any legacy flat criteria onto every existing setup so nothing is lost.
+  var [gradeSetup,setGradeSetup]=useState(function(){var ss=(tradeOptions&&tradeOptions.setup)||[];return ss.length?ss[0]:"";});
+  useEffect(function(){
+    var gc=settings&&settings.gradeCriteria;
+    if(!isFlatGradeCriteria(gc))return; // already per-setup (or empty)
+    var setups=(tradeOptions&&tradeOptions.setup)||[];
+    if(setups.length===0)return; // nothing to migrate onto yet
+    var flat={};ALL_GRADES.forEach(function(g){var l=toCriteriaList(gc[g]);if(l.length)flat[g]=l;});
+    var next={};setups.forEach(function(su){next[su]=Object.assign({},flat);});
+    setSettings(function(s){return Object.assign({},s,{gradeCriteria:next});});
+  // eslint-disable-next-line
+  },[]);
   function addTransfer(){
     var rawAmt=parseFloat(transferDraft.amount);
     if(isNaN(rawAmt)||rawAmt===0)return;
@@ -9261,7 +9300,7 @@ function SettingsTab(props){
       </SettingsSection>
 
       <SettingsSection title="Setup Grade Criteria">
-        <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Turn each grade on or off, and define the checklist items shown below the grade buttons in the trade form. Only enabled grades appear in the form.</div>
+        <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Turn each grade on or off, then pick a setup and define its checklist for each grade. In the trade form these appear once both a setup and a grade are selected. Setups are managed under Trade Form Options.</div>
         {/* Per-grade enable toggles */}
         {(function(){
           var enabled=getEnabledGrades(settings);
@@ -9283,25 +9322,50 @@ function SettingsTab(props){
             })}
           </div>;
         })()}
-        {getEnabledGrades(settings).map(function(g){
+        {(function(){
+          var setups=(tradeOptions&&tradeOptions.setup)||[];
+          if(setups.length===0)return <div style={{fontSize:12,color:"#fdba74",padding:"10px 12px",background:"#1c1509",border:"1px solid #713f12",borderRadius:6}}>Add setups under <span style={{fontWeight:700}}>Trade Form Options</span> below to define grade criteria for them.</div>;
+          var active=setups.indexOf(gradeSetup)>=0?gradeSetup:setups[0];
           var gc=(settings&&settings.gradeCriteria)||{};
-          var raw=gc[g];
-          var items=Array.isArray(raw)?raw:(typeof raw==="string"&&raw?raw.split(/\r?\n/).map(function(x){return x.trim();}).filter(Boolean):[]);
-          var color=GRADE_COLORS[g];
-          function update(next){setSettings(function(s){var n=Object.assign({},s.gradeCriteria||{});n[g]=next;return Object.assign({},s,{gradeCriteria:n});});}
-          return <div key={g} style={{marginBottom:14,paddingBottom:12,borderBottom:"1px solid #1e293b"}}>
-            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-              <span style={{fontSize:12,fontWeight:800,color:color,letterSpacing:1}}>{g} GRADE</span>
-              <span style={{fontSize:10,color:"#475569"}}>{items.length} item{items.length===1?"":"s"}</span>
+          var perSetup=(!isFlatGradeCriteria(gc)&&gc[active])||{};
+          function update(g,next){
+            setSettings(function(s){
+              var all=Object.assign({},(!isFlatGradeCriteria(s.gradeCriteria)&&s.gradeCriteria)||{});
+              var one=Object.assign({},all[active]||{});
+              one[g]=next;all[active]=one;
+              return Object.assign({},s,{gradeCriteria:all});
+            });
+          }
+          return <>
+            {/* Setup picker */}
+            <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
+              {setups.map(function(su){
+                var on=su===active;
+                var count=ALL_GRADES.reduce(function(n,g){return n+toCriteriaList(perSetup[g]).length;},0);
+                var cnt=on?count:ALL_GRADES.reduce(function(n,g){return n+getSetupGradeCriteria(settings,su,g).length;},0);
+                return <button key={su} onClick={function(){setGradeSetup(su);}} style={{padding:"6px 12px",background:on?"#1e1b4b":"#0a0a0f",border:"1px solid "+(on?"#4338ca":"#334155"),borderRadius:6,color:on?"#a5b4fc":"#94a3b8",fontSize:12,fontWeight:on?700:500,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:6}}>
+                  <span>{su}</span>{cnt>0&&<span style={{fontSize:10,color:on?"#818cf8":"#475569",fontWeight:600}}>{cnt}</span>}
+                </button>;
+              })}
             </div>
-            {items.map(function(it,ix){return <div key={ix} style={{display:"flex",gap:6,marginBottom:5,alignItems:"center"}}>
-              <span style={{color:color,fontWeight:700,fontSize:14,flexShrink:0}}>☐</span>
-              <input type="text" value={it} onChange={function(e){var v=e.target.value;var nx=items.slice();nx[ix]=v;update(nx);}} style={Object.assign({},fld,{flex:1,padding:"6px 10px",fontSize:12})}/>
-              <button onClick={function(){var nx=items.slice();nx.splice(ix,1);update(nx);}} style={{padding:"4px 10px",background:"transparent",border:"1px solid #334155",borderRadius:5,color:"#64748b",fontSize:14,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>
-            </div>;})}
-            <button onClick={function(){update(items.concat([""]));}} style={{marginTop:2,padding:"5px 12px",background:"transparent",border:"1px dashed "+color,borderRadius:5,color:color,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ Add criterion</button>
-          </div>;
-        })}
+            {getEnabledGrades(settings).map(function(g){
+              var items=toCriteriaList(perSetup[g]);
+              var color=GRADE_COLORS[g];
+              return <div key={g} style={{marginBottom:14,paddingBottom:12,borderBottom:"1px solid #1e293b"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                  <span style={{fontSize:12,fontWeight:800,color:color,letterSpacing:1}}>{g} GRADE</span>
+                  <span style={{fontSize:10,color:"#475569"}}>{items.length} item{items.length===1?"":"s"}</span>
+                </div>
+                {items.map(function(it,ix){return <div key={ix} style={{display:"flex",gap:6,marginBottom:5,alignItems:"center"}}>
+                  <span style={{color:color,fontWeight:700,fontSize:14,flexShrink:0}}>☐</span>
+                  <input type="text" value={it} onChange={function(e){var v=e.target.value;var nx=items.slice();nx[ix]=v;update(g,nx);}} style={Object.assign({},fld,{flex:1,padding:"6px 10px",fontSize:12})}/>
+                  <button onClick={function(){var nx=items.slice();nx.splice(ix,1);update(g,nx);}} style={{padding:"4px 10px",background:"transparent",border:"1px solid #334155",borderRadius:5,color:"#64748b",fontSize:14,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>
+                </div>;})}
+                <button onClick={function(){update(g,items.concat([""]));}} style={{marginTop:2,padding:"5px 12px",background:"transparent",border:"1px dashed "+color,borderRadius:5,color:color,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ Add criterion</button>
+              </div>;
+            })}
+          </>;
+        })()}
       </SettingsSection>
       <SettingsSection title="Discipline Scoring">
         <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Customize how points are awarded or deducted from your daily discipline score (starts at 100).</div>
