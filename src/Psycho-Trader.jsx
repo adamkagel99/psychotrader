@@ -3266,12 +3266,12 @@ function TradeForm(props){
   // references compile without touching each one.) The Pre-MARKET checklist is unaffected.
   var pretradeItems=[];
   var isExistingTrade=!!(trade.id&&(trade.entries||[]).length>0);
-  // CHANGED: If A is the only enabled grade, there's nothing to pick — auto-fill it on new trades.
+  // CHANGED: If A is the only enabled grade, there's nothing to pick — auto-fill it when unset.
   var _egKey=getEnabledGrades(settings).join(",");
   useEffect(function(){
-    if(isExistingTrade||trade.grade)return;
+    if(trade.grade)return;
     if(_egKey==="A")upd("grade","A");
-  },[isExistingTrade,trade.grade,_egKey]);
+  },[trade.grade,_egKey]);
   var pretradeComplete=true;
   var unitLabel=assetClass.unit;
   var unitLabelSingular=assetClass.unitSingular;
