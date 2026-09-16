@@ -1481,6 +1481,28 @@ function tradingDaysThisWeek(){
 function defaultWeeklyFromMonthly(goals,sp){
   return defaultDailyFromMonthly(goals,sp)*tradingDaysThisWeek();
 }
+// CHANGED: Unified goal-target resolver with override precedence: monthly > weekly > daily >
+// auto (from session sizing). Whichever period the user overrides in goal edits becomes the
+// anchor; the other two derive from a single canonical daily figure, so daily × trading-days
+// always reconciles to the weekly and monthly targets.
+//   - monthly overridden  -> daily = monthly/daysThisMonth,  weekly = daily×daysThisWeek
+//   - weekly overridden    -> daily = weekly/daysThisWeek,    monthly = daily×daysThisMonth
+//   - daily overridden     -> weekly = daily×daysThisWeek,    monthly = daily×daysThisMonth
+//   - none                 -> daily = computeDailyTarget(sp)
+function resolveGoalTargets(goals,sp){
+  goals=goals||{};
+  var mp=parseFloat(goals.monthlyPnL)||0;
+  var wp=parseFloat(goals.weeklyPnL)||0;
+  var dp=parseFloat(goals.dailyPnL)||0;
+  var tdM=tradingDaysThisMonth();
+  var tdW=tradingDaysThisWeek();
+  var daily,anchor;
+  if(mp>0){daily=mp/tdM;anchor="monthly";}
+  else if(wp>0){daily=wp/tdW;anchor="weekly";}
+  else if(dp>0){daily=dp;anchor="daily";}
+  else {daily=computeDailyTarget(sp)||0;anchor="auto";}
+  return {daily:daily,weekly:daily*tdW,monthly:daily*tdM,anchor:anchor};
+}
 // Daily target derived from session sizing + gain hard stops. Falls back to 0 if unset.
 function getDailyTarget(){
   try{var s=localStorage.getItem(SETTINGS_KEY);if(!s)return 0;return computeDailyTarget(JSON.parse(s));}catch(e){return 0;}
@@ -1628,7 +1650,8 @@ function getCurrentMonthKey(){var d=new Date();return d.getFullYear()+"-"+String
 function isMonthlyGoalHit(todayLivePnL){
   try{
     var goals=JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};
-    var target=parseFloat(goals.monthlyPnL)||0;
+    var settings=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};
+    var target=resolveGoalTargets(goals,settings).monthly||0;
     if(target<=0)return false;
     var moStart=new Date();moStart=new Date(moStart.getFullYear(),moStart.getMonth(),1);
     var todayKey=todayStr();
@@ -1644,11 +1667,7 @@ function isWeeklyGoalHit(todayLivePnL){
   try{
     var goals=JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};
     var settings=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};
-    var multiplier=parseFloat(goals.weeklyMultiplier)||4;
-    var dailyExplicit=parseFloat(goals.dailyPnL)||0;
-    var dailyAuto=computeDailyTarget(settings)||0;
-    var weeklyExplicit=parseFloat(goals.weeklyPnL)||0;
-    var target=weeklyExplicit>0?weeklyExplicit:((dailyExplicit>0?dailyExplicit:dailyAuto)*multiplier);
+    var target=resolveGoalTargets(goals,settings).weekly||0;
     if(target<=0)return false;
     // Week start = Sunday-anchored week containing today.
     var d=new Date();var dow=d.getDay();var weekStart=new Date(d.getFullYear(),d.getMonth(),d.getDate()-dow);
@@ -1769,7 +1788,8 @@ function dismissMonthGoalBanner(){try{localStorage.setItem("tf-month-goal-banner
 // place to toggle it back off.
 function MonthlyTargetBanner(props){
   var goalsLocal=(function(){try{return JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};}catch(e){return {};}})();
-  var monthlyTarget=parseFloat(goalsLocal.monthlyPnL)||0;
+  var settingsLocal=(function(){try{return JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};}catch(e){return {};}})();
+  var monthlyTarget=resolveGoalTargets(goalsLocal,settingsLocal).monthly||0;
   if(monthlyTarget<=0)return null;
   var moStart=(function(){var d=new Date();return new Date(d.getFullYear(),d.getMonth(),1);})();
   var todayKeyLocal=todayStr();
@@ -2371,15 +2391,15 @@ function CalendarGrid(props){
   // CHANGED: Load goal targets here so the grid can highlight goal-met days/weeks/months.
   var goals=(function(){try{return JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};}catch(e){return {};}})();
   var settingsForTarget=(function(){try{return JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};}catch(e){return {};}})();
-  var dailyTarget=parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(computeDailyTarget(settingsForTarget)||0);
+  var _gt=resolveGoalTargets(goals,settingsForTarget);
+  var dailyTarget=_gt.daily;
   // CHANGED: Per-day daily target scales by that day's stamped riskMax relative to the current
   // full risk setting. Prevents past full-size days from being marked "target met" against a
   // halved threshold (or vice-versa) when half-size mode is toggled later.
-  var fullDailyTarget=parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(defaultDailyFromMonthly(goals,settingsForTarget)||0);
+  var fullDailyTarget=_gt.daily;
   var fullRiskMax=parseFloat(settingsForTarget.riskMax)||0;
-  var weeklyMultiplier=parseFloat(goals.weeklyMultiplier)||5;
-  var weeklyTarget=parseFloat(goals.weeklyPnL)>0?parseFloat(goals.weeklyPnL):defaultWeeklyFromMonthly(goals,settingsForTarget);
-  var monthlyTarget=(parseFloat(goals.monthlyPnL)||0)||((parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(defaultDailyFromMonthly(goals,settingsForTarget)||0))*tradingDaysThisMonth());
+  var weeklyTarget=_gt.weekly;
+  var monthlyTarget=_gt.monthly;
   var now=getPT();
   // CHANGED: When parent provides controlled year/month/onMonthChange, use those instead of
   // local state so a parent (DashboardCalendar) can drive the header readout to match.
@@ -4428,15 +4448,10 @@ function GoalsSnapshot(props){
   var allW=allT.filter(function(t){return tradeNetPnl(t)>0;});
   var oWR=allT.length>0?allW.length/allT.length*100:0;
   var aDisc=rows.length>0?rows.reduce(function(s,e){return s+calcDiscipline(e.trades||[],e.riskMax,e.commitments?{commitments:e.commitments}:{commitment:e.commitment||null});},0)/rows.length:0;
-  var monthlyTarget=(parseFloat(goals.monthlyPnL)||0)||((parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(defaultDailyFromMonthly(goals,settings)||0))*tradingDaysThisMonth());
-  // CHANGED: Daily/weekly default to monthly ÷ trading-days-this-month and daily × 5 respectively.
-  // User overrides in goals.dailyPnL / goals.weeklyPnL take precedence when > 0.
-  var autoDaily=defaultDailyFromMonthly(goals,settings);
-  var weeklyMultiplier=parseFloat(goals.weeklyMultiplier)||5;
-  var _userDaily=parseFloat(goals.dailyPnL)||0;
-  var _userWeekly=parseFloat(goals.weeklyPnL)||0;
-  var dailyTarget=_userDaily>0?_userDaily:autoDaily;
-  var weeklyTarget=_userWeekly>0?_userWeekly:defaultWeeklyFromMonthly(goals,settings);
+  var _gtH=resolveGoalTargets(goals,settings);
+  var monthlyTarget=_gtH.monthly;
+  var dailyTarget=_gtH.daily;
+  var weeklyTarget=_gtH.weekly;
   var winRateTarget=parseFloat(goals.winRate)||0;
   var disciplineTarget=loadDisciplineLockThreshold();
   var accountTarget=parseFloat(goals.accountTarget)||0;
@@ -6396,16 +6411,13 @@ function GoalsTab(props){
   var weekWins=weekTrades.filter(function(t){return tradeNetPnl(t)>0;}).length;
   var wWR=weekTrades.length>0?weekWins/weekTrades.length*100:0;
 
-  var monthlyTarget=(parseFloat(goals.monthlyPnL)||0)||((parseFloat(goals.dailyPnL)>0?parseFloat(goals.dailyPnL):(defaultDailyFromMonthly(goals,settings)||0))*tradingDaysThisMonth());
-  var autoDaily=defaultDailyFromMonthly(goals,settings);
-  var _userDaily=parseFloat(goals.dailyPnL)||0;
-  var _userWeekly=parseFloat(goals.weeklyPnL)||0;
-  var dailyTarget=_userDaily>0?_userDaily:autoDaily;
+  var _gtG=resolveGoalTargets(goals,settings);
+  var monthlyTarget=_gtG.monthly;
+  var dailyTarget=_gtG.daily;
   var gtRiskMax=parseFloat(settings.riskMax)||0;
   function gtRFmt(v){var r=gtRiskMax>0?v/gtRiskMax:0;return (r>=0?"+":"")+r.toFixed(1)+"R";}
   var pnlFmt=HIDE_DOLLAR_PNL?{formatValue:gtRFmt,formatTarget:gtRFmt}:{};
-  var weeklyMultiplier=parseFloat(goals.weeklyMultiplier)||5;
-  var weeklyTarget=_userWeekly>0?_userWeekly:defaultWeeklyFromMonthly(goals,settings);
+  var weeklyTarget=_gtG.weekly;
   var winRateTarget=parseFloat(goals.winRate)||0;
   // CHANGED: Discipline Score goal is tied directly to the discipline LOCK THRESHOLD setting and
   // is no longer user-editable in Goals. The goal is simply: keep your score above the lock bar.
@@ -6489,38 +6501,37 @@ function GoalsTab(props){
           <div style={{fontSize:18,fontWeight:700,color:"#e2e8f0"}}>Edit Goals</div>
           <button onClick={function(){setEditing(false);}} style={{background:"none",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:14,cursor:"pointer",fontFamily:"inherit",padding:"6px 14px"}}>Cancel</button>
         </div>
+        {/* CHANGED: Unified Daily/Weekly/Monthly P&L targets. Set any one — the other two
+            auto-calculate from it. Editing a field makes it the sole anchor and clears the others,
+            so overrides never conflict. Priority for legacy blobs with several set: Monthly > Weekly > Daily. */}
         {(function(){
-          var mp=parseFloat(draft.monthlyPnL)||0;
-          var td=tradingDaysThisMonth();var tw=tradingDaysThisWeek();
-          var ad=mp>0?mp/td:computeDailyTarget(settings);
-          var aw=ad*tw;
-          var src=mp>0?("Monthly $"+Math.round(mp).toLocaleString()+" ÷ "+td+" days · weekly = daily × "+tw+" days this week"):("risk max × session size × gain-stop R · weekly = daily × "+tw+" days this week");
-          return <div style={{padding:"10px 12px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:8,marginBottom:12,fontSize:13,color:"#94a3b8",lineHeight:1.5}}>Auto: Daily <span style={{color:"#22c55e",fontWeight:700}}>${Math.round(ad).toLocaleString()}</span> · Weekly <span style={{color:"#22c55e",fontWeight:700}}>${Math.round(aw).toLocaleString()}</span> ({src}). Override either below; empty falls back to auto.</div>;
-        })()}
-        {/* CHANGED: Daily/Weekly P&L. Empty = auto-computed from Monthly ÷ trading days & daily × multiplier.
-            User can override with an explicit number; the Reset button clears the override. */}
-        {(function(){
-          var monthlyN=parseFloat(draft.monthlyPnL)||0;
-          var autoDaily=monthlyN>0?monthlyN/tradingDaysThisMonth():computeDailyTarget(settings);
-          var autoWeekly=autoDaily*tradingDaysThisWeek();
-          function row(k,label,autoVal){
-            var override=parseFloat(draft[k])>0;
-            return (
-              <div key={k} style={{marginBottom:12}}>
+          var _rt=resolveGoalTargets(draft,settings);
+          var td=tradingDaysThisMonth(),tw=tradingDaysThisWeek();
+          var anchorLabel={monthly:"Monthly",weekly:"Weekly",daily:"Daily",auto:"session sizing"}[_rt.anchor];
+          var rows=[
+            {k:"dailyPnL",label:"Daily P&L Target ($)",val:_rt.daily,anchorKey:"daily"},
+            {k:"weeklyPnL",label:"Weekly P&L Target ($)",val:_rt.weekly,anchorKey:"weekly"},
+            {k:"monthlyPnL",label:"Monthly P&L Target ($)",val:_rt.monthly,anchorKey:"monthly"}
+          ];
+          return <>
+            <div style={{padding:"10px 12px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:8,marginBottom:12,fontSize:12,color:"#94a3b8",lineHeight:1.5}}>Set any one of Daily / Weekly / Monthly — the other two auto-calculate from it. If more than one is set, priority is <span style={{color:"#e2e8f0",fontWeight:600}}>Monthly → Weekly → Daily</span>. Anchored to <span style={{color:"#22c55e",fontWeight:700}}>{anchorLabel}</span> · {td} trading days this month, {tw} this week.</div>
+            {rows.map(function(r){
+              var override=parseFloat(draft[r.k])>0;
+              var isAnchor=_rt.anchor===r.anchorKey;
+              return <div key={r.k} style={{marginBottom:12}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4}}>
-                  <label style={lbl}>{label}</label>
-                  <span style={{fontSize:11,color:"#64748b"}}>auto: ${Math.round(autoVal||0).toLocaleString()}{override?" (overridden)":""}</span>
+                  <label style={lbl}>{r.label}</label>
+                  <span style={{fontSize:11,color:isAnchor?"#22c55e":"#64748b"}}>{isAnchor?"anchor":"auto: $"+Math.round(r.val||0).toLocaleString()}</span>
                 </div>
                 <div style={{display:"flex",gap:6}}>
-                  <input type="number" value={draft[k]||""} onChange={function(e){var v=e.target.value;setDraft(function(g){return Object.assign({},g,{[k]:v});});}} placeholder={"auto: $"+Math.round(autoVal||0)} style={Object.assign({},fld,{flex:1})}/>
-                  {override&&<button onClick={function(){setDraft(function(g){return Object.assign({},g,{[k]:""});});}} style={{padding:"0 12px",background:"transparent",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>Reset</button>}
+                  <input type="number" value={draft[r.k]||""} onChange={function(e){var v=e.target.value;setDraft(function(g){var ng=Object.assign({},g);ng[r.k]=v;if(parseFloat(v)>0){["dailyPnL","weeklyPnL","monthlyPnL"].forEach(function(kk){if(kk!==r.k)ng[kk]="";});}return ng;});}} placeholder={"auto: $"+Math.round(r.val||0)} style={Object.assign({},fld,{flex:1})}/>
+                  {override&&<button onClick={function(){setDraft(function(g){return Object.assign({},g,{[r.k]:""});});}} style={{padding:"0 12px",background:"transparent",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>Reset</button>}
                 </div>
-              </div>
-            );
-          }
-          return <>{row("dailyPnL","Daily P&L Target ($)",autoDaily)}{row("weeklyPnL","Weekly P&L Target ($)",autoWeekly)}</>;
+              </div>;
+            })}
+          </>;
         })()}
-        {[{key:"monthlyPnL",label:"Monthly P&L Target ($)",ph:"e.g. 3000"},{key:"winRate",label:"Win Rate Target (%)",ph:"e.g. 60"},{key:"accountTarget",label:"Account Milestone ($)",ph:"e.g. 5000"},{key:"monthlyWithdrawals",label:"Monthly Withdrawal Target ($)",ph:"e.g. 1000"}].map(function(f){
+        {[{key:"winRate",label:"Win Rate Target (%)",ph:"e.g. 60"},{key:"accountTarget",label:"Account Milestone ($)",ph:"e.g. 5000"},{key:"monthlyWithdrawals",label:"Monthly Withdrawal Target ($)",ph:"e.g. 1000"}].map(function(f){
           return <div key={f.key} style={{marginBottom:12}}><label style={lbl}>{f.label}</label><input type="number" value={draft[f.key]||""} onChange={function(e){var v=e.target.value;setDraft(function(g){return Object.assign({},g,{[f.key]:v});});}} placeholder={f.ph} style={fld}/></div>;
         })}
         <button onClick={saveStandardGoals} style={{width:"100%",padding:"13px",background:"linear-gradient(135deg,#4f46e5,#6366f1)",color:"#fff",border:"none",borderRadius:10,fontSize:16,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginTop:4}}>Save Goals</button>
