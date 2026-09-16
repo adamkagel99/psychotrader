@@ -3266,6 +3266,12 @@ function TradeForm(props){
   // references compile without touching each one.) The Pre-MARKET checklist is unaffected.
   var pretradeItems=[];
   var isExistingTrade=!!(trade.id&&(trade.entries||[]).length>0);
+  // CHANGED: If A is the only enabled grade, there's nothing to pick — auto-fill it on new trades.
+  var _egKey=getEnabledGrades(settings).join(",");
+  useEffect(function(){
+    if(isExistingTrade||trade.grade)return;
+    if(_egKey==="A")upd("grade","A");
+  },[isExistingTrade,trade.grade,_egKey]);
   var pretradeComplete=true;
   var unitLabel=assetClass.unit;
   var unitLabelSingular=assetClass.unitSingular;
@@ -9120,10 +9126,10 @@ function SettingsTab(props){
                   <div style={{fontSize:10,color:"#86efac",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Total Withdrawals</div>
                   <div style={{fontSize:16,fontWeight:700,color:"#e2e8f0",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{fmtUSD(totalWdr)}</div>
                 </div>
-                {(function(){var net=totalDep-totalWdr;return (
+                {(function(){var net=totalWdr-totalDep;return (
                 <div style={{padding:"8px 10px",background:"#0a0a0f",border:"1px solid #4338ca",borderRadius:8}}>
                   <div style={{fontSize:10,color:"#a5b4fc",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Net</div>
-                  <div style={{fontSize:16,fontWeight:700,color:net>=0?"#e2e8f0":"#ef4444",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{(net<0?"−":"")+fmtUSD(Math.abs(net))}</div>
+                  <div style={{fontSize:16,fontWeight:700,color:net>=0?"#22c55e":"#ef4444",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{(net<0?"−":"")+fmtUSD(Math.abs(net))}</div>
                 </div>
                 );})()}
               </div>
