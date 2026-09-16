@@ -9120,6 +9120,12 @@ function SettingsTab(props){
                   <div style={{fontSize:10,color:"#86efac",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Total Withdrawals</div>
                   <div style={{fontSize:16,fontWeight:700,color:"#e2e8f0",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{fmtUSD(totalWdr)}</div>
                 </div>
+                {(function(){var net=totalDep-totalWdr;return (
+                <div style={{padding:"8px 10px",background:"#0a0a0f",border:"1px solid #4338ca",borderRadius:8}}>
+                  <div style={{fontSize:10,color:"#a5b4fc",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Net</div>
+                  <div style={{fontSize:16,fontWeight:700,color:net>=0?"#e2e8f0":"#ef4444",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{(net<0?"−":"")+fmtUSD(Math.abs(net))}</div>
+                </div>
+                );})()}
               </div>
               {/* CHANGED: Half-size trading toggle moved to Position Sizing Parameters section. */}
             </>
