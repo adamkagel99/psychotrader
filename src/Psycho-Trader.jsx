@@ -688,7 +688,7 @@ function getFuturesPointValue(symbol){var s=getFuturesSpec(symbol);return s?s.po
 function getAssetClass(id){return ASSET_CLASSES[id]||ASSET_CLASSES.options;}
 function getDirectionColor(dir){if(!dir)return "#64748b";if(dir==="CALL"||dir==="LONG"||dir==="BUY")return "#22c55e";if(dir==="PUT"||dir==="SHORT"||dir==="SELL")return "#ef4444";return "#64748b";}
 function defaultEnabledAssetClasses(){return {options:true,stocks:false,futures:false,forex:false,crypto:false};}
-function defaultFormSections(){return {timeframe:true,candlePattern:true,indicators:true};}
+function defaultFormSections(){return {timeframe:true,candlePattern:true,indicators:true,grade:true};}
 // CHANGED: Local draft-string input for "Risk Max % of Balance" so typed decimals ("2.", "0.5")
 // don't get clobbered by parent re-renders while the user is mid-typing.
 function RiskMaxBalanceInput(props){
@@ -3408,8 +3408,8 @@ function TradeForm(props){
           <FormSection label="Setup & Analysis" mb={sectionMb} hasContent={!!(trade.direction||trade.setup||trade.timeframe||trade.candlePattern||trade.grade||(trade.emotions||[]).length||(trade.indicators||[]).length)}>
           {/* CHANGED: Setup Grade + Emotional State moved to the top of Setup & Analysis. Grade
              buttons match the height of the emotion dropdown so the row aligns. */}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:rowGap,marginBottom:sectionMb,alignItems:"stretch"}}>
-            <div style={{minWidth:0,display:"flex",flexDirection:"column"}}>
+          <div style={{display:"grid",gridTemplateColumns:formSections.grade!==false?"1fr 1fr":"1fr",gap:rowGap,marginBottom:sectionMb,alignItems:"stretch"}}>
+            {formSections.grade!==false&&<div style={{minWidth:0,display:"flex",flexDirection:"column"}}>
               <label style={lbl}>Setup Grade</label>
               <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5,flex:1}}>
                 {/* CHANGED: C grade removed from the picker (A/B only). Scoring logic for C is kept
@@ -3443,7 +3443,7 @@ function TradeForm(props){
                   })}
                 </div>;
               })()}
-            </div>
+            </div>}
             <div style={{minWidth:0}}>
               <MultiDropdown label="Emotional State" options={opts.emotion} selected={trade.emotions||[]} onChange={function(v){upd("emotions",v);}} negativeOptions={(opts.emotion||[]).filter(function(e){return getEmotionSentiment(e,opts.emotionSentiments||{})==="negative";})}/>
             </div>
@@ -3458,7 +3458,17 @@ function TradeForm(props){
             if(formSections.timeframe!==false)cols.push("1fr");
             return (
               <div style={{display:"grid",gridTemplateColumns:cols.join(" "),gap:rowGap,marginBottom:sectionMb}}>
-                <div><label style={lblCompact}>Direction</label><Dropdown value={trade.direction} onChange={function(v){st(function(p){return Object.assign({},p,doRecalc(p.entries||[],p.exits||[],p.assetClass,p.instrument,v),{direction:v});});}} placeholder="Select" options={[{v:"",l:"Select"}].concat(assetClass.directions.map(function(d){return {v:d,l:d};}))} style={compactFld}/></div>
+                <div><label style={lblCompact}>Direction</label>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}}>
+                    {assetClass.directions.map(function(d){
+                      var isLong=d==="LONG"||d==="BUY"||d==="CALL";
+                      var active=trade.direction===d;
+                      var ac=isLong?"#22c55e":"#ef4444";
+                      var abg=isLong?"#14532d":"#7f1d1d";
+                      return <button key={d} onClick={function(){st(function(p){return Object.assign({},p,doRecalc(p.entries||[],p.exits||[],p.assetClass,p.instrument,d),{direction:d});});}} style={Object.assign({},compactFld,{textAlign:"center",background:active?abg:"#0a0a0f",border:"1px solid "+(active?ac:"#334155"),color:active?"#fff":"#64748b",fontWeight:700,cursor:"pointer",fontFamily:"inherit"})}>{d}</button>;
+                    })}
+                  </div>
+                </div>
                 {showSetupHere&&<div><label style={lblCompact}>Setup</label><Dropdown value={trade.setup} onChange={function(v){upd("setup",v);}} placeholder="Select" options={[{v:"",l:"Select"}].concat(opts.setup.map(function(s){return {v:s,l:s};}))} style={compactFld}/></div>}
                 {formSections.timeframe!==false&&<div><label style={lblCompact}>Timeframe</label><Dropdown value={trade.timeframe||""} onChange={function(v){upd("timeframe",v);}} placeholder="Select" options={[{v:"",l:"Select"}].concat(opts.timeframe.map(function(t){return {v:t,l:t};}))} style={compactFld}/></div>}
               </div>
@@ -9105,36 +9115,6 @@ function SettingsTab(props){
           );
         })()}
         {/* Type toggle */}
-        {/* CHANGED: One-time balance reset. Balance is derived (transfers + all journal P&L), so it
-           can't be "set" directly without destroying history. This records a single dated adjustment
-           transfer for exactly the difference, which makes the balance read the target while leaving
-           every trade and journal entry untouched — and it stays visible in the list below, so it can
-           be deleted to undo. */}
-        {(function(){
-          var current=getAccountBalance();
-          var target=parseFloat(resetTarget);
-          var diff=(!isNaN(target))?(target-current):NaN;
-          return (
-            <div style={{marginBottom:10,padding:"9px 11px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:6}}>
-              <div style={{fontSize:12,color:"#e2e8f0",fontWeight:700,marginBottom:2}}>Reset balance</div>
-              <div style={{fontSize:11,color:"#64748b",marginBottom:7}}>Current: ${current.toFixed(2)} — logs one adjustment transfer to hit your target. Trades and journal history are not modified.</div>
-              <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
-                <input type="number" step="0.01" value={resetTarget} onChange={function(e){setResetTarget(e.target.value);}} placeholder="10000" style={Object.assign({},fld,{padding:"6px 9px",fontSize:13,width:120})}/>
-                <button disabled={isNaN(diff)||Math.abs(diff)<0.005} onClick={function(){
-                  if(isNaN(diff)||Math.abs(diff)<0.005)return;
-                  if(!window.confirm("Log an adjustment of "+(diff>=0?"+$":"-$")+Math.abs(diff).toFixed(2)+" so your balance reads $"+target.toFixed(2)+"?\n\nNo trades or journal entries are changed. You can delete this transfer to undo."))return;
-                  var n=getNow();
-                  var ds=n.getFullYear()+"-"+(n.getMonth()+1).toString().padStart(2,"0")+"-"+n.getDate().toString().padStart(2,"0");
-                  var t={id:Date.now(),date:ds,type:diff>=0?"deposit":"withdrawal",amount:diff,note:"Balance reset to $"+target.toFixed(2)};
-                  var nt=transfers.concat([t]);
-                  setTransfers(nt);saveTransfers(nt);
-                  if(props.bumpReloadKey)props.bumpReloadKey();
-                }} style={{padding:"6px 12px",background:(isNaN(diff)||Math.abs(diff)<0.005)?"#1e293b":"#4f46e5",border:"none",borderRadius:5,color:(isNaN(diff)||Math.abs(diff)<0.005)?"#64748b":"#fff",fontSize:12,fontWeight:600,cursor:(isNaN(diff)||Math.abs(diff)<0.005)?"not-allowed":"pointer",fontFamily:"inherit"}}>Reset</button>
-                {!isNaN(diff)&&Math.abs(diff)>=0.005&&<span style={{fontSize:11,color:diff>=0?"#86efac":"#fca5a5",fontVariantNumeric:"tabular-nums"}}>adjustment {diff>=0?"+":"−"}${Math.abs(diff).toFixed(2)}</span>}
-              </div>
-            </div>
-          );
-        })()}
         <div style={{display:"flex",gap:6,marginBottom:8}}>
           {[{id:"deposit",label:"Deposit (+$)",color:"#ef4444",bg:"#7f1d1d"},{id:"withdrawal",label:"Withdrawal (-$)",color:"#22c55e",bg:"#14532d"}].map(function(o){
             var active=transferDraft.type===o.id;
@@ -9532,6 +9512,10 @@ function SettingsTab(props){
                     <div style={{marginBottom:10,padding:"8px 10px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:5}}>
                       <div style={{fontSize:10,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700,marginBottom:6}}>Optional Fields</div>
                       <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
+                        <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:12,color:"#cbd5e1"}}>
+                          <input type="checkbox" checked={fs.grade!==false} onChange={function(e){toggle("grade",e.target.checked);}} style={{cursor:"pointer"}}/>
+                          Setup Grade
+                        </label>
                         <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:12,color:"#cbd5e1"}}>
                           <input type="checkbox" checked={fs.timeframe!==false} onChange={function(e){toggle("timeframe",e.target.checked);}} style={{cursor:"pointer"}}/>
                           Timeframe
