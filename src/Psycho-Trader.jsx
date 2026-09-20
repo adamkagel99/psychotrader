@@ -4473,7 +4473,7 @@ function GoalsSnapshot(props){
       return (loadTransfers()||[]).reduce(function(s,t){
         var dt=new Date(t.date);if(isNaN(dt.getTime()))return s;
         if(dt.getFullYear()!==y||dt.getMonth()!==m)return s;
-        var a=parseFloat(t.amount)||0;return a<0?s+Math.abs(a):s;
+        var a=parseFloat(t.amount)||0;return s-a;// CHANGED: net of month's deposits & withdrawals (withdrawals add, deposits subtract)
       },0);
     }catch(e){return 0;}
   })();
@@ -6441,7 +6441,7 @@ function GoalsTab(props){
       return (loadTransfers()||[]).reduce(function(s,t){
         var dt=new Date(t.date);if(isNaN(dt.getTime()))return s;
         if(dt.getFullYear()!==y||dt.getMonth()!==m)return s;
-        var a=parseFloat(t.amount)||0;return a<0?s+Math.abs(a):s;
+        var a=parseFloat(t.amount)||0;return s-a;// CHANGED: net of month's deposits & withdrawals (withdrawals add, deposits subtract)
       },0);
     }catch(e){return 0;}
   })();
