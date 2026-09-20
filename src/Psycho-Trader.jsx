@@ -4471,9 +4471,9 @@ function GoalsSnapshot(props){
     try{
       var d=new Date();var y=d.getFullYear(),m=d.getMonth();
       return (loadTransfers()||[]).reduce(function(s,t){
-        var dt=new Date(t.date);if(isNaN(dt.getTime()))return s;
+        var _p=String(t.date||"").split("-");var dt=_p.length===3?new Date(+_p[0],+_p[1]-1,+_p[2]):new Date(t.date);if(isNaN(dt.getTime()))return s;// CHANGED: parse YYYY-MM-DD as LOCAL so month-boundary transfers aren't shifted a month by UTC
         if(dt.getFullYear()!==y||dt.getMonth()!==m)return s;
-        var a=parseFloat(t.amount)||0;return s-a;// CHANGED: net of month's deposits & withdrawals (withdrawals add, deposits subtract)
+        var a=parseFloat(t.amount)||0;return s-a;// net of month's deposits & withdrawals (withdrawals add, deposits subtract)
       },0);
     }catch(e){return 0;}
   })();
@@ -6439,9 +6439,9 @@ function GoalsTab(props){
     try{
       var d=new Date();var y=d.getFullYear(),m=d.getMonth();
       return (loadTransfers()||[]).reduce(function(s,t){
-        var dt=new Date(t.date);if(isNaN(dt.getTime()))return s;
+        var _p=String(t.date||"").split("-");var dt=_p.length===3?new Date(+_p[0],+_p[1]-1,+_p[2]):new Date(t.date);if(isNaN(dt.getTime()))return s;// CHANGED: parse YYYY-MM-DD as LOCAL so month-boundary transfers aren't shifted a month by UTC
         if(dt.getFullYear()!==y||dt.getMonth()!==m)return s;
-        var a=parseFloat(t.amount)||0;return s-a;// CHANGED: net of month's deposits & withdrawals (withdrawals add, deposits subtract)
+        var a=parseFloat(t.amount)||0;return s-a;// net of month's deposits & withdrawals (withdrawals add, deposits subtract)
       },0);
     }catch(e){return 0;}
   })();
@@ -9117,18 +9117,10 @@ function SettingsTab(props){
                 <span style={{fontSize:11,color:"#a5b4fc",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Current Balance</span>
                 <span style={{fontSize:20,fontWeight:800,color:balance>=0?"#e2e8f0":"#ef4444",fontVariantNumeric:"tabular-nums",letterSpacing:-0.3}}>${balance.toLocaleString("en-US",{maximumFractionDigits:0})}</span>
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:8,marginBottom:12}}>
-                <div style={{padding:"8px 10px",background:"#0a0a0f",border:"1px solid #7f1d1d",borderRadius:8}}>
-                  <div style={{fontSize:10,color:"#fca5a5",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Total Deposits</div>
-                  <div style={{fontSize:16,fontWeight:700,color:"#e2e8f0",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{fmtUSD(totalDep)}</div>
-                </div>
-                <div style={{padding:"8px 10px",background:"#0a0a0f",border:"1px solid #166534",borderRadius:8}}>
-                  <div style={{fontSize:10,color:"#86efac",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Total Withdrawals</div>
-                  <div style={{fontSize:16,fontWeight:700,color:"#e2e8f0",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{fmtUSD(totalWdr)}</div>
-                </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr",gap:8,marginBottom:12}}>
                 {(function(){var net=totalWdr-totalDep;return (
                 <div style={{padding:"8px 10px",background:"#0a0a0f",border:"1px solid #4338ca",borderRadius:8}}>
-                  <div style={{fontSize:10,color:"#a5b4fc",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Net</div>
+                  <div style={{fontSize:10,letterSpacing:1,textTransform:"uppercase",fontWeight:700}}><span style={{color:"#a5b4fc"}}>Net </span>(<span style={{color:"#fca5a5"}}>In</span>/<span style={{color:"#86efac"}}>Out</span>)</div>
                   <div style={{fontSize:16,fontWeight:700,color:net>=0?"#22c55e":"#ef4444",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{(net<0?"−":"")+fmtUSD(Math.abs(net))}</div>
                 </div>
                 );})()}
