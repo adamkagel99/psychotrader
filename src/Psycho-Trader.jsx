@@ -389,32 +389,26 @@ var EARLY_CLOSE_DAYS={
   "7/3/2028":"Day before Independence Day","11/24/2028":"Day after Thanksgiving"
 };
 
-// CHANGED: Sizing base steps by $1k up to $15k, then by $5k beyond — so above $15k the position
-// and risk hold steady across each $5k band and only step up at the next $5k tier (with the same
-// 5% buffer as the lower ramp). This protects the user from sizing up too soon as the account grows.
+// CHANGED: Sizing base is the largest milestone at or below the balance, using the single
+// milestone schedule (getMilestones) so live sizing steps $1k → $5k → $10k in lockstep with
+// the Scale Milestones table. Previously this used its own $1k-to-$15k ramp, which floored a
+// milestone value to the tier below (e.g. base 4000 at the $5k tier) and made live sizing
+// disagree with the table.
 function getBase(a){
-  var b=500,n=1;
-  // $1k increments until the base reaches $15k.
-  while(n*1000<=15000&&a>n*1000*1.05){b=n*1000;n++;}
-  if(b>=15000){
-    // $5k increments from $15k upward.
-    var k=15000;
-    while(a>(k+5000)*1.05){k+=5000;}
-    b=k;
-  }
+  var ms=getMilestones();
+  var b=ms[0];
+  for(var i=0;i<ms.length;i++){if(a>=ms[i])b=ms[i];}
   return b;
 }
 // CHANGED: positionMin and riskMin are now derived from slippagePct (% below max).
 // CHANGED: Risk Max % is now a percentage of Position Max (not the account balance).
 // CHANGED: Also supports fixed-dollar sizing mode (positionMaxDollar, riskMaxDollar).
-// CHANGED: Single source of truth for the scaling milestone schedule. Tiers step by $1k up to
-// $10k, then $5k up to $20k, then $10k after. Used by Settings, Dashboard, and the sizing
-// effect so they all agree on which tier the user is in.
+// CHANGED: Single source of truth for the scaling milestone schedule. Tiers are $1k → $5k →
+// $10k, then $10k steps after (no tiers between $1k–$5k or $5k–$10k). Used by Settings,
+// Dashboard, and the sizing effect so they all agree on which tier the user is in.
 function getMilestones(){
-  var m=[500];
-  for(var k=1;k<=10;k++)m.push(k*1000);
-  m.push(15000);m.push(20000);
-  for(var m10=30000;m10<=100000;m10+=10000)m.push(m10);
+  var m=[500,1000,5000,10000];
+  for(var m10=20000;m10<=100000;m10+=10000)m.push(m10);
   return m;
 }
 // CHANGED: A tier "activates" only once balance is at least 5% above the tier value — the
@@ -9255,7 +9249,7 @@ function SettingsTab(props){
                 <div>
                   <div style={{fontSize:10,color:"#94a3b8",marginBottom:8,lineHeight:1.5,padding:"6px 8px",background:"#0f0f17",border:"1px solid #1e293b",borderRadius:4}}>
                     <div style={{color:"#cbd5e1",fontWeight:600,marginBottom:3}}>Formula (current settings):</div>
-                    <div style={{color:"#64748b",marginBottom:4,fontSize:9.5,lineHeight:1.4}}>Tiers step by $1k up to $10k, then $5k up to $20k, then $10k after — size holds steady across each band so you don't scale up too soon.</div>
+                    <div style={{color:"#64748b",marginBottom:4,fontSize:9.5,lineHeight:1.4}}>Tiers: $1k → $5k → $10k, then $10k steps after — size holds steady within each band so you don't scale up too soon.</div>
                     {(settings.sizingMode||"pct")==="pct"?(
                       <div>
                         Pos Max = Tier × <span style={{color:"#a5b4fc"}}>{posMaxPct}%</span> · Pos Min = Pos Max × (1 − <span style={{color:"#a5b4fc"}}>{slip}%</span>)<br/>
