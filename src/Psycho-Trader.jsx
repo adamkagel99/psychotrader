@@ -425,8 +425,14 @@ function calcPosSizes(a,pcts){
   var b=(pcts&&pcts.useDirect)?a:getBase(a);
   var p=pcts||{slippagePct:20,positionMaxPct:7.5,riskMaxPct:33};
   var slip=p.slippagePct!=null?p.slippagePct:20;
-  var posMax,riskMax;
-  if(p.sizingMode==="dollar"){
+  var posMax,riskMax,posUnit="$";
+  if(p.sizingMode==="contracts"){
+    // CHANGED: Contract-based sizing — position cap is a fixed CONTRACT count (not $), risk cap
+    // stays in $. Position is expressed in contracts; risk is dollars.
+    posMax=Math.round(parseFloat(p.positionMaxContracts)||0);
+    riskMax=Math.round(parseFloat(p.riskMaxDollar)||0);
+    posUnit="contracts";
+  }else if(p.sizingMode==="dollar"){
     posMax=Math.round(parseFloat(p.positionMaxDollar)||0);
     riskMax=Math.round(parseFloat(p.riskMaxDollar)||0);
   }else{
@@ -437,7 +443,7 @@ function calcPosSizes(a,pcts){
   }
   var posMin=Math.round(posMax*(1-slip/100));
   var riskMin=Math.round(riskMax*(1-slip/100));
-  return {base:b,positionMin:posMin,positionMax:posMax,riskMin:riskMin,riskMax:riskMax};
+  return {base:b,positionMin:posMin,positionMax:posMax,riskMin:riskMin,riskMax:riskMax,posUnit:posUnit,riskUnit:"$"};
 }
 function discColor(score){return score>=80?"#22c55e":score>=60?"#f59e0b":"#ef4444";}
 function wrColor(rate){return rate>=60?"#22c55e":rate>=40?"#f59e0b":"#ef4444";}
@@ -504,7 +510,7 @@ function buildDisciplineCtx(riskMaxArg){
   try{var s=localStorage.getItem(OPTIONS_KEY);if(s){var p=JSON.parse(s);sentiments=p.emotionSentiments||DEFAULT_EMOTION_SENTIMENTS;}}catch(e){sentiments=DEFAULT_EMOTION_SENTIMENTS;}
   if(!sentiments)sentiments=DEFAULT_EMOTION_SENTIMENTS;
   var ds=loadDisciplineScoring();
-  var posMax=0,riskMaxPctSetting=33,riskMax=parseFloat(riskMaxArg)||0;
+  var posMax=0,riskMaxPctSetting=33,riskMax=parseFloat(riskMaxArg)||0,_posUnit="$";
   try{
     var st=localStorage.getItem(SETTINGS_KEY);
     if(st){
@@ -513,21 +519,32 @@ function buildDisciplineCtx(riskMaxArg){
       try{
         var _bal=getAccountBalance();
         var _tier=getCurrentTier(_bal);
-        var _c=calcPosSizes(_tier,{useDirect:true,sizingMode:sp.sizingMode,slippagePct:sp.slippagePct,positionMaxPct:sp.positionMaxPct,riskMaxPct:sp.riskMaxPct,positionMaxDollar:sp.positionMaxDollar,riskMaxDollar:sp.riskMaxDollar});
+        var _c=calcPosSizes(_tier,{useDirect:true,sizingMode:sp.sizingMode,slippagePct:sp.slippagePct,positionMaxPct:sp.positionMaxPct,riskMaxPct:sp.riskMaxPct,positionMaxDollar:sp.positionMaxDollar,positionMaxContracts:sp.positionMaxContracts,riskMaxDollar:sp.riskMaxDollar});
         posMax=_c.positionMax||parseFloat(sp.positionMax)||0;
+        _posUnit=_c.posUnit||"$";
       }catch(e){posMax=parseFloat(sp.positionMax)||0;}
       if(riskMax<=0)riskMax=parseFloat(sp.riskMax)||0;
     }
   }catch(e){}
-  return {sentiments:sentiments,ds:ds,posMax:posMax,riskMaxPct:riskMaxPctSetting,riskMax:riskMax};
+  return {sentiments:sentiments,ds:ds,posMax:posMax,riskMaxPct:riskMaxPctSetting,riskMax:riskMax,posUnit:_posUnit};
+}
+// CHANGED: Total entry contracts on a trade — the sizing quantity used by contract-based sizing.
+function tradeTotalContracts(t){
+  if(!t)return 0;
+  var es=t.entries||[];
+  var c=es.reduce(function(s,e){return s+(parseFloat(e&&e.contracts)||0);},0);
+  if(c===0)c=parseFloat(t.contracts)||0;
+  return c;
 }
 // Effective violations for a trade: the stored list, with "Oversized entry" and "Max risk exceeded"
 // re-derived from current data so stale flags drop off after an edit and new breaches are caught.
 function effectiveViolations(t,ctx){
   ctx=ctx||buildDisciplineCtx();
   var vs=(t.violations||[]).slice();
-  var pos=parseFloat(t.positionSize)||0;
-  var stampedMax=parseFloat(t.posMaxAtEntry)||0;
+  // CHANGED: In contract-based sizing the position quantity and cap are CONTRACTS, not $.
+  var _ctrUnit=ctx.posUnit==="contracts";
+  var pos=_ctrUnit?tradeTotalContracts(t):(parseFloat(t.positionSize)||0);
+  var stampedMax=_ctrUnit?0:(parseFloat(t.posMaxAtEntry)||0);
   var _cGm=t.grade==="A"?1:t.grade==="B"?0.75:t.grade==="C"?0.5:1;
   // CHANGED: Cap the effective size fraction at 0.5 while half-size is in force (for trades taken
   // at/after it was enabled). Without this the stamped sizeFraction of 1 measured the trade against
@@ -590,7 +607,7 @@ function calcDiscipline(trades,riskMaxArg,opts){
     Object.keys(comMap).forEach(function(sid){
       var sc=comMap[sid];if(!sc||!sc.committed)return;
       var sessTrades;
-      if(sid==="_legacy")sessTrades=trades.filter(function(t){return t&&t.status!=="open";});
+      if(sid==="_legacy"||sid==="_day")sessTrades=trades.filter(function(t){return t&&t.status!=="open";});
       else sessTrades=trades.filter(function(t){return t&&t.status!=="open"&&t.sessionId===sid;});
       var maxT=parseInt(sc.maxTrades);
       if(!isNaN(maxT)&&maxT>0&&sessTrades.length>maxT){processScore-=(ds.overTradePenalty!=null?ds.overTradePenalty:10);anyViolation=true;}
@@ -869,7 +886,7 @@ function getFocusStates(settings){
   });
   return out;
 }
-function defaultSettings(){return {accountSize:0,positionMin:0,positionMax:0,riskMin:0,riskMax:0,gainMultiplier:5,timezone:"America/Los_Angeles",sessions:defaultSessionsForTz("America/Los_Angeles"),tradingWindows:[{start:60,end:1020}],slippagePct:20,positionMaxPct:7.5,positionMaxDollar:500,riskMaxPct:33,riskMaxDollar:165,sizingMode:"pct",hideDollarPnL:false,enabledAssetClasses:defaultEnabledAssetClasses(),assetClassSettings:defaultAssetClassSettings(),defaultAssetClass:"options",defaultInstruments:{},focusStates:defaultFocusStates(),enabledGrades:["A","B"]};}
+function defaultSettings(){return {accountSize:0,positionMin:0,positionMax:0,riskMin:0,riskMax:0,gainMultiplier:5,timezone:"America/Los_Angeles",sessions:defaultSessionsForTz("America/Los_Angeles"),tradingWindows:[{start:60,end:1020}],slippagePct:20,positionMaxPct:7.5,positionMaxDollar:500,positionMaxContracts:1,riskMaxPct:33,riskMaxDollar:165,sizingMode:"pct",hideDollarPnL:false,enabledAssetClasses:defaultEnabledAssetClasses(),assetClassSettings:defaultAssetClassSettings(),defaultAssetClass:"options",defaultInstruments:{},focusStates:defaultFocusStates(),enabledGrades:["A","B"]};}
 // Grade metadata — order + colors. C exists for legacy trades but is off by default.
 var ALL_GRADES=["A","B","C"];
 var GRADE_COLORS={A:"#22c55e",B:"#f59e0b",C:"#ef4444"};
@@ -1190,19 +1207,17 @@ function SessionCommitmentReview(props){
     <div style={{marginBottom:12,padding:"10px 12px",background:over||aff===false?"#1c0a0a":"#0f1a14",border:"1px solid "+(over||aff===false?"#7f1d1d":"#166534"),borderRadius:8}}>
       <div style={{fontSize:10,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:600,marginBottom:6}}>Commitment Review</div>
       {hasMax&&(
-        <div style={{fontSize:12,lineHeight:1.5,color:over?"#fca5a5":"#86efac",marginBottom:c.setups?6:0}}>
+        <div style={{fontSize:12,lineHeight:1.5,color:over?"#fca5a5":"#86efac",marginBottom:6}}>
           {over?"✗ ":"✓ "}{over?("Took "+closedInSession.length+" — over "+maxT+"-trade cap"):("Stayed within "+maxT+"-trade cap ("+closedInSession.length+")")}
         </div>
       )}
-      {c.setups&&(
-        <>
-          <div style={{fontSize:12,color:"#94a3b8",marginBottom:6}}>Committed setups: <span style={{color:"#cbd5e1"}}>{c.setups}</span></div>
-          <div style={{display:"flex",gap:6}}>
-            <button onClick={function(){persist({setupsReviewAffirmed:true});}} style={{flex:1,padding:"6px",background:aff===true?"#14532d":"#0a0a0f",border:"1px solid "+(aff===true?"#22c55e":"#1e293b"),borderRadius:5,color:aff===true?"#86efac":"#94a3b8",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Stuck to plan</button>
-            <button onClick={function(){persist({setupsReviewAffirmed:false});}} style={{flex:1,padding:"6px",background:aff===false?"#3a1010":"#0a0a0f",border:"1px solid "+(aff===false?"#ef4444":"#1e293b"),borderRadius:5,color:aff===false?"#fca5a5":"#94a3b8",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Deviated</button>
-          </div>
-        </>
+      {(c.bias||(c.contracts!=null&&c.contracts!==""))&&(
+        <div style={{fontSize:12,color:"#94a3b8",marginBottom:6}}>Committed plan: <span style={{color:"#cbd5e1"}}>{[c.bias?("Bias "+c.bias):null,(c.contracts!=null&&c.contracts!=="")?(c.contracts+" contract"+(parseInt(c.contracts)===1?"":"s")):null].filter(Boolean).join(" · ")}</span></div>
       )}
+      <div style={{display:"flex",gap:6}}>
+        <button onClick={function(){persist({setupsReviewAffirmed:true});}} style={{flex:1,padding:"6px",background:aff===true?"#14532d":"#0a0a0f",border:"1px solid "+(aff===true?"#22c55e":"#1e293b"),borderRadius:5,color:aff===true?"#86efac":"#94a3b8",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Stuck to plan</button>
+        <button onClick={function(){persist({setupsReviewAffirmed:false});}} style={{flex:1,padding:"6px",background:aff===false?"#3a1010":"#0a0a0f",border:"1px solid "+(aff===false?"#ef4444":"#1e293b"),borderRadius:5,color:aff===false?"#fca5a5":"#94a3b8",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Deviated</button>
+      </div>
     </div>
   );
 }
@@ -1386,9 +1401,9 @@ function scoreCommitment(state){
   var aggMax=0,aggActual=0,anyOver=false;
   committedSids.forEach(function(sid){
     var c=map[sid];
-    var st=sid==="_legacy"?closed:closed.filter(function(t){return t.sessionId===sid;});
+    var st=(sid==="_legacy"||sid==="_day")?closed:closed.filter(function(t){return t.sessionId===sid;});
     var sessLabel=null;try{var ss=getSessionByID(sid);if(ss)sessLabel=ss.label||ss.id;}catch(e){}
-    if(!sessLabel)sessLabel=sid==="_legacy"?"Day":sid;
+    if(!sessLabel)sessLabel=(sid==="_legacy"||sid==="_day")?"Day":sid;
     var maxT=parseInt(c.maxTrades);
     var hasMax=!isNaN(maxT)&&maxT>0;
     var over=hasMax&&st.length>maxT;
@@ -2738,7 +2753,7 @@ function ChecklistPanel(props){
               try{
                 var _bal=computeAccountBalance(props.liveTotalPnL||0);
                 var _tier=getCurrentTier(_bal);
-                var _c=calcPosSizes(_tier,{useDirect:true,sizingMode:settings.sizingMode,slippagePct:settings.slippagePct,positionMaxPct:settings.positionMaxPct,riskMaxPct:settings.riskMaxPct,positionMaxDollar:settings.positionMaxDollar,riskMaxDollar:settings.riskMaxDollar});
+                var _c=calcPosSizes(_tier,{useDirect:true,sizingMode:settings.sizingMode,slippagePct:settings.slippagePct,positionMaxPct:settings.positionMaxPct,riskMaxPct:settings.riskMaxPct,positionMaxDollar:settings.positionMaxDollar,positionMaxContracts:settings.positionMaxContracts,riskMaxDollar:settings.riskMaxDollar});
                 pMin=_c.positionMin;pMax=_c.positionMax;
               }catch(e){}
               var _hs=false;try{_hs=isMonthHalfsizeActive();if(!_hs){var _tr=[];try{var _st=JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}");_tr=_st.trades||[];}catch(e){}var _lk=checkDisciplineLock(_tr,null);_hs=_lk&&_lk.locked;}}catch(e){}
@@ -3287,7 +3302,12 @@ function TradeForm(props){
   // CHANGED: Apply grade scaling — B=0.75, C=0.50 — so the red indicator fires on grade-based oversizing.
   var _fGm=trade.grade==="A"?1:trade.grade==="B"?0.75:trade.grade==="C"?0.5:1;
   effPosMaxForForm=effPosMaxForForm*_fGm;
-  var posExceedsMax=trade.positionSize&&effPosMaxForForm>0&&parseFloat(trade.positionSize)>effPosMaxForForm;
+  // CHANGED: In contracts sizing mode the cap is a CONTRACT count — flag when total entry
+  // contracts exceed it, rather than comparing the $ position size.
+  var _ctrSizing=(settings.sizingMode||"pct")==="contracts";
+  var posExceedsMax=_ctrSizing
+    ?(totalEntryC>0&&effPosMaxForForm>0&&totalEntryC>effPosMaxForForm)
+    :(trade.positionSize&&effPosMaxForForm>0&&parseFloat(trade.positionSize)>effPosMaxForForm);
   var legCount=entries.length+exits.length;
   var hasEvaluation=!!(trade.grade||(trade.emotions&&trade.emotions.length)||(trade.violations&&trade.violations.length)||trade.notes);
   var density=0;
@@ -3320,11 +3340,13 @@ function TradeForm(props){
           var pMax=Math.round((parseFloat(props.displayPosMax)||0)*mult);
           var rMin=Math.round((parseFloat(props.displayRiskMin)||0)*mult);
           var rMax=Math.round((parseFloat(props.displayRiskMax)||0)*mult);
+          // CHANGED: Position is shown in contracts when contract-based sizing is on.
+          var _ctr=(settings.sizingMode||"pct")==="contracts";
           return (
           <div style={{padding:"8px 16px",borderBottom:"1px solid #1e293b",display:"flex",gap:16,flexShrink:0,background:"#0a0a0f",alignItems:"center"}}>
             <div style={{flex:1}}>
               <div style={{fontSize:9,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Position{g?" · "+g+" grade":""}</div>
-              <div style={{fontSize:14,fontWeight:700,color:"#818cf8",marginTop:2}}>{"$"+pMin+" "}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500}}>– ${pMax}</span></div>
+              <div style={{fontSize:14,fontWeight:700,color:"#818cf8",marginTop:2}}>{_ctr?(pMin+" "):("$"+pMin+" ")}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500}}>– {_ctr?(pMax+" ct"):("$"+pMax)}</span></div>
             </div>
             <div style={{flex:1}}>
               <div style={{fontSize:9,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Risk{g?" · "+g+" grade":""}</div>
@@ -3539,12 +3561,21 @@ function TradeForm(props){
                         var pMax=parseFloat(props.displayPosMax)||0;
                         var g=trade&&trade.grade;var mult=g==="A"?1:g==="B"?0.75:g==="C"?0.5:1;
                         pMin=pMin*mult;pMax=pMax*mult;
-                        var mult2=1;try{var ac=getAssetClass(trade.assetClass);if(ac&&ac.multiplier)mult2=ac.multiplier;}catch(e){}
-                        var spent=0;
-                        for(var pi=0;pi<i;pi++){var pe=(trade.entries||[])[pi];var pc=parseFloat(pe&&pe.contracts)||0;var pp=parseFloat(pe&&pe.price)||0;if(pc>0&&pp>0)spent+=pc*pp*mult2;}
-                        var remMin=Math.max(0,pMin-spent),remMax=Math.max(0,pMax-spent);
                         var ph="";
-                        if(cost>0&&remMax>0){var minSug=Math.floor(remMin/(cost*mult2));var maxSug=Math.floor(remMax/(cost*mult2));if(maxSug>0)ph="suggested "+(minSug===maxSug?minSug:minSug+"–"+maxSug);}
+                        // CHANGED: Contract-based sizing — displayPos* are contract counts, so the
+                        // suggested qty is the remaining contract budget (cap minus prior legs), no
+                        // division by leg cost.
+                        if((settings.sizingMode||"pct")==="contracts"){
+                          var priorC=0;for(var pj=0;pj<i;pj++){var pe2=(trade.entries||[])[pj];priorC+=parseFloat(pe2&&pe2.contracts)||0;}
+                          var remCMin=Math.max(0,Math.floor(pMin-priorC)),remCMax=Math.max(0,Math.floor(pMax-priorC));
+                          if(remCMax>0)ph="suggested "+(remCMin===remCMax?remCMax:remCMin+"–"+remCMax);
+                        }else{
+                          var mult2=1;try{var ac=getAssetClass(trade.assetClass);if(ac&&ac.multiplier)mult2=ac.multiplier;}catch(e){}
+                          var spent=0;
+                          for(var pi=0;pi<i;pi++){var pe=(trade.entries||[])[pi];var pc=parseFloat(pe&&pe.contracts)||0;var pp=parseFloat(pe&&pe.price)||0;if(pc>0&&pp>0)spent+=pc*pp*mult2;}
+                          var remMin=Math.max(0,pMin-spent),remMax=Math.max(0,pMax-spent);
+                          if(cost>0&&remMax>0){var minSug=Math.floor(remMin/(cost*mult2));var maxSug=Math.floor(remMax/(cost*mult2));if(maxSug>0)ph="suggested "+(minSug===maxSug?minSug:minSug+"–"+maxSug);}
+                        }
                         return <input type="text" value={en.contracts||""} placeholder={ph} onChange={function(e){var val=e.target.value;st(function(prev){var ne=prev.entries.map(function(x,xi){return xi===i?Object.assign({},x,{contracts:val}):x;});return Object.assign({},prev,doRecalc(ne,prev.exits||[],prev.assetClass,prev.instrument,prev.direction));});}} style={compactFld}/>;
                       })()}
                     </div>
@@ -4128,10 +4159,12 @@ function ScalingTargetCard(props){
   var slip=settings.slippagePct!=null?settings.slippagePct:20;
   var posMaxPct=settings.positionMaxPct!=null?settings.positionMaxPct:7.5;
   var riskMaxPct=settings.riskMaxPct!=null?settings.riskMaxPct:33;
-  var sizesAtTarget=calcPosSizes(targetVal,{sizingMode:settings.sizingMode,slippagePct:slip,positionMaxPct:posMaxPct,riskMaxPct:riskMaxPct,positionMaxDollar:settings.positionMaxDollar,riskMaxDollar:settings.riskMaxDollar});
-  var sizesNow=calcPosSizes(currentTier,{sizingMode:settings.sizingMode,slippagePct:slip,positionMaxPct:posMaxPct,riskMaxPct:riskMaxPct,positionMaxDollar:settings.positionMaxDollar,riskMaxDollar:settings.riskMaxDollar});
+  var sizesAtTarget=calcPosSizes(targetVal,{sizingMode:settings.sizingMode,slippagePct:slip,positionMaxPct:posMaxPct,riskMaxPct:riskMaxPct,positionMaxDollar:settings.positionMaxDollar,positionMaxContracts:settings.positionMaxContracts,riskMaxDollar:settings.riskMaxDollar});
+  var sizesNow=calcPosSizes(currentTier,{sizingMode:settings.sizingMode,slippagePct:slip,positionMaxPct:posMaxPct,riskMaxPct:riskMaxPct,positionMaxDollar:settings.positionMaxDollar,positionMaxContracts:settings.positionMaxContracts,riskMaxDollar:settings.riskMaxDollar});
   function fmtUSD(v){return "$"+v.toLocaleString("en-US",{maximumFractionDigits:0});}
   function fmtPnLUSD(v){if(HIDE_DOLLAR_PNL)return "$•••";return "$"+v.toLocaleString("en-US",{maximumFractionDigits:0});}
+  // CHANGED: Position range respects contract-based sizing unit.
+  function fmtPos(sz){return sz.posUnit==="contracts"?(sz.positionMin+"–"+sz.positionMax+" ct"):(fmtUSD(sz.positionMin)+"–"+fmtUSD(sz.positionMax));}
   return (
     <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid "+(reached?"#166534":"#1e293b"),borderRadius:10}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,gap:8,flexWrap:"wrap"}}>
@@ -4152,12 +4185,12 @@ function ScalingTargetCard(props){
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,paddingTop:10,borderTop:"1px solid #1e293b"}}>
         <div style={{background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:6,padding:"8px 10px"}}>
           <div style={{fontSize:9,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Position now</div>
-          <div style={{fontSize:13,fontWeight:700,color:"#818cf8",marginTop:3,fontVariantNumeric:"tabular-nums"}}>{fmtUSD(sizesNow.positionMin)}–{fmtUSD(sizesNow.positionMax)}</div>
+          <div style={{fontSize:13,fontWeight:700,color:"#818cf8",marginTop:3,fontVariantNumeric:"tabular-nums"}}>{fmtPos(sizesNow)}</div>
           <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>Risk {fmtUSD(sizesNow.riskMax)}</div>
         </div>
         <div style={{background:"#0a0a0f",border:"1px solid "+(reached?"#166534":"#1e293b"),borderRadius:6,padding:"8px 10px"}}>
           <div style={{fontSize:9,color:reached?"#86efac":"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>At target</div>
-          <div style={{fontSize:13,fontWeight:700,color:reached?"#86efac":"#cbd5e1",marginTop:3,fontVariantNumeric:"tabular-nums"}}>{fmtUSD(sizesAtTarget.positionMin)}–{fmtUSD(sizesAtTarget.positionMax)}</div>
+          <div style={{fontSize:13,fontWeight:700,color:reached?"#86efac":"#cbd5e1",marginTop:3,fontVariantNumeric:"tabular-nums"}}>{fmtPos(sizesAtTarget)}</div>
           <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>Risk {fmtUSD(sizesAtTarget.riskMax)}</div>
         </div>
       </div>
@@ -4737,81 +4770,108 @@ function CommitmentPanel(props){
   // Only show the upcoming session (from 15 minutes before its start until it ends).
   // If a session is currently active OR within its 15-min pre-window, show that one only.
   // Committed sessions still render (as ✓ locked summary) even after end so the user has feedback.
-  var visible=(function(){
+  // CHANGED: Consolidated to ONE day-level commitment (market bias, contracts, max trades today)
+  // instead of a card per session. Show it from 15 min before the day's first enabled session
+  // until the last session's end; once committed it stays visible as a locked summary all day.
+  var show=(function(){
     try{
       var dow=getNow().getDay();
       var now=getCurrentMinutesLocal();
       var todays=getSessions(settings||{}).filter(function(s){if(s.enabled===false)return false;var days=s.days||[1,2,3,4,5];return days.indexOf(dow)>=0;});
+      if(todays.length===0)return false;
       var map=getCommitmentsMap(state);
-      var trades=(state&&state.trades)||[];
-      // Only sessions currently in their [start-15min, endMin] window AND not yet trigger-ended
-      // (i.e. haven't hit their committed or configured trade cap).
-      return todays.filter(function(s){
-        if(!(now>=(s.startMin-15)&&now<s.endMin))return false;
-        var sessClosed=trades.filter(function(t){if(!t||t.status==="open")return false;try{return getSessionForTrade(t)===s.id;}catch(e){return false;}});
-        var c=map[s.id];
-        var commCap=c&&c.committed?parseInt(c.maxTrades):NaN;
-        var sessCap=parseInt(s.maxTrades);
-        if(!isNaN(commCap)&&commCap>0&&sessClosed.length>=commCap)return false;
-        if(!isNaN(sessCap)&&sessCap>0&&sessClosed.length>=sessCap)return false;
-        return true;
-      });
-    }catch(e){return [];}
+      if(map._day&&map._day.committed)return true; // keep summary visible after committing
+      var earliest=Math.min.apply(null,todays.map(function(s){return s.startMin;}));
+      var latest=Math.max.apply(null,todays.map(function(s){return s.endMin;}));
+      return now>=(earliest-15)&&now<latest;
+    }catch(e){return false;}
   })();
-  if(visible.length===0)return null;
+  if(!show)return null;
   return (
     <div style={{marginBottom:props.hideMargin?0:14,display:"flex",flexDirection:"column",gap:10}}>
-      {visible.map(function(s){return <SessionCommitmentCard key={s.id} session={s} state={state} setState={setState} settings={settings}/>;})}
+      <DayCommitmentCard state={state} setState={setState} settings={settings}/>
     </div>
   );
 }
-function SessionCommitmentCard(props){
-  var state=props.state,setState=props.setState,session=props.session;
-  var sid=session.id;
+function DayCommitmentCard(props){
+  var state=props.state,setState=props.setState,settings=props.settings;
   var map=getCommitmentsMap(state);
-  var c=map[sid]||{};
+  var c=map._day||{};
   var committed=!!c.committed;
   var [open,setOpen]=useState(!committed);
-  var derivedCap=(function(){var n=parseInt(session.maxTrades);return !isNaN(n)&&n>0?String(n):"";})();
-  var [setups,setSetups]=useState(c.setups||"");
+  // Default max-trades suggestion = sum of today's enabled session caps (day-wide).
+  var derivedCap=(function(){
+    try{
+      var dow=getNow().getDay();
+      var todays=getSessions(settings||{}).filter(function(s){if(s.enabled===false)return false;var days=s.days||[1,2,3,4,5];return days.indexOf(dow)>=0;});
+      var sum=0,any=false;todays.forEach(function(s){var n=parseInt(s.maxTrades);if(!isNaN(n)&&n>0&&n<99){sum+=n;any=true;}});
+      return any?String(sum):"";
+    }catch(e){return "";}
+  })();
+  // CHANGED: Single DAY commitment — market bias, contracts, and max trades for the whole day.
+  var [bias,setBias]=useState(c.bias||"");
+  var [contracts,setContracts]=useState(c.contracts!=null?String(c.contracts):"");
+  var [maxTrades,setMaxTrades]=useState(c.maxTrades!=null&&c.maxTrades!==""?String(c.maxTrades):derivedCap);
   function persist(nextMap){
     var agg=aggregateCommitment(nextMap);
     setState(function(s){return Object.assign({},s,{commitments:nextMap,commitment:agg||s.commitment||null});});
   }
   function commit(){
     var newMap=Object.assign({},map);
-    newMap[sid]={committed:true,committedAt:Date.now(),maxTrades:derivedCap,setups:setups,reviewed:false,setupsReviewAffirmed:null};
+    newMap._day={committed:true,committedAt:Date.now(),bias:bias,contracts:contracts,maxTrades:maxTrades,reviewed:false,setupsReviewAffirmed:c.setupsReviewAffirmed!=null?c.setupsReviewAffirmed:null};
     persist(newMap);
     setOpen(false);
   }
+  function affirm(v){var newMap=Object.assign({},map);newMap._day=Object.assign({},c,{setupsReviewAffirmed:v,reviewed:true});persist(newMap);}
   var lbl={fontSize:12,color:"#94a3b8",fontWeight:600,marginBottom:4,display:"block"};
   var fld={width:"100%",padding:"10px 12px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8,color:"#e2e8f0",fontSize:14,fontFamily:"inherit",boxSizing:"border-box"};
-  var sessLabel=(function(){var nm=(session.name&&String(session.name).trim())||(session.label&&String(session.label).trim());if(nm)return nm;function fm(m){var h=Math.floor(m/60),mm=m%60,ap=h>=12?"PM":"AM";var h12=((h+11)%12)+1;return h12+":"+(mm<10?"0":"")+mm+" "+ap;}return fm(session.startMin)+"–"+fm(session.endMin);})();
+  var closedN=((state&&state.trades)||[]).filter(function(t){return t&&t.status!=="open";}).length;
+  var maxT=parseInt(c.maxTrades);
+  var hasMax=!isNaN(maxT)&&maxT>0;
+  var over=hasMax&&closedN>maxT;
+  var aff=c.setupsReviewAffirmed;
   if(committed&&!open){
     return (
-      <div style={{padding:"12px 14px",background:"#0f1a14",border:"1px solid #166534",borderRadius:10,width:"100%",boxSizing:"border-box",display:"flex",flexDirection:"column"}}>
+      <div style={{padding:"12px 14px",background:over?"#1c0a0a":"#0f1a14",border:"1px solid "+(over?"#7f1d1d":"#166534"),borderRadius:10,width:"100%",boxSizing:"border-box",display:"flex",flexDirection:"column"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <span style={{fontSize:13,fontWeight:700,color:"#86efac"}}>✓ {sessLabel} commitment</span>
+          <span style={{fontSize:13,fontWeight:700,color:over?"#fca5a5":"#86efac"}}>{over?"✗":"✓"} Today's commitment</span>
           <span style={{fontSize:11,color:"#94a3b8",cursor:"pointer"}} onClick={function(){setOpen(true);}}>edit</span>
         </div>
         <div style={{fontSize:13,color:"#cbd5e1",marginTop:6,lineHeight:1.5}}>
-          {c.maxTrades?("Max "+c.maxTrades+" trade"+(parseInt(c.maxTrades)===1?"":"s")):"No trade cap set"}{c.setups?(" · "+c.setups):""}
+          {[c.bias?("Bias: "+c.bias):null,(c.contracts!=null&&c.contracts!=="")?(c.contracts+" contract"+(parseInt(c.contracts)===1?"":"s")):null,(c.maxTrades!=null&&c.maxTrades!=="")?("Max "+c.maxTrades+" trade"+(parseInt(c.maxTrades)===1?"":"s")):null].filter(Boolean).join(" · ")||"No plan set"}
+        </div>
+        {hasMax&&<div style={{fontSize:12,marginTop:6,color:over?"#fca5a5":"#86efac"}}>{over?("Took "+closedN+" — over your "+maxT+"-trade cap"):("Within cap ("+closedN+"/"+maxT+")")}</div>}
+        <div style={{display:"flex",gap:6,marginTop:8}}>
+          <button onClick={function(){affirm(true);}} style={{flex:1,padding:"6px",background:aff===true?"#14532d":"#0a0a0f",border:"1px solid "+(aff===true?"#22c55e":"#1e293b"),borderRadius:5,color:aff===true?"#86efac":"#94a3b8",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Stuck to plan</button>
+          <button onClick={function(){affirm(false);}} style={{flex:1,padding:"6px",background:aff===false?"#3a1010":"#0a0a0f",border:"1px solid "+(aff===false?"#ef4444":"#1e293b"),borderRadius:5,color:aff===false?"#fca5a5":"#94a3b8",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Deviated</button>
         </div>
       </div>
     );
   }
   return (
     <div style={{padding:"14px",background:"#111118",border:"1px solid #4338ca",borderRadius:10}}>
-      <div style={{fontSize:14,fontWeight:700,color:"#a5b4fc",marginBottom:4}}>{sessLabel} — commit to plan</div>
-      <div style={{fontSize:12,color:"#64748b",marginBottom:12,lineHeight:1.5}}>State it before you trade this session. At day's end you're scored against your own plan.</div>
-      <div style={{marginBottom:10}}>
-        <label style={lbl}>Max trades this session</label>
-        <div style={{padding:"10px 12px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8,fontSize:14,color:"#e2e8f0",fontFamily:"inherit"}}>{derivedCap?(derivedCap+" trade"+(parseInt(derivedCap)===1?"":"s")):"No cap from session strategy"}</div>
-        <div style={{fontSize:11,color:"#64748b",marginTop:5,lineHeight:1.5}}>From Session Strategy. Edit in Settings → Session Strategy.</div>
-      </div>
+      <div style={{fontSize:14,fontWeight:700,color:"#a5b4fc",marginBottom:4}}>Today — commit to plan</div>
+      <div style={{fontSize:12,color:"#64748b",marginBottom:12,lineHeight:1.5}}>State it before you trade. At day's end you're scored against your own plan.</div>
       <div style={{marginBottom:12}}>
-        <label style={lbl}>Setups you'll take (and what you'll skip)</label>
-        <textarea value={setups} onChange={function(e){setSetups(e.target.value);}} placeholder="e.g. Only A+ breakouts at PDH/PDL. Skip chop." style={Object.assign({},fld,{minHeight:64,resize:"vertical",lineHeight:1.5})}/>
+        <label style={lbl}>Market bias</label>
+        <div style={{display:"flex",gap:6}}>
+          {["Long","Short","Neutral"].map(function(o){
+            var active=bias===o;
+            var ac=o==="Long"?"#22c55e":o==="Short"?"#ef4444":"#a5b4fc";
+            var abg=o==="Long"?"#14532d":o==="Short"?"#7f1d1d":"#1e1b4b";
+            return <button key={o} onClick={function(){setBias(o);}} style={{flex:1,padding:"9px 8px",background:active?abg:"#0a0a0f",border:"1px solid "+(active?ac:"#334155"),borderRadius:8,color:active?"#fff":"#64748b",fontSize:13,fontWeight:active?700:500,cursor:"pointer",fontFamily:"inherit"}}>{o}</button>;
+          })}
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+        <div>
+          <label style={lbl}>Contracts</label>
+          <input type="number" min="0" step="1" value={contracts} onChange={function(e){setContracts(e.target.value);}} placeholder="e.g. 3" style={fld}/>
+        </div>
+        <div>
+          <label style={lbl}>Max trades today</label>
+          <input type="number" min="0" step="1" value={maxTrades} onChange={function(e){setMaxTrades(e.target.value);}} placeholder={derivedCap||"e.g. 5"} style={fld}/>
+        </div>
       </div>
       <button onClick={commit} style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#4f46e5,#6366f1)",color:"#fff",border:"none",borderRadius:8,fontSize:15,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{committed?"Update commitment":"Commit to plan"}</button>
       {committed&&<button onClick={function(){setOpen(false);}} style={{width:"100%",padding:"8px",marginTop:6,background:"none",color:"#64748b",border:"none",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>Cancel</button>}
@@ -9175,7 +9235,7 @@ function SettingsTab(props){
         })()}
         {/* CHANGED: $ / % mode toggle. */}
         <div style={{display:"flex",gap:6,marginBottom:12}}>
-          {[{id:"pct",label:"% of Balance"},{id:"dollar",label:"Fixed $"}].map(function(o){
+          {[{id:"pct",label:"% of Balance"},{id:"dollar",label:"Fixed $"},{id:"contracts",label:"Contracts"}].map(function(o){
             var active=(settings.sizingMode||"pct")===o.id;
             return <button key={o.id} onClick={function(){setSettings(function(s){return Object.assign({},s,{sizingMode:o.id});});}} style={{flex:1,padding:"7px 12px",background:active?"#1e1b4b":"#0a0a0f",border:"1px solid "+(active?"#4338ca":"#334155"),borderRadius:5,color:active?"#a5b4fc":"#64748b",fontSize:13,fontWeight:active?700:500,cursor:"pointer",fontFamily:"inherit"}}>{o.label}</button>;
           })}
@@ -9206,6 +9266,12 @@ function SettingsTab(props){
             </div>
             <div><label style={lbl}>Slippage %</label><input type="number" step="0.1" value={settings.slippagePct!=null?settings.slippagePct:20} onChange={function(e){setSettings(function(s){return Object.assign({},s,{slippagePct:parseFloat(e.target.value)||0});});}} style={fld}/></div>
           </div>
+        ):(settings.sizingMode||"pct")==="contracts"?(
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8,marginBottom:8}}>
+            <div><label style={lbl}>Slippage %</label><input type="number" step="0.1" value={settings.slippagePct!=null?settings.slippagePct:20} onChange={function(e){setSettings(function(s){return Object.assign({},s,{slippagePct:parseFloat(e.target.value)||0});});}} style={fld}/></div>
+            <div><label style={lbl}>Position Max (contracts)</label><input type="number" step="1" min="0" value={settings.positionMaxContracts!=null?settings.positionMaxContracts:1} onChange={function(e){setSettings(function(s){return Object.assign({},s,{positionMaxContracts:parseFloat(e.target.value)||0});});}} style={fld}/></div>
+            <div><label style={lbl}>Risk Max ($)</label><input type="number" step="1" value={settings.riskMaxDollar!=null?settings.riskMaxDollar:165} onChange={function(e){setSettings(function(s){return Object.assign({},s,{riskMaxDollar:parseFloat(e.target.value)||0});});}} style={fld}/></div>
+          </div>
         ):(
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8,marginBottom:8}}>
             <div><label style={lbl}>Slippage %</label><input type="number" step="0.1" value={settings.slippagePct!=null?settings.slippagePct:20} onChange={function(e){setSettings(function(s){return Object.assign({},s,{slippagePct:parseFloat(e.target.value)||0});});}} style={fld}/></div>
@@ -9219,11 +9285,13 @@ function SettingsTab(props){
             // the Scale Milestones table (stored settings.positionMin/Max was a stale snapshot).
             var bal=computeAccountBalance(props.liveTotalPnL);
             var tier=getCurrentTier(bal);
-            var s=calcPosSizes(tier,{useDirect:true,sizingMode:settings.sizingMode,slippagePct:settings.slippagePct,positionMaxPct:settings.positionMaxPct,riskMaxPct:settings.riskMaxPct,positionMaxDollar:settings.positionMaxDollar,riskMaxDollar:settings.riskMaxDollar});
+            var s=calcPosSizes(tier,{useDirect:true,sizingMode:settings.sizingMode,slippagePct:settings.slippagePct,positionMaxPct:settings.positionMaxPct,riskMaxPct:settings.riskMaxPct,positionMaxDollar:settings.positionMaxDollar,positionMaxContracts:settings.positionMaxContracts,riskMaxDollar:settings.riskMaxDollar});
             var posMin=s.positionMin,posMax=s.positionMax,riskMin=s.riskMin,riskMax=s.riskMax;
             var hs=false;try{hs=isMonthHalfsizeActive();if(!hs){var _tr=[];try{var _st=JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}");_tr=_st.trades||[];}catch(e){}var _lk=checkDisciplineLock(_tr,null);hs=_lk&&_lk.locked;}}catch(e){}
             if(hs){posMax=Math.round(posMax/2);posMin=Math.round(posMin/2);riskMax=Math.round(riskMax/2);riskMin=Math.round(riskMin/2);}
-            return "Computed: Position $"+posMin+"–$"+posMax+" · Risk $"+riskMin+"–$"+riskMax+(hs?" (½ size)":"");
+            var ctr=s.posUnit==="contracts";
+            var posStr=ctr?(posMin+"–"+posMax+" ct"):("$"+posMin+"–$"+posMax);
+            return "Computed: Position "+posStr+" · Risk $"+riskMin+"–$"+riskMax+(hs?" (½ size)":"");
           })()}
         </div>
         {/* CHANGED: Scale milestones table — shows position/risk at each $1k tier with 5% buffer. */}
@@ -9255,6 +9323,11 @@ function SettingsTab(props){
                         Pos Max = Tier × <span style={{color:"#a5b4fc"}}>{posMaxPct}%</span> · Pos Min = Pos Max × (1 − <span style={{color:"#a5b4fc"}}>{slip}%</span>)<br/>
                         Risk Max = Pos Max × <span style={{color:"#a5b4fc"}}>{riskMaxPct}%</span> · Risk Min = Risk Max × (1 − <span style={{color:"#a5b4fc"}}>{slip}%</span>)
                       </div>
+                    ):(settings.sizingMode||"pct")==="contracts"?(
+                      <div>
+                        Pos Max = <span style={{color:"#a5b4fc"}}>{settings.positionMaxContracts} ct</span> (fixed) · Pos Min = Pos Max × (1 − <span style={{color:"#a5b4fc"}}>{slip}%</span>)<br/>
+                        Risk Max = <span style={{color:"#a5b4fc"}}>${settings.riskMaxDollar}</span> (fixed) · Risk Min = Risk Max × (1 − <span style={{color:"#a5b4fc"}}>{slip}%</span>)
+                      </div>
                     ):(
                       <div>
                         Pos Max = <span style={{color:"#a5b4fc"}}>${settings.positionMaxDollar}</span> (fixed) · Pos Min = Pos Max × (1 − <span style={{color:"#a5b4fc"}}>{slip}%</span>)<br/>
@@ -9268,14 +9341,14 @@ function SettingsTab(props){
                   <ScaleMilestonesScroller currentTier={currentTier}>
                     <div style={{display:"grid",gridTemplateColumns:"auto 1fr 1fr",gap:6,fontSize:11,alignItems:"center"}}>
                       {milestones.map(function(m){
-                        var sizes=calcPosSizes(m,{useDirect:true,sizingMode:settings.sizingMode,slippagePct:slip,positionMaxPct:posMaxPct,riskMaxPct:riskMaxPct,positionMaxDollar:settings.positionMaxDollar,riskMaxDollar:settings.riskMaxDollar});
+                        var sizes=calcPosSizes(m,{useDirect:true,sizingMode:settings.sizingMode,slippagePct:slip,positionMaxPct:posMaxPct,riskMaxPct:riskMaxPct,positionMaxDollar:settings.positionMaxDollar,positionMaxContracts:settings.positionMaxContracts,riskMaxDollar:settings.riskMaxDollar});
                         var isCurrent=m===currentTier;
                         var isReached=balance>m*1.05;
                         var color=isCurrent?"#86efac":(isReached?"#64748b":"#cbd5e1");
                         var bg=isCurrent?"#0a1f10":"transparent";
                         return [
                           <div key={m+"-t"} data-tier={m} style={{padding:"4px 6px",background:bg,borderRadius:3,fontWeight:isCurrent?700:500,color:color}}>${m.toLocaleString()}{isCurrent?" ←":""}</div>,
-                          <div key={m+"-p"} style={{padding:"4px 6px",background:bg,borderRadius:3,color:color}}>${sizes.positionMin}–${sizes.positionMax}</div>,
+                          <div key={m+"-p"} style={{padding:"4px 6px",background:bg,borderRadius:3,color:color}}>{sizes.posUnit==="contracts"?(sizes.positionMin+"–"+sizes.positionMax+" ct"):("$"+sizes.positionMin+"–$"+sizes.positionMax)}</div>,
                           <div key={m+"-r"} style={{padding:"4px 6px",background:bg,borderRadius:3,color:color}}>${sizes.riskMin}–${sizes.riskMax}</div>
                         ];
                       })}
@@ -10086,7 +10159,7 @@ function App(props){
       if(localStorage.getItem("tf-oversize-migrated-v5"))return;
       // CHANGED: Use live-tier position cap (matches saveTrade + Computed) instead of stale settings snapshot.
       var _lt=getCurrentTier(computeAccountBalance(0));
-      var _lc=calcPosSizes(_lt,{useDirect:true,sizingMode:settings.sizingMode,slippagePct:settings.slippagePct,positionMaxPct:settings.positionMaxPct,riskMaxPct:settings.riskMaxPct,positionMaxDollar:settings.positionMaxDollar,riskMaxDollar:settings.riskMaxDollar});
+      var _lc=calcPosSizes(_lt,{useDirect:true,sizingMode:settings.sizingMode,slippagePct:settings.slippagePct,positionMaxPct:settings.positionMaxPct,riskMaxPct:settings.riskMaxPct,positionMaxDollar:settings.positionMaxDollar,positionMaxContracts:settings.positionMaxContracts,riskMaxDollar:settings.riskMaxDollar});
       var rawMax=_lc.positionMax||parseFloat(settings.positionMax)||0;
       if(rawMax<=0)return;
       var sessions=getSessions(settings);
@@ -10160,12 +10233,12 @@ function App(props){
     var live=(state.trades||[]).filter(function(t){return t.status!=="open";}).reduce(function(s,t){return s+(tradeNetPnl(t));},0);
     var computedAcct=computeAccountBalance(live);
     var tierBase=getCurrentTier(computedAcct);
-    var p={sizingMode:settings.sizingMode,slippagePct:settings.slippagePct,positionMaxPct:settings.positionMaxPct,riskMaxPct:settings.riskMaxPct,positionMaxDollar:settings.positionMaxDollar,riskMaxDollar:settings.riskMaxDollar};
+    var p={sizingMode:settings.sizingMode,slippagePct:settings.slippagePct,positionMaxPct:settings.positionMaxPct,riskMaxPct:settings.riskMaxPct,positionMaxDollar:settings.positionMaxDollar,positionMaxContracts:settings.positionMaxContracts,riskMaxDollar:settings.riskMaxDollar};
     var sizes=calcPosSizes(tierBase,p);
     if(sizes.positionMin!==settings.positionMin||sizes.positionMax!==settings.positionMax||sizes.riskMin!==settings.riskMin||sizes.riskMax!==settings.riskMax){
       setSettings(function(s){return Object.assign({},s,{positionMin:sizes.positionMin,positionMax:sizes.positionMax,riskMin:sizes.riskMin,riskMax:sizes.riskMax});});
     }
-  },[settings.sizingMode,settings.slippagePct,settings.positionMaxPct,settings.riskMaxPct,settings.positionMaxDollar,settings.riskMaxDollar,state.trades,reloadKey]);
+  },[settings.sizingMode,settings.slippagePct,settings.positionMaxPct,settings.riskMaxPct,settings.positionMaxDollar,settings.positionMaxContracts,settings.riskMaxDollar,state.trades,reloadKey]);
   useEffect(function(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state));}catch(e){}},[state]);
   useEffect(function(){try{localStorage.setItem(SETTINGS_KEY,JSON.stringify(settings));}catch(e){}},[settings]);
   // Daily rollover - if date has changed, save journal entry and reset state
@@ -10441,7 +10514,8 @@ function App(props){
   useEffect(function(){var id=setInterval(function(){setPhase(function(prev){var next=getPhase();return next!==prev?next:prev;});},1000);return function(){clearInterval(id);};},[]);
   function autoAddViolations(t,posMax){
     var v=(t.violations||[]).slice();
-    var pos=parseFloat(t.positionSize)||0;
+    // CHANGED: Contract-based sizing measures the CONTRACT count against the contract cap.
+    var pos=(settings&&(settings.sizingMode||"pct")==="contracts")?tradeTotalContracts(t):(parseFloat(t.positionSize)||0);
     var pnlNum=(isNaN(parseFloat(t.pnl))?NaN:tradeNetPnl(t));
     var pctNum=parseFloat(t.pctPnl);
     var riskMaxPct=(settings&&settings.riskMaxPct!=null)?parseFloat(settings.riskMaxPct):33;
@@ -10523,7 +10597,7 @@ function App(props){
     // CHANGED: Compute live-tier positionMax so "Oversized entry" measures against the CURRENT
     // account tier's cap, not a stale settings snapshot. Aligns with Computed and trade form.
     var _liveTier=getCurrentTier(computeAccountBalance(totalPnL));
-    var _liveCaps=calcPosSizes(_liveTier,{useDirect:true,sizingMode:settings.sizingMode,slippagePct:settings.slippagePct,positionMaxPct:settings.positionMaxPct,riskMaxPct:settings.riskMaxPct,positionMaxDollar:settings.positionMaxDollar,riskMaxDollar:settings.riskMaxDollar});
+    var _liveCaps=calcPosSizes(_liveTier,{useDirect:true,sizingMode:settings.sizingMode,slippagePct:settings.slippagePct,positionMaxPct:settings.positionMaxPct,riskMaxPct:settings.riskMaxPct,positionMaxDollar:settings.positionMaxDollar,positionMaxContracts:settings.positionMaxContracts,riskMaxDollar:settings.riskMaxDollar});
     var enriched=autoAddViolations(Object.assign({},t,_rc,{openedAt:derivedOpenedAt,closedAt:derivedClosedAt,status:status,sessionId:sessionId}),_liveCaps.positionMax);
     // CHANGED: Compute updated trades list outside setState so we can sync the journal too.
     var existingIdx=state.trades.findIndex(function(x){return x.id===enriched.id;});
@@ -10756,7 +10830,7 @@ function App(props){
           var sf=effSF;
           var bal=computeAccountBalance(totalPnL);
           var tier=getCurrentTier(bal);
-          var s=calcPosSizes(tier,{useDirect:true,sizingMode:settings.sizingMode,slippagePct:settings.slippagePct,positionMaxPct:settings.positionMaxPct,riskMaxPct:settings.riskMaxPct,positionMaxDollar:settings.positionMaxDollar,riskMaxDollar:settings.riskMaxDollar});
+          var s=calcPosSizes(tier,{useDirect:true,sizingMode:settings.sizingMode,slippagePct:settings.slippagePct,positionMaxPct:settings.positionMaxPct,riskMaxPct:settings.riskMaxPct,positionMaxDollar:settings.positionMaxDollar,positionMaxContracts:settings.positionMaxContracts,riskMaxDollar:settings.riskMaxDollar});
           var dPosMin=Math.round(s.positionMin*sf);
           var dPosMax=Math.round(s.positionMax*sf);
           var dRiskMin=Math.round(s.riskMin*sf);
