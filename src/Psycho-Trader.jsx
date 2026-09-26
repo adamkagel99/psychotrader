@@ -420,6 +420,14 @@ function getCurrentTier(balance){
   for(var i=0;i<ms.length;i++){if(balance>ms[i]*1.05)t=ms[i];}
   return t;
 }
+// CHANGED: Next milestone strictly above a tier value. Used by contract-based sizing, where the
+// contract count = next-tier $ ÷ 1000 (e.g. tier $1k → next $5k → 5 contracts; $5k → $10k → 10).
+// Falls back to the tier itself at the top of the ladder.
+function nextMilestone(tier){
+  var ms=getMilestones();
+  for(var i=0;i<ms.length;i++){if(ms[i]>tier)return ms[i];}
+  return tier;
+}
 function calcPosSizes(a,pcts){
   // CHANGED: When useDirect=true (milestone preview), use 'a' as the base directly instead of getBase(a).
   var b=(pcts&&pcts.useDirect)?a:getBase(a);
@@ -427,9 +435,9 @@ function calcPosSizes(a,pcts){
   var slip=p.slippagePct!=null?p.slippagePct:20;
   var posMax,riskMax,posUnit="$";
   if(p.sizingMode==="contracts"){
-    // CHANGED: Contract-based sizing — position cap is a fixed CONTRACT count (not $), risk cap
-    // stays in $. Position is expressed in contracts; risk is dollars.
-    posMax=Math.round(parseFloat(p.positionMaxContracts)||0);
+    // CHANGED: Contract-based sizing is now TIER-DERIVED — contracts = next-tier $ ÷ 1000
+    // (e.g. balance in $1k–$5k → next tier $5k → 5 contracts; $5k–$10k → 10). Risk cap stays $.
+    posMax=Math.round(nextMilestone(b)/1000);
     riskMax=Math.round(parseFloat(p.riskMaxDollar)||0);
     posUnit="contracts";
   }else if(p.sizingMode==="dollar"){
@@ -441,7 +449,8 @@ function calcPosSizes(a,pcts){
     posMax=Math.round(b*(posMaxPct/100));
     riskMax=Math.round(posMax*(riskMaxPct/100));
   }
-  var posMin=Math.round(posMax*(1-slip/100));
+  // CHANGED: Contracts are a discrete tier target — no slippage range on the position (min = max).
+  var posMin=posUnit==="contracts"?posMax:Math.round(posMax*(1-slip/100));
   var riskMin=Math.round(riskMax*(1-slip/100));
   return {base:b,positionMin:posMin,positionMax:posMax,riskMin:riskMin,riskMax:riskMax,posUnit:posUnit,riskUnit:"$"};
 }
@@ -9267,10 +9276,11 @@ function SettingsTab(props){
             <div><label style={lbl}>Slippage %</label><input type="number" step="0.1" value={settings.slippagePct!=null?settings.slippagePct:20} onChange={function(e){setSettings(function(s){return Object.assign({},s,{slippagePct:parseFloat(e.target.value)||0});});}} style={fld}/></div>
           </div>
         ):(settings.sizingMode||"pct")==="contracts"?(
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8,marginBottom:8}}>
-            <div><label style={lbl}>Slippage %</label><input type="number" step="0.1" value={settings.slippagePct!=null?settings.slippagePct:20} onChange={function(e){setSettings(function(s){return Object.assign({},s,{slippagePct:parseFloat(e.target.value)||0});});}} style={fld}/></div>
-            <div><label style={lbl}>Position Max (contracts)</label><input type="number" step="1" min="0" value={settings.positionMaxContracts!=null?settings.positionMaxContracts:1} onChange={function(e){setSettings(function(s){return Object.assign({},s,{positionMaxContracts:parseFloat(e.target.value)||0});});}} style={fld}/></div>
-            <div><label style={lbl}>Risk Max ($)</label><input type="number" step="1" value={settings.riskMaxDollar!=null?settings.riskMaxDollar:165} onChange={function(e){setSettings(function(s){return Object.assign({},s,{riskMaxDollar:parseFloat(e.target.value)||0});});}} style={fld}/></div>
+          <div style={{marginBottom:8}}>
+            <div style={{fontSize:11,color:"#64748b",marginBottom:8,lineHeight:1.5,padding:"7px 9px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:6}}>Contracts are derived from your tier: <span style={{color:"#a5b4fc"}}>next-tier $ ÷ 1000</span>. E.g. $1k–$5k → 5 contracts, $5k–$10k → 10.</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8}}>
+              <div><label style={lbl}>Risk Max ($)</label><input type="number" step="1" value={settings.riskMaxDollar!=null?settings.riskMaxDollar:165} onChange={function(e){setSettings(function(s){return Object.assign({},s,{riskMaxDollar:parseFloat(e.target.value)||0});});}} style={fld}/></div>
+            </div>
           </div>
         ):(
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8,marginBottom:8}}>
@@ -9325,7 +9335,7 @@ function SettingsTab(props){
                       </div>
                     ):(settings.sizingMode||"pct")==="contracts"?(
                       <div>
-                        Pos Max = <span style={{color:"#a5b4fc"}}>{settings.positionMaxContracts} ct</span> (fixed) · Pos Min = Pos Max × (1 − <span style={{color:"#a5b4fc"}}>{slip}%</span>)<br/>
+                        Contracts = <span style={{color:"#a5b4fc"}}>next-tier $ ÷ 1000</span> (e.g. $1k–$5k → 5, $5k–$10k → 10)<br/>
                         Risk Max = <span style={{color:"#a5b4fc"}}>${settings.riskMaxDollar}</span> (fixed) · Risk Min = Risk Max × (1 − <span style={{color:"#a5b4fc"}}>{slip}%</span>)
                       </div>
                     ):(
