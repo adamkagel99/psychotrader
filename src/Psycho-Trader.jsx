@@ -6348,7 +6348,7 @@ function GoalRing(props){
          replace with "Goal reached". The ring color shift already conveys completion. */}
       {isPercent?(
         <div style={{fontSize:cmp?8:10,color:"#475569",marginTop:1,textAlign:"center"}}>target {(typeof tgt==="number"?Math.round(tgt):tgt)}%</div>
-      ):(<>
+      ):HIDE_AMOUNTS?null:(<>
         <div style={{fontSize:cmp?15:21,fontWeight:800,color:valColor,fontVariantNumeric:"tabular-nums",lineHeight:1.1,textAlign:"center"}}>{fv}</div>
         <div style={{fontSize:cmp?9:11,color:"#64748b",marginTop:3,textAlign:"center"}}>of {ft}</div>
       </>)}
