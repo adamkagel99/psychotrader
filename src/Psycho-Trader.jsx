@@ -896,7 +896,7 @@ function getFocusStates(settings){
   });
   return out;
 }
-function defaultSettings(){return {accountSize:0,positionMin:0,positionMax:0,riskMin:0,riskMax:0,gainMultiplier:5,timezone:"America/Los_Angeles",sessions:defaultSessionsForTz("America/Los_Angeles"),tradingWindows:[{start:60,end:1020}],slippagePct:20,positionMaxPct:7.5,positionMaxDollar:500,positionMaxContracts:1,riskPerContract:33,riskMaxPct:33,riskMaxDollar:165,sizingMode:"pct",hideDollarPnL:false,enabledAssetClasses:defaultEnabledAssetClasses(),assetClassSettings:defaultAssetClassSettings(),defaultAssetClass:"options",defaultInstruments:{},focusStates:defaultFocusStates(),enabledGrades:["A","B"]};}
+function defaultSettings(){return {accountSize:0,positionMin:0,positionMax:0,riskMin:0,riskMax:0,gainMultiplier:5,timezone:"America/Los_Angeles",sessions:defaultSessionsForTz("America/Los_Angeles"),tradingWindows:[{start:60,end:1020}],slippagePct:20,positionMaxPct:7.5,positionMaxDollar:500,positionMaxContracts:1,riskPerContract:33,riskMaxPct:33,riskMaxDollar:165,sizingMode:"pct",hideDollarPnL:false,hideAmounts:false,enabledAssetClasses:defaultEnabledAssetClasses(),assetClassSettings:defaultAssetClassSettings(),defaultAssetClass:"options",defaultInstruments:{},focusStates:defaultFocusStates(),enabledGrades:["A","B"]};}
 // Grade metadata — order + colors. C exists for legacy trades but is off by default.
 var ALL_GRADES=["A","B","C"];
 var GRADE_COLORS={A:"#22c55e",B:"#f59e0b",C:"#ef4444"};
@@ -933,17 +933,29 @@ function getSetupGradeCriteria(settings,setup,grade){
 }
 
 var HIDE_DOLLAR_PNL=false;
+// CHANGED: "Outcome only" mode — hides ALL magnitudes ($, %, R alike) so the user sees only
+// win/loss direction. It implies HIDE_DOLLAR_PNL (so every $-hidden branch fires), then masks
+// the substituted value: magnitudes render as AMT_MASK, signed P&L renders as a +/− (win/loss)
+// sign via wlSign(). Win rate, trade counts, and discipline score are NOT amounts and stay.
+var HIDE_AMOUNTS=false;
+var AMT_MASK="•••";
+function setHideAmounts(v){HIDE_AMOUNTS=!!v;}
+// Win/loss direction token for a signed P&L value in outcome-only mode.
+function wlSign(v){var n=parseFloat(v)||0;return n>0?"+":n<0?"−":"—";}
 function setHideDollarPnL(v){HIDE_DOLLAR_PNL=!!v;}
-function fmtMoney(n){if(HIDE_DOLLAR_PNL)return "$•••";var v=Math.abs(parseFloat(n)||0);return "$"+v.toFixed(2);}
-function fmtSignedMoney(n){var v=parseFloat(n)||0;if(HIDE_DOLLAR_PNL)return (v>=0?"+":"−")+"$•••";return (v>=0?"+":"−")+"$"+Math.abs(v).toFixed(2);}
-function $fmt(n,opts){opts=opts||{};if(HIDE_DOLLAR_PNL)return (opts.signed&&n>=0?"+":opts.signed&&n<0?"−":"")+"$•••";var v=parseFloat(n)||0;var sign=opts.signed?(v>=0?"+":"−"):"";return sign+"$"+Math.abs(v).toFixed(opts.decimals!=null?opts.decimals:2);}
+// True when the $-hidden branch should run (either plain hide-$ or full outcome-only mode).
+function hideCurrency(){return HIDE_DOLLAR_PNL||HIDE_AMOUNTS;}
+function fmtMoney(n){if(HIDE_AMOUNTS)return AMT_MASK;if(HIDE_DOLLAR_PNL)return "$•••";var v=Math.abs(parseFloat(n)||0);return "$"+v.toFixed(2);}
+function fmtSignedMoney(n){var v=parseFloat(n)||0;if(HIDE_AMOUNTS)return wlSign(v);if(HIDE_DOLLAR_PNL)return (v>=0?"+":"−")+"$•••";return (v>=0?"+":"−")+"$"+Math.abs(v).toFixed(2);}
+function $fmt(n,opts){opts=opts||{};if(HIDE_AMOUNTS)return opts.signed?wlSign(n):AMT_MASK;if(HIDE_DOLLAR_PNL)return (opts.signed&&n>=0?"+":opts.signed&&n<0?"−":"")+"$•••";var v=parseFloat(n)||0;var sign=opts.signed?(v>=0?"+":"−"):"";return sign+"$"+Math.abs(v).toFixed(opts.decimals!=null?opts.decimals:2);}
 // CHANGED: When $ is hidden, dollar position/risk amounts are shown as a % of current account balance.
 function pctOfAccount(dollars){
+  if(HIDE_AMOUNTS)return AMT_MASK;
   try{var bal=computeAccountBalance(0);if(bal>0)return ((parseFloat(dollars)||0)/bal*100).toFixed(1)+"%";}catch(e){}
   return "—";
 }
-// Position display helper: $ normally, % of account when $ hidden.
-function fmtPositionDisplay(pos){return HIDE_DOLLAR_PNL?pctOfAccount(pos):("$"+Number(pos).toLocaleString(undefined,{maximumFractionDigits:0}));}
+// Position display helper: $ normally, % of account when $ hidden, masked in outcome-only mode.
+function fmtPositionDisplay(pos){if(HIDE_AMOUNTS)return AMT_MASK;return HIDE_DOLLAR_PNL?pctOfAccount(pos):("$"+Number(pos).toLocaleString(undefined,{maximumFractionDigits:0}));}
 function defaultChecklist(){return {sleptWell:false,identifiedPDH:false,identifiedPDL:false,marked15minOpen:false,positionSized:false,candlesOverlapping:false};}
 function defaultState(){return {date:todayStr(),preChecklist:defaultChecklist(),conditionsChecked:{},trades:[],dailyNote:"",ruleViolations:[],commitment:null,commitments:{},noTradeReason:"",noTradeReasons:[],noTradeShots:[],noTradeSessions:{}};}
 // CHANGED: Each leg gets its own timestamp on creation. Editable in the form.
@@ -1824,7 +1836,7 @@ function MonthlyTargetBanner(props){
   if(halfOn)return null;
   if(isMonthGoalBannerDismissed())return null;
   var allowance=getWithdrawalAllowance(totalPnL);
-  var fmt=function(n){return "$"+Math.round(n).toLocaleString();};
+  var fmt=function(n){if(HIDE_AMOUNTS)return AMT_MASK;return "$"+Math.round(n).toLocaleString();};
   return (
     <div style={{marginBottom:props.compact?0:12,padding:props.compact?"8px 12px":"12px 16px",background:"linear-gradient(135deg,#422006,#713f12)",border:"1px solid #facc15",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
       <div style={{minWidth:0}}>
@@ -2221,7 +2233,7 @@ function DailyPnLBar(props){
   var worstPct=Math.min.apply(null,pcts);
   var avgPct=pcts.reduce(function(s,v){return s+v;},0)/pcts.length;
   // CHANGED: fmt now takes both $ and % so it can return the % when dollars are hidden.
-  var fmt=function(n,pct){if(HIDE_DOLLAR_PNL)return (pct>=0?"+":"")+pct.toFixed(2)+"%";return (n>=0?"+":"-")+"$"+Math.abs(n).toFixed(0);};
+  var fmt=function(n,pct){if(HIDE_AMOUNTS)return wlSign(n);if(HIDE_DOLLAR_PNL)return (pct>=0?"+":"")+pct.toFixed(2)+"%";return (n>=0?"+":"-")+"$"+Math.abs(n).toFixed(0);};
   // CHANGED: When dollars are hidden, scale bar heights by per-day % so the visible bar size
   // matches the unit shown in the tooltip. Otherwise a small-$-but-big-% day got squashed into
   // an invisible sliver by a single large-$ outlier.
@@ -2310,7 +2322,7 @@ function DailyPnLBar(props){
           var pnl=entryNetPnl(e),bx=barX(effectiveHoverIdx),bh=barH(pnl,pcts[effectiveHoverIdx]),by=barY(pnl,pcts[effectiveHoverIdx]);
           var color=pnl>=0?"#22c55e":"#ef4444";
           var tx=bx+barW/2,ty=pnl>=0?by-6:by+bh+14;
-          var dateStr=fmtDate(e.date),pnlStr=HIDE_DOLLAR_PNL?((function(){var sb=getAccountBalanceAtDate(e.date);var p=sb>0?(pnl/sb*100):0;return (p>=0?"+":"")+p.toFixed(2)+"%";})()):(fmtPnl(pnl));
+          var dateStr=fmtDate(e.date),pnlStr=HIDE_AMOUNTS?wlSign(pnl):(HIDE_DOLLAR_PNL?((function(){var sb=getAccountBalanceAtDate(e.date);var p=sb>0?(pnl/sb*100):0;return (p>=0?"+":"")+p.toFixed(2)+"%";})()):(fmtPnl(pnl)));
           var trades=(e.trades||[]).length;
           var label=dateStr+" · "+pnlStr+(trades>0?" · "+trades+"t":"");
           var tw=label.length*5.5+16;
@@ -2506,6 +2518,7 @@ function CalendarGrid(props){
               {dayData&&dayData.tradeCount>0&&(function(){
                 if(props.summaryMode==="trades")return <span style={{fontSize:10,color:col,fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1,marginTop:2}}>{dayData.tradeCount}t</span>;
                 if(pnl==null)return null;
+                if(HIDE_AMOUNTS)return null; // outcome-only: cell color conveys win/loss, no number
                 if(HIDE_DOLLAR_PNL){
                   var rT=dayData.rTotal||0;
                   if(rT===0&&dayRiskMax<=0)return null;
@@ -2610,6 +2623,8 @@ function DashboardCalendar(props){
   if(headerScope.hasAny){
     if(summaryMode==="trades"){
       readoutText=headerScope.trades+"t";
+    }else if(HIDE_AMOUNTS){
+      readoutText=wlSign(headerScope.pnl);readoutColor=headerScope.pnl>=0?"#86efac":"#fca5a5";
     }else if(HIDE_DOLLAR_PNL){
       if(headerScope.hasRisk){readoutText=(headerScope.r>=0?"+":"")+headerScope.r.toFixed(1)+"R";readoutColor=headerScope.r>=0?"#86efac":"#fca5a5";}
     }else{
@@ -2664,6 +2679,7 @@ function DashboardCalendar(props){
                     // CHANGED: trade count mode — show "Nt" when there are trades, blank otherwise.
                     d.tradeCount>0?<span style={{fontSize:10,color:col,fontWeight:600,fontVariantNumeric:"tabular-nums",lineHeight:1,marginTop:2}}>{d.tradeCount}t</span>:<span style={{fontSize:10,lineHeight:1,marginTop:2,color:"transparent"}}>·</span>
                   ):pnl!=null&&(d.tradeCount>0||pnl!==0)?(
+                    HIDE_AMOUNTS?(<span style={{fontSize:10,lineHeight:1,marginTop:2,color:"transparent"}}>·</span>):
                     HIDE_DOLLAR_PNL?(
                     (function(){
                       // CHANGED: Use stamped per-trade R (sum of each trade's R against own
@@ -3036,7 +3052,9 @@ function TradeTile(props){
       {/* P&L ROW: when $ is hidden, show % in the large slot; otherwise show $ + smaller %. */}
       {hasPnl&&(
         <div style={{display:"flex",alignItems:"baseline",gap:10,marginTop:8,flexWrap:"wrap"}}>
-          {HIDE_DOLLAR_PNL
+          {HIDE_AMOUNTS
+            ? (<div style={{fontSize:16,fontWeight:800,color:pnlColor,lineHeight:1,letterSpacing:0.5}}>{pnl>0?"WIN":pnl<0?"LOSS":"FLAT"}</div>)
+            : HIDE_DOLLAR_PNL
             ? (<>
                 {hasR&&<div style={{fontSize:18,fontWeight:800,color:pnlColor,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>{rMul>=0?"+":""}{rMul.toFixed(2)}R</div>}
                 {hasPct&&<div style={{fontSize:13,color:pctPnl>=0?"#86efac":"#fca5a5",fontWeight:600,fontVariantNumeric:"tabular-nums"}}>({pctPnl>=0?"+":""}{pctPnl.toFixed(2)}%)</div>}
@@ -4172,7 +4190,7 @@ function ScalingTargetCard(props){
   var sizesAtTarget=calcPosSizes(targetVal,{sizingMode:settings.sizingMode,slippagePct:slip,positionMaxPct:posMaxPct,riskMaxPct:riskMaxPct,positionMaxDollar:settings.positionMaxDollar,positionMaxContracts:settings.positionMaxContracts,riskPerContract:settings.riskPerContract,riskMaxDollar:settings.riskMaxDollar});
   var sizesNow=calcPosSizes(currentTier,{sizingMode:settings.sizingMode,slippagePct:slip,positionMaxPct:posMaxPct,riskMaxPct:riskMaxPct,positionMaxDollar:settings.positionMaxDollar,positionMaxContracts:settings.positionMaxContracts,riskPerContract:settings.riskPerContract,riskMaxDollar:settings.riskMaxDollar});
   function fmtUSD(v){return "$"+v.toLocaleString("en-US",{maximumFractionDigits:0});}
-  function fmtPnLUSD(v){if(HIDE_DOLLAR_PNL)return "$•••";return "$"+v.toLocaleString("en-US",{maximumFractionDigits:0});}
+  function fmtPnLUSD(v){if(HIDE_AMOUNTS)return AMT_MASK;if(HIDE_DOLLAR_PNL)return "$•••";return "$"+v.toLocaleString("en-US",{maximumFractionDigits:0});}
   // CHANGED: Position range respects contract-based sizing unit.
   function fmtPos(sz){return sz.posUnit==="contracts"?(sz.positionMin+"–"+sz.positionMax+" ct"):(fmtUSD(sz.positionMin)+"–"+fmtUSD(sz.positionMax));}
   return (
@@ -4424,16 +4442,20 @@ function TodayStrip(props){
     ddVal=worst;
   })();
   var ddR=riskMax>0?ddVal/riskMax:0;
-  var ddText=HIDE_DOLLAR_PNL
+  var ddText=HIDE_AMOUNTS
+    ?AMT_MASK
+    :HIDE_DOLLAR_PNL
     ?(ddR<=-0.05?ddR.toFixed(1)+"R":"0R")
     :(ddVal<0?"-$"+Math.abs(ddVal).toFixed(0):"$0");
   var startBal=(props.currentAccount||0)-pnl;
-  var pnlText=HIDE_DOLLAR_PNL
+  var pnlText=HIDE_AMOUNTS
+    ?wlSign(pnl)
+    :HIDE_DOLLAR_PNL
     ?((pnl>=0?"+":"")+(startBal>0?(pnl/startBal*100):0).toFixed(2)+"%")
     :((pnl<0?"-$":"$")+Math.abs(pnl).toFixed(2));
   var tiles=[
     {label:"Today P&L",value:pnlText,color:pnlColor},
-    {label:"R Multiple",value:(rVal>=0?"+":"")+rVal.toFixed(1)+"R",color:rVal>=0?"#22c55e":"#ef4444"},
+    {label:"R Multiple",value:HIDE_AMOUNTS?AMT_MASK:((rVal>=0?"+":"")+rVal.toFixed(1)+"R"),color:rVal>=0?"#22c55e":"#ef4444"},
     {label:"Trades",value:cap!=null?(todayTrades.length+" / "+cap):String(todayTrades.length),color:cap!=null&&todayTrades.length>cap?"#ef4444":"#e2e8f0"},
     {label:"Intraday DD",value:ddText,color:ddVal<0?"#ef4444":"#94a3b8"},
     {label:"Discipline",value:Math.round(disc),color:discColor(disc)}
@@ -4514,10 +4536,10 @@ function GoalsSnapshot(props){
       },0);
     }catch(e){return 0;}
   })();
-  function money(v){if(HIDE_DOLLAR_PNL)return (v<0?"-":"")+"$•••";return (v<0?"-$":"$")+Math.abs(Math.round(v)).toLocaleString();}
-  function rFmt(v){var r=riskMax>0?v/riskMax:0;return (r>=0?"+":"")+r.toFixed(1)+"R";}
-  var pnlVal=HIDE_DOLLAR_PNL?rFmt:money;
-  var pnlTgt=HIDE_DOLLAR_PNL?rFmt:money;
+  function money(v){if(HIDE_AMOUNTS)return AMT_MASK;if(HIDE_DOLLAR_PNL)return (v<0?"-":"")+"$•••";return (v<0?"-$":"$")+Math.abs(Math.round(v)).toLocaleString();}
+  function rFmt(v){if(HIDE_AMOUNTS)return wlSign(v);var r=riskMax>0?v/riskMax:0;return (r>=0?"+":"")+r.toFixed(1)+"R";}
+  var pnlVal=HIDE_AMOUNTS?money:(HIDE_DOLLAR_PNL?rFmt:money);
+  var pnlTgt=HIDE_AMOUNTS?money:(HIDE_DOLLAR_PNL?rFmt:money);
   // CHANGED: build GoalRing tiles grouped by category to mirror the Goals tab.
   var account=[],perf=[],pnl=[];
   if(!hidden.account&&accountTarget>0)account.push({key:"account",label:"Account Balance",value:props.currentAccount||0,target:accountTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
@@ -5627,6 +5649,7 @@ function TradesTab(props){
                   var startBal=getAccountBalanceAtDate(dateKey);
                   var pct=startBal>0?(sPnl/startBal*100):0;
                   var pctStr=(pct>=0?"+":"")+pct.toFixed(2)+"%";
+                  if(HIDE_AMOUNTS)return wlSign(sPnl);
                   if(HIDE_DOLLAR_PNL)return pctStr;
                   var dol=(sPnl>=0?"+":"-")+"$"+Math.abs(sPnl).toFixed(2);
                   return <>{dol} <span style={{fontSize:11,fontWeight:600,color:"#94a3b8"}}>({pctStr})</span></>;
@@ -5991,7 +6014,7 @@ function JournalTab(props){
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
             <div>
               <div style={{fontSize:11,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>Daily P&L</div>
-              <div style={{fontSize:28,fontWeight:700,color:pnlVal>=0?"#22c55e":"#ef4444",marginTop:4}}>{HIDE_DOLLAR_PNL?fmtPct(sumPct,true):((pnlVal>=0?"+":"-")+"$"+Math.abs(pnlVal).toFixed(2))}</div>
+              <div style={{fontSize:28,fontWeight:700,color:pnlVal>=0?"#22c55e":"#ef4444",marginTop:4}}>{HIDE_AMOUNTS?(pnlVal>0?"WIN":pnlVal<0?"LOSS":"FLAT"):HIDE_DOLLAR_PNL?fmtPct(sumPct,true):((pnlVal>=0?"+":"-")+"$"+Math.abs(pnlVal).toFixed(2))}</div>
             </div>
             <div style={{display:"flex",gap:8}}>
               {!editing&&<button onClick={function(){startEdit(selectedEntry);}} style={{padding:"5px 11px",background:"#1e1b4b",border:"1px solid #4338ca",borderRadius:6,color:"#a5b4fc",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Edit</button>}
@@ -6004,8 +6027,8 @@ function JournalTab(props){
             <div style={{background:"#0a0a0f",borderRadius:8,padding:"8px 10px",border:"1px solid #1e293b"}}><div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>Discipline</div><div style={{fontSize:18,fontWeight:700,color:discColor(liveDiscipline),marginTop:2}}>{liveDiscipline}</div></div>
           </div>
           {trades.length>0&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            <div style={{background:"#0a0a0f",borderRadius:8,padding:"8px 10px",border:"1px solid #1e293b"}}><div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>Avg Win</div><div style={{fontSize:15,fontWeight:700,color:"#22c55e",marginTop:2}}>{HIDE_DOLLAR_PNL?("+"+avgWinPct.toFixed(2)+"%"):"$"+avgWin.toFixed(2)}</div></div>
-            <div style={{background:"#0a0a0f",borderRadius:8,padding:"8px 10px",border:"1px solid #1e293b"}}><div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>Avg Loss</div><div style={{fontSize:15,fontWeight:700,color:"#ef4444",marginTop:2}}>{HIDE_DOLLAR_PNL?("-"+avgLossPct.toFixed(2)+"%"):"$"+avgLoss.toFixed(2)}</div></div>
+            <div style={{background:"#0a0a0f",borderRadius:8,padding:"8px 10px",border:"1px solid #1e293b"}}><div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>Avg Win</div><div style={{fontSize:15,fontWeight:700,color:"#22c55e",marginTop:2}}>{HIDE_AMOUNTS?AMT_MASK:HIDE_DOLLAR_PNL?("+"+avgWinPct.toFixed(2)+"%"):"$"+avgWin.toFixed(2)}</div></div>
+            <div style={{background:"#0a0a0f",borderRadius:8,padding:"8px 10px",border:"1px solid #1e293b"}}><div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>Avg Loss</div><div style={{fontSize:15,fontWeight:700,color:"#ef4444",marginTop:2}}>{HIDE_AMOUNTS?AMT_MASK:HIDE_DOLLAR_PNL?("-"+avgLossPct.toFixed(2)+"%"):"$"+avgLoss.toFixed(2)}</div></div>
           </div>}
         </div>
         <div style={CS({marginBottom:14})}>
@@ -6183,7 +6206,7 @@ function JournalTab(props){
                   <div style={{fontSize:12,color:"#64748b"}}>{trades.length} trade{trades.length===1?"":"s"} · {winRate}% WR{breakevens>0?" · "+breakevens+" BE":""} · D{entry.disciplineScore||0}</div>
                 </div>
                 <div style={{textAlign:"right",flexShrink:0}}>
-                  <div style={{fontSize:16,fontWeight:700,color:pnl>=0?"#22c55e":"#ef4444"}}>{HIDE_DOLLAR_PNL?((sumPct>=0?"+":"")+sumPct.toFixed(2)+"%"):((pnl>=0?"+":"-")+"$"+Math.abs(pnl).toFixed(2))}</div>
+                  <div style={{fontSize:16,fontWeight:700,color:pnl>=0?"#22c55e":"#ef4444"}}>{HIDE_AMOUNTS?wlSign(pnl):HIDE_DOLLAR_PNL?((sumPct>=0?"+":"")+sumPct.toFixed(2)+"%"):((pnl>=0?"+":"-")+"$"+Math.abs(pnl).toFixed(2))}</div>
                 </div>
               </div>
               {entry.note&&<div style={{fontSize:12,color:"#94a3b8",marginTop:5,fontStyle:"italic",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>"{entry.note}"</div>}
@@ -7325,9 +7348,9 @@ function EquityCurve(props){
     }catch(e){}
   }
   var positive=cum>=0;
-  var fmt=function(n){if(HIDE_DOLLAR_PNL){var pct=pctDenom>0?(n/pctDenom*100):0;return (pct>=0?"+":"")+pct.toFixed(2)+"%";}return (n>=0?"+":"-")+"$"+Math.abs(n).toFixed(2);};
+  var fmt=function(n){if(HIDE_AMOUNTS)return wlSign(n);if(HIDE_DOLLAR_PNL){var pct=pctDenom>0?(n/pctDenom*100):0;return (pct>=0?"+":"")+pct.toFixed(2)+"%";}return (n>=0?"+":"-")+"$"+Math.abs(n).toFixed(2);};
   // CHANGED: Drawdown also reframed to use the same denominator so it's apples-to-apples with the headline %.
-  var fmtDD=function(){if(maxDD>=0)return "—";if(HIDE_DOLLAR_PNL){var pct=pctDenom>0?(maxDD/pctDenom*100):maxDDPct;return pct.toFixed(2)+"%";}return fmt(maxDD);};
+  var fmtDD=function(){if(maxDD>=0)return "—";if(HIDE_AMOUNTS)return AMT_MASK;if(HIDE_DOLLAR_PNL){var pct=pctDenom>0?(maxDD/pctDenom*100):maxDDPct;return pct.toFixed(2)+"%";}return fmt(maxDD);};
   // CHANGED: Interactive hover/drag — readout switches to the value at the hovered point.
   // Broadcasts the hovered date to other charts via shared pub/sub (skipped in per-trade
   // "granular" mode since other daily charts don't share that index space).
@@ -7425,7 +7448,7 @@ function WhatsWorkingPanel(props){
   var working=rows.filter(function(r){return r.exp>0;}).sort(function(a,b){return b.exp-a.exp;}).slice(0,3);
   var hurting=rows.filter(function(r){return r.exp<0;}).sort(function(a,b){return a.exp-b.exp;}).slice(0,3);
   // CHANGED: when $ is hidden, expectancy is shown as average % per trade.
-  var fmtExp=function(r){if(HIDE_DOLLAR_PNL)return (r.expPct>=0?"+":"")+r.expPct.toFixed(2)+"%";return (r.exp>=0?"+":"-")+"$"+Math.abs(r.exp).toFixed(0);};
+  var fmtExp=function(r){if(HIDE_AMOUNTS)return wlSign(r.exp);if(HIDE_DOLLAR_PNL)return (r.expPct>=0?"+":"")+r.expPct.toFixed(2)+"%";return (r.exp>=0?"+":"-")+"$"+Math.abs(r.exp).toFixed(0);};
   function Col(p){return (
     <div style={{flex:1,minWidth:0,padding:"10px 12px",background:"#0d0d12",border:"1px solid "+p.bd,borderRadius:8,display:"flex",flexDirection:"column"}}>
       <div style={{fontSize:10,color:p.titleColor,letterSpacing:1,textTransform:"uppercase",fontWeight:700,marginBottom:6,display:"flex",alignItems:"center",gap:6}}><span>{p.icon}</span>{p.title}</div>
@@ -7511,9 +7534,9 @@ function RMultipleHistogram(props){
         <div>
           <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{hoverI!=null?labels[hoverI]:"R-Multiple Distribution"}</div>
           {hoverI!=null?(
-            <div style={{fontSize:20,fontWeight:700,color:bounds[hoverI+1]<=0?"#ef4444":"#22c55e",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{hoverAvgR!=null?((hoverAvgR>=0?"+":"")+hoverAvgR.toFixed(2)+"R"):"—"}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:4}}>avg</span></div>
+            <div style={{fontSize:20,fontWeight:700,color:bounds[hoverI+1]<=0?"#ef4444":"#22c55e",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{HIDE_AMOUNTS?AMT_MASK:hoverAvgR!=null?((hoverAvgR>=0?"+":"")+hoverAvgR.toFixed(2)+"R"):"—"}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:4}}>avg</span></div>
           ):(
-            <div style={{fontSize:20,fontWeight:700,color:expR>=0?"#22c55e":"#ef4444",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{(expR>=0?"+":"")+expR.toFixed(2)}R<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:4}}>/trade</span></div>
+            <div style={{fontSize:20,fontWeight:700,color:expR>=0?"#22c55e":"#ef4444",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{HIDE_AMOUNTS?AMT_MASK:((expR>=0?"+":"")+expR.toFixed(2)+"R")}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:4}}>/trade</span></div>
           )}
         </div>
         <div style={{textAlign:"right",fontSize:10,color:"#94a3b8",lineHeight:1.55}}>
@@ -7522,8 +7545,8 @@ function RMultipleHistogram(props){
             var avgWinD=winsDollar.length>0?winsDollar.reduce(function(s,v){return s+v;},0)/winsDollar.length:0;
             var avgLossD=lossesDollar.length>0?lossesDollar.reduce(function(s,v){return s+v;},0)/lossesDollar.length:0;
             return (<>
-              <div>Avg win ({winsDollar.length}): <span style={{color:"#86efac",fontWeight:700}}>+{avgWinR.toFixed(2)}R</span>{winsDollar.length>0&&!HIDE_DOLLAR_PNL&&<span style={{color:"#86efac",fontWeight:600,marginLeft:4}}>(+${avgWinD.toFixed(0)})</span>}</div>
-              <div>Avg loss ({lossesDollar.length}): <span style={{color:"#fca5a5",fontWeight:700}}>{avgLossR.toFixed(2)}R</span>{lossesDollar.length>0&&!HIDE_DOLLAR_PNL&&<span style={{color:"#fca5a5",fontWeight:600,marginLeft:4}}>(-${Math.abs(avgLossD).toFixed(0)})</span>}</div>
+              <div>Avg win ({winsDollar.length}): <span style={{color:"#86efac",fontWeight:700}}>{HIDE_AMOUNTS?AMT_MASK:("+"+avgWinR.toFixed(2)+"R")}</span>{winsDollar.length>0&&!HIDE_DOLLAR_PNL&&<span style={{color:"#86efac",fontWeight:600,marginLeft:4}}>(+${avgWinD.toFixed(0)})</span>}</div>
+              <div>Avg loss ({lossesDollar.length}): <span style={{color:"#fca5a5",fontWeight:700}}>{HIDE_AMOUNTS?AMT_MASK:(avgLossR.toFixed(2)+"R")}</span>{lossesDollar.length>0&&!HIDE_DOLLAR_PNL&&<span style={{color:"#fca5a5",fontWeight:600,marginLeft:4}}>(-${Math.abs(avgLossD).toFixed(0)})</span>}</div>
             </>);
           })()}
         </div>
@@ -7682,8 +7705,8 @@ function DisciplineScatter(props){
             var aAvgD=above.length>0?above.reduce(function(s,p){return s+(p.pnl||0);},0)/above.length:0;
             function fmtD(v){return (v>=0?"+$":"-$")+Math.abs(v).toFixed(0);}
             return (<>
-              <div>Below thr ({below.length}): <span style={{color:belowAvgR>=0?"#86efac":"#fca5a5",fontWeight:700}}>{fmtR(belowAvgR)}</span>{below.length>0&&!HIDE_DOLLAR_PNL&&<span style={{color:bAvgD>=0?"#86efac":"#fca5a5",fontWeight:600,marginLeft:4}}>({fmtD(bAvgD)})</span>}</div>
-              <div>At/above ({above.length}): <span style={{color:aboveAvgR>=0?"#86efac":"#fca5a5",fontWeight:700}}>{fmtR(aboveAvgR)}</span>{above.length>0&&!HIDE_DOLLAR_PNL&&<span style={{color:aAvgD>=0?"#86efac":"#fca5a5",fontWeight:600,marginLeft:4}}>({fmtD(aAvgD)})</span>}</div>
+              <div>Below thr ({below.length}): <span style={{color:belowAvgR>=0?"#86efac":"#fca5a5",fontWeight:700}}>{HIDE_AMOUNTS?AMT_MASK:fmtR(belowAvgR)}</span>{below.length>0&&!HIDE_DOLLAR_PNL&&<span style={{color:bAvgD>=0?"#86efac":"#fca5a5",fontWeight:600,marginLeft:4}}>({fmtD(bAvgD)})</span>}</div>
+              <div>At/above ({above.length}): <span style={{color:aboveAvgR>=0?"#86efac":"#fca5a5",fontWeight:700}}>{HIDE_AMOUNTS?AMT_MASK:fmtR(aboveAvgR)}</span>{above.length>0&&!HIDE_DOLLAR_PNL&&<span style={{color:aAvgD>=0?"#86efac":"#fca5a5",fontWeight:600,marginLeft:4}}>({fmtD(aAvgD)})</span>}</div>
             </>);
           })()}
         </div>
@@ -7823,7 +7846,7 @@ function SessionDayHeatmap(props){
   grid.forEach(function(row){row.forEach(function(c){if(Math.abs(c.pnl)>maxAbs)maxAbs=Math.abs(c.pnl);});});
   if(maxAbs===0)maxAbs=1;
   var [hover,setHover]=useState(null);
-  var fmt=function(n){if(HIDE_DOLLAR_PNL)return (n>=0?"+":"-")+"$•••";return (n>=0?"+":"-")+"$"+Math.abs(n).toFixed(0);};
+  var fmt=function(n){if(HIDE_AMOUNTS)return wlSign(n);if(HIDE_DOLLAR_PNL)return (n>=0?"+":"-")+"$•••";return (n>=0?"+":"-")+"$"+Math.abs(n).toFixed(0);};
   var hp=hover?{s:rowSessions[hover.s],d:dayLabels[hover.d],c:grid[hover.s][hover.d]}:null;
   return (
     <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid #1e293b",borderRadius:10,display:"flex",flexDirection:"column",height:"100%",boxSizing:"border-box"}}>
@@ -7831,7 +7854,7 @@ function SessionDayHeatmap(props){
         <div>
           <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{hp?(hp.s.name+" · "+hp.d):"Session × Day (P&L)"}</div>
           {hp?(
-            <div style={{fontSize:18,fontWeight:700,color:hp.c.n>0?(hp.c.pnl>=0?"#22c55e":"#ef4444"):"#94a3b8",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{HIDE_DOLLAR_PNL?((hp.c.rSum>=0?"+":"")+hp.c.rSum.toFixed(2)+"R"):fmt(hp.c.pnl)}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:6}}>{hp.c.n}t · {hp.c.n>0?Math.round(hp.c.wins/hp.c.n*100):0}% wr</span></div>
+            <div style={{fontSize:18,fontWeight:700,color:hp.c.n>0?(hp.c.pnl>=0?"#22c55e":"#ef4444"):"#94a3b8",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{HIDE_AMOUNTS?wlSign(hp.c.pnl):HIDE_DOLLAR_PNL?((hp.c.rSum>=0?"+":"")+hp.c.rSum.toFixed(2)+"R"):fmt(hp.c.pnl)}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:6}}>{hp.c.n}t · {hp.c.n>0?Math.round(hp.c.wins/hp.c.n*100):0}% wr</span></div>
           ):(
             <div style={{fontSize:14,fontWeight:600,color:"#94a3b8",marginTop:2}}>Tap a cell to inspect</div>
           )}
@@ -7853,6 +7876,7 @@ function SessionDayHeatmap(props){
             var bg=c.n===0?"#0a0a0f":(c.pnl>=0?"rgba(34,197,94,"+alpha+")":"rgba(239,68,68,"+alpha+")");
             var cellLabel=(function(){
               if(c.n===0)return "";
+              if(HIDE_AMOUNTS)return c.pnl>0?"W":c.pnl<0?"L":"—";
               if(HIDE_DOLLAR_PNL)return ((c.rSum>=0?"+":"")+c.rSum.toFixed(1)+"R");
               var a=Math.abs(c.pnl);
               var s=a>=1000?((a/1000).toFixed(a>=10000?0:1)+"k"):String(Math.round(a));
@@ -8319,7 +8343,7 @@ function PerformanceTab(props){
             var fmtNum=function(v){return v.toFixed(2);};
             var fmtCount=function(v){return Math.round(v).toString();};
             // CHANGED: fmtDollar now respects the global HIDE_DOLLAR_PNL toggle — returns % when on.
-            var fmtDollar=function(v){if(HIDE_DOLLAR_PNL)return (v>=0?"+":"")+v.toFixed(2)+"%";return (v>=0?"+":"-")+"$"+Math.abs(v).toFixed(0);};
+            var fmtDollar=function(v){if(HIDE_AMOUNTS)return wlSign(v);if(HIDE_DOLLAR_PNL)return (v>=0?"+":"")+v.toFixed(2)+"%";return (v>=0?"+":"-")+"$"+Math.abs(v).toFixed(0);};
             // CHANGED: Chart shown based on selectedMetric. For Avg Win/Loss/Expectancy, swap to the
             // % compute when HIDE_DOLLAR_PNL is on so the line reflects what the format shows.
             function renderChart(){
@@ -8397,7 +8421,7 @@ function PerformanceTab(props){
             }
             return <StatSec title="Overview" colSpan={props.mobile?1:6}>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:6,padding:"4px 0"}}>
-                <StatTile label="Total P&L" active={selectedMetric==="totalPnl"} onClick={function(){setSelectedMetric("totalPnl");}} value={HIDE_DOLLAR_PNL?(function(){
+                <StatTile label="Total P&L" active={selectedMetric==="totalPnl"} onClick={function(){setSelectedMetric("totalPnl");}} value={HIDE_AMOUNTS?wlSign(totalPnl):HIDE_DOLLAR_PNL?(function(){
                   // CHANGED: For all-time / long ranges, % return is computed against total deposits
                   // (cumulative invested capital), not summed daily %s — much more meaningful.
                   if(range==="all"||range==="ytd"){
@@ -8424,14 +8448,15 @@ function PerformanceTab(props){
                    (avgPosSize / currentAccount × 100) — gives a meaningful unit without exposing
                    the dollar figure. */}
                 <StatTile label="Avg Pos Size" active={selectedMetric==="avgPosSize"} onClick={function(){setSelectedMetric("avgPosSize");}} value={(function(){
+                  if(HIDE_AMOUNTS)return AMT_MASK;
                   if(!HIDE_DOLLAR_PNL)return "$"+avgPosSize.toFixed(0);
                   var bal=0;try{bal=computeAccountBalance(0);}catch(e){}
                   if(bal<=0||avgPosSize<=0)return "—";
                   return (avgPosSize/bal*100).toFixed(2)+"%";
                 })()} color="#94a3b8" sub={posSizes.length+" trades"}/>
-                <StatTile label="Avg Win" active={selectedMetric==="avgWin"} onClick={function(){setSelectedMetric("avgWin");}} value={HIDE_DOLLAR_PNL?avgWinPct():("+$"+avgWin.toFixed(0))} color="#22c55e" sub={HIDE_DOLLAR_PNL?"":(avgWinPct())}/>
-                <StatTile label="Avg Loss" active={selectedMetric==="avgLoss"} onClick={function(){setSelectedMetric("avgLoss");}} value={HIDE_DOLLAR_PNL?avgLossPct():("-$"+Math.abs(avgLoss).toFixed(0))} color="#ef4444" sub={HIDE_DOLLAR_PNL?"":(avgLossPct())}/>
-                <StatTile label="Expectancy" active={selectedMetric==="expectancy"} onClick={function(){setSelectedMetric("expectancy");}} value={HIDE_DOLLAR_PNL?expPct():((expValue>=0?"+":"-")+"$"+Math.abs(expValue).toFixed(2))} color={expValue>=0?"#22c55e":"#ef4444"} sub={HIDE_DOLLAR_PNL?"":expPct()}/>
+                <StatTile label="Avg Win" active={selectedMetric==="avgWin"} onClick={function(){setSelectedMetric("avgWin");}} value={HIDE_AMOUNTS?AMT_MASK:HIDE_DOLLAR_PNL?avgWinPct():("+$"+avgWin.toFixed(0))} color="#22c55e" sub={HIDE_AMOUNTS?"":HIDE_DOLLAR_PNL?"":(avgWinPct())}/>
+                <StatTile label="Avg Loss" active={selectedMetric==="avgLoss"} onClick={function(){setSelectedMetric("avgLoss");}} value={HIDE_AMOUNTS?AMT_MASK:HIDE_DOLLAR_PNL?avgLossPct():("-$"+Math.abs(avgLoss).toFixed(0))} color="#ef4444" sub={HIDE_AMOUNTS?"":HIDE_DOLLAR_PNL?"":(avgLossPct())}/>
+                <StatTile label="Expectancy" active={selectedMetric==="expectancy"} onClick={function(){setSelectedMetric("expectancy");}} value={HIDE_AMOUNTS?AMT_MASK:HIDE_DOLLAR_PNL?expPct():((expValue>=0?"+":"-")+"$"+Math.abs(expValue).toFixed(2))} color={expValue>=0?"#22c55e":"#ef4444"} sub={HIDE_AMOUNTS?"":HIDE_DOLLAR_PNL?"":expPct()}/>
               </div>
               {/* CHANGED: Chart embedded directly under Overview tiles — clicking a tile swaps the chart. */}
               <div style={{marginTop:14,paddingTop:12,borderTop:"1px solid #1e293b"}}>{renderChart()}</div>
@@ -8639,7 +8664,9 @@ function PerformanceTab(props){
                   var avgLoss=g.lossN>0?g.lossPnl/g.lossN:0;
                   var avgLossPct=g.lossPcts.length>0?(g.lossPcts.reduce(function(s,v){return s+v;},0)/g.lossPcts.length):0;
                   // CHANGED: For discipline-lock row, show worst red day $, not average.
-                  var lossStr=isLock
+                  var lossStr=HIDE_AMOUNTS
+                    ? AMT_MASK
+                    : isLock
                     ? (g.worstPnl<0?"-$"+Math.abs(g.worstPnl).toFixed(2):"—")
                     : (g.lossN>0?(HIDE_DOLLAR_PNL?(avgLossPct.toFixed(2)+"%"):("-$"+Math.abs(avgLoss).toFixed(2))):"—");
                   var unit=isLock?"day":"trade";
@@ -8692,7 +8719,7 @@ function PerformanceTab(props){
               <StatSec title="Untagged Trades" colSpan={props.mobile?1:6}>
                 {cats.map(function(c,i){
                   var g=c.stat;
-                  var lossStr=g.l>0?(HIDE_DOLLAR_PNL?(g.avgLossPct.toFixed(2)+"%"):("-$"+Math.abs(g.avgLoss).toFixed(2))):"—";
+                  var lossStr=HIDE_AMOUNTS?AMT_MASK:(g.l>0?(HIDE_DOLLAR_PNL?(g.avgLossPct.toFixed(2)+"%"):("-$"+Math.abs(g.avgLoss).toFixed(2))):"—");
                   return (
                     <div key={c.label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:i<cats.length-1?"1px solid #1e293b":"none",gap:8}}>
                       <div style={{flex:1,minWidth:0,display:"flex",alignItems:"center",gap:7}}>
@@ -8723,7 +8750,7 @@ function PerformanceTab(props){
             <StatRow label="Win/Loss/BE Split" value={wins.length+"/"+(losses.length)+"/"+breakevens.length} color="#64748b"/>
             {breakevens.length>0&&(
               <>
-                <StatRow label="Avg Breakeven Cost" value={HIDE_DOLLAR_PNL?"$•••":"$"+(breakevens.reduce(function(s,t){return s+(Math.abs(tradeNetPnl(t)));},0)/breakevens.length).toFixed(2)}/>
+                <StatRow label="Avg Breakeven Cost" value={HIDE_AMOUNTS?AMT_MASK:HIDE_DOLLAR_PNL?"$•••":"$"+(breakevens.reduce(function(s,t){return s+(Math.abs(tradeNetPnl(t)));},0)/breakevens.length).toFixed(2)}/>
                 <StatRow label="Breakeven Frequency" value={(breakevenRate>0?breakevenRate:"0")+"%"} last color={breakevenRate>10?"#fbbf24":"#94a3b8"}/>
               </>
             )}
@@ -10236,7 +10263,8 @@ function App(props){
   // eslint-disable-next-line
   },[props.syncTick]);
   // Persist hide-dollar setting globally.
-  useEffect(function(){setHideDollarPnL(!!settings.hideDollarPnL);},[settings.hideDollarPnL]);
+  // CHANGED: Outcome-only mode implies the currency-hidden branch everywhere, then masks the value.
+  useEffect(function(){setHideAmounts(!!settings.hideAmounts);setHideDollarPnL(!!settings.hideDollarPnL||!!settings.hideAmounts);},[settings.hideDollarPnL,settings.hideAmounts]);
   // CHANGED: Recalc derived position/risk from the user's CURRENT TIER (banded scaling), not the
   // raw live balance. Within a tier band the size stays constant — so trading at $13k uses the
   // same size as trading at $10.5k, until the balance clears the next tier's 5% buffer. This
@@ -10800,6 +10828,10 @@ function App(props){
              doesn't visually jump when the sidebar collapses/expands. */}
           {sidebarCollapsed?<span style={{width:20,textAlign:"center",flexShrink:0}}>{settings.hideDollarPnL?"%":"$"}</span>:(settings.hideDollarPnL?"Show $":"Hide $")}
         </button>
+        {/* CHANGED: Outcome-only toggle — hides ALL magnitudes ($, %, R) so only win/loss shows. */}
+        <button onClick={function(){setSettings(function(s){return Object.assign({},s,{hideAmounts:!s.hideAmounts});});}} aria-label={settings.hideAmounts?"Show amounts":"Hide all amounts (win/loss only)"} title={settings.hideAmounts?"Showing win/loss only. Tap to show amounts.":"Tap to hide all $ / % / R — see only wins & losses."} style={{marginTop:8,textAlign:"left",padding:sidebarCollapsed?"11px 0":"11px 12px",background:settings.hideAmounts?"#1e1b4b":"none",border:"1px solid "+(settings.hideAmounts?"#4338ca":"#1e293b"),borderRadius:8,color:settings.hideAmounts?"#a5b4fc":"#94a3b8",fontSize:14,fontWeight:settings.hideAmounts?700:500,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:sidebarCollapsed?"center":"flex-start",gap:10}}>
+          {sidebarCollapsed?<span style={{width:20,textAlign:"center",flexShrink:0}}>{settings.hideAmounts?"⊘":"W/L"}</span>:(settings.hideAmounts?"Show amounts":"W/L only")}
+        </button>
       </div>}
       <div style={{flex:1,minWidth:0}}>
       <div style={{maxWidth:mobile?560:"min(1800px, 96vw)",margin:"0 auto",padding:mobile?"0 12px 84px":"0 28px 60px"}}>
@@ -10813,6 +10845,8 @@ function App(props){
                   {/* CHANGED: Hide-$ toggle — on laptop it lives in the sidebar (hidden on mobile),
                      so surface it here next to the brand. Same toggle action, same styling cues. */}
                   <button onClick={function(){setSettings(function(s){return Object.assign({},s,{hideDollarPnL:!s.hideDollarPnL});});}} aria-label={settings.hideDollarPnL?"Show $ amounts":"Hide $ amounts"} style={{width:24,height:24,flexShrink:0,background:settings.hideDollarPnL?"#1e1b4b":"#0a0a0f",border:"1px solid "+(settings.hideDollarPnL?"#4338ca":"#334155"),borderRadius:6,color:settings.hideDollarPnL?"#a5b4fc":"#94a3b8",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",padding:0,lineHeight:1}}>{settings.hideDollarPnL?"%":"$"}</button>
+                  {/* CHANGED: Outcome-only chip (mobile). */}
+                  <button onClick={function(){setSettings(function(s){return Object.assign({},s,{hideAmounts:!s.hideAmounts});});}} aria-label={settings.hideAmounts?"Show amounts":"Hide all amounts (win/loss only)"} style={{height:24,padding:"0 6px",flexShrink:0,background:settings.hideAmounts?"#1e1b4b":"#0a0a0f",border:"1px solid "+(settings.hideAmounts?"#4338ca":"#334155"),borderRadius:6,color:settings.hideAmounts?"#a5b4fc":"#94a3b8",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>{settings.hideAmounts?"⊘":"W/L"}</button>
                 </div>
               )}
               <div style={{fontSize:18,fontWeight:700,color:"#e2e8f0",letterSpacing:-0.3}}>{todayDisplay()}</div>
