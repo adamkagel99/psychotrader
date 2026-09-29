@@ -2503,7 +2503,9 @@ function CalendarGrid(props){
           var isNoTrade=!!(dayData&&dayData.noTradeDay&&dayData.tradeCount===0);
           var noTradeBorderStyle="solid";
           if(isNoTrade){bg="#1c1408";bd="#a16207";col="#fcd34d";noTradeBorderStyle="dashed";}
-          if(isToday){bg="#1e1b4b";bd="#4338ca";col="#a5b4fc";noTradeBorderStyle="solid";}
+          // CHANGED: Today keeps its win/loss (or no-trade) fill; the "today" marker is just the
+          // blue border. Only fall back to the solid blue fill when today has no data yet.
+          if(isToday){bd="#4338ca";noTradeBorderStyle="solid";if(pnl==null&&!isNoTrade){bg="#1e1b4b";col="#a5b4fc";}}
           if(isSelected){bd="#818cf8";}
           var dailyTargetR=(fullDailyTarget>0&&fullRiskMax>0)?(fullDailyTarget/fullRiskMax):0;
           var dayRTotal=dayData?(dayData.rTotal||0):0;
@@ -4643,18 +4645,22 @@ function PerfProgressCard(props){
   // CHANGED: Days-since-discipline-lock — walks trading days (those with closed trades OR
   // explicit no-trade entries) in reverse chrono and counts until the first wasLocked day.
   // Mirrors the no-lock-streak achievement helper; replaces the A-Grade Streak tile on Home.
-  var daysSinceLock=(function(){
-    try{
-      var tradingDays=loadJournalRows().filter(function(d){return (d.trades||[]).length>0||d.noTradeDay;}).sort(function(a,b){return new Date(b.date)-new Date(a.date);});
-      var n=0;for(var i=0;i<tradingDays.length;i++){if(tradingDays[i].wasLocked)break;n++;}return n;
-    }catch(e){return 0;}
+  // CHANGED: Winning vs losing DAYS over the selected range — each row's net P&L sign counts as a
+  // win day or loss day (breakeven days excluded). Replaces the "Days Since Lock" tile.
+  var winLossDays=(function(){
+    var w=0,l=0;
+    allRows.forEach(function(r){
+      var net=(r.trades||[]).filter(function(t){return t&&t.status!=="open";}).reduce(function(s,t){return s+tradeNetPnl(t);},0);
+      if(net>0)w++;else if(net<0)l++;
+    });
+    return {w:w,l:l};
   })();
   var kpis=[
     {label:"Win Rate",icon:"🎯",value:hasData?winRate+"%":"—",color:hasData?wrColor(winRate):"#64748b"},
     {label:"Profit Factor",icon:"⚖️",value:hasData?pf:"—",color:hasData?(pfNum>1?"#22c55e":pfNum<1?"#ef4444":"#94a3b8"):"#64748b"},
     {label:"Expectancy",icon:"📈",value:expPctVal!=null?((expPctVal>=0?"+":"")+expPctVal.toFixed(2)+"%"):"—",color:expPctVal!=null?(expPctVal>=0?"#22c55e":"#ef4444"):"#64748b"},
     {label:"Green Streak",icon:"🌱",value:streak,suffix:streak===1?" day":" days",color:streak>0?"#22c55e":"#64748b"},
-    {label:"Days Since Lock",icon:"🛡",value:daysSinceLock,suffix:daysSinceLock===1?" day":" days",color:daysSinceLock>=10?"#22c55e":daysSinceLock>0?"#a5b4fc":"#64748b"}
+    {label:"W/L (Days)",icon:"🗓",value:hasData?(winLossDays.w+"/"+winLossDays.l):"—",color:hasData?(winLossDays.w>winLossDays.l?"#22c55e":winLossDays.w<winLossDays.l?"#ef4444":"#94a3b8"):"#64748b"}
   ];
   // CHANGED: compact summary shown in the collapsed header.
   var [open,setOpen]=useState(false);
