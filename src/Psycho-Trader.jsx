@@ -407,8 +407,8 @@ function getBase(a){
 // $10k, then $10k steps after (no tiers between $1k–$5k or $5k–$10k). Used by Settings,
 // Dashboard, and the sizing effect so they all agree on which tier the user is in.
 function getMilestones(){
-  var m=[500,1000,5000,10000];
-  for(var m10=20000;m10<=100000;m10+=10000)m.push(m10);
+  var m=[500,1000,5000,7500,10000];
+  for(var m5=15000;m5<=100000;m5+=5000)m.push(m5);
   return m;
 }
 // CHANGED: A tier "activates" only once balance is at least 5% above the tier value — the
@@ -438,7 +438,7 @@ function calcPosSizes(a,pcts){
     // CHANGED: Contract-based sizing is now TIER-DERIVED — contracts = next-tier $ ÷ 1000
     // (e.g. balance in $1k–$5k → next tier $5k → 5 contracts; $5k–$10k → 10). Risk cap is a
     // function of the contract count: risk-per-contract × contracts.
-    posMax=Math.round(nextMilestone(b)/1000);
+    posMax=Math.floor(nextMilestone(b)/1000);
     riskMax=Math.round((parseFloat(p.riskPerContract)||0)*posMax);
     posUnit="contracts";
   }else if(p.sizingMode==="dollar"){
@@ -8228,83 +8228,6 @@ function PerformanceTab(props){
           </div>
         )}
       </div>
-      {filtered.length>0&&(function(){
-        // CHANGED: Gather summary stats for AI Coach.
-        function bw(fieldKey,isArr){
-          var g={};
-          allTrades.forEach(function(t){var vals=isArr?(t[fieldKey]||[]):(t[fieldKey]?[t[fieldKey]]:[]);vals.forEach(function(v){if(!v)return;if(!g[v])g[v]={n:0,pcts:[]};g[v].n++;var pp=parseFloat(t.pctPnl);if(!isNaN(pp))g[v].pcts.push(pp);});});
-          var q=Object.keys(g).filter(function(k){return g[k].n>=2;}).map(function(k){return {name:k,avg:g[k].pcts.length?g[k].pcts.reduce(function(s,v){return s+v;},0)/g[k].pcts.length:0};});
-          if(!q.length)return {best:null,worst:null};
-          q.sort(function(a,b){return b.avg-a.avg;});
-          return {best:q[0].name,worst:q[q.length-1].name};
-        }
-        var setupBW=bw("setup",false);
-        var sessBW=bw("sessionId",false);
-        var emoBW=bw("emotions",true);
-        var dirBW=bw("direction",false);
-        var instBW=bw("instrument",false);
-        var tfBW=bw("timeframe",false);
-        // Map session ids -> names for readability.
-        var sessNameMap={};getSessions(settings).forEach(function(s){sessNameMap[s.id]=s.name;});
-        function sn(id){return id?(sessNameMap[id]||id):id;}
-        var violCounts={};allTrades.forEach(function(t){(t.violations||[]).forEach(function(v){violCounts[v]=(violCounts[v]||0)+1;});});
-        var topViol=Object.keys(violCounts).sort(function(a,b){return violCounts[b]-violCounts[a];})[0]||null;
-        var tradesWithViol=allTrades.filter(function(t){return (t.violations||[]).length>0;}).length;
-        var violRate=allTrades.length?Math.round(tradesWithViol/allTrades.length*100):0;
-        var discScores=filtered.map(function(e){return parseFloat(e.disciplineScore);}).filter(function(v){return !isNaN(v);});
-        var avgDisc=discScores.length?Math.round(discScores.reduce(function(s,v){return s+v;},0)/discScores.length):"n/a";
-        // Expectancy in % and R.
-        var pcts=allTrades.map(function(t){return parseFloat(t.pctPnl);}).filter(function(v){return !isNaN(v);});
-        var expPct=pcts.length?(pcts.reduce(function(s,v){return s+v;},0)/pcts.length):0;
-        var coachRisk=parseFloat(settings.riskMax)||0;
-        var rVals=[];filtered.forEach(function(e){var rr=parseFloat(e.riskMax)||coachRisk;(e.trades||[]).forEach(function(t){if(t&&t.status!=="open"&&rr>0)rVals.push((tradeNetPnl(t))/rr);});});
-        var expR=rVals.length?(rVals.reduce(function(s,v){return s+v;},0)/rVals.length):0;
-        // Discipline → outcome link: avg trade % on high-discipline days vs low-discipline days.
-        var discThr=loadDisciplineLockThreshold();
-        var hiDayPct=[],loDayPct=[];
-        filtered.forEach(function(e){
-          var sc=parseFloat(e.disciplineScore);if(isNaN(sc))sc=calcDiscipline(e.trades||[],e.riskMax);
-          (e.trades||[]).forEach(function(t){if(!t||t.status==="open")return;var pp=parseFloat(t.pctPnl);if(isNaN(pp))return;(sc>=discThr?hiDayPct:loDayPct).push(pp);});
-        });
-        function avg(a){return a.length?a.reduce(function(s,v){return s+v;},0)/a.length:null;}
-        var hiAvg=avg(hiDayPct),loAvg=avg(loDayPct);
-        // Overtrading: avg trades/day and busiest day.
-        var perDay=filtered.map(function(e){return (e.trades||[]).filter(function(t){return t&&t.status!=="open";}).length;}).filter(function(n){return n>0;});
-        var avgPerDay=perDay.length?(perDay.reduce(function(s,v){return s+v;},0)/perDay.length).toFixed(1):"n/a";
-        var maxPerDay=perDay.length?Math.max.apply(null,perDay):0;
-        // Revenge signal: avg % on the trade immediately after a loss vs baseline.
-        var flat=[];filtered.forEach(function(e){(e.trades||[]).forEach(function(t){if(t&&t.status!=="open")flat.push(parseFloat(t.pctPnl));});});
-        flat=flat.filter(function(v){return !isNaN(v);});
-        var afterLoss=[];for(var fi=1;fi<flat.length;fi++){if(flat[fi-1]<0)afterLoss.push(flat[fi]);}
-        var afterLossAvg=avg(afterLoss);
-        // Recent trend: last 10 trades vs the rest.
-        var last10=flat.slice(-10),prior=flat.slice(0,-10);
-        var last10Avg=avg(last10),priorAvg=avg(prior);
-        // Grade distribution.
-        var gradeCounts={};allTrades.forEach(function(t){if(t.grade)gradeCounts[t.grade]=(gradeCounts[t.grade]||0)+1;});
-        var gradeStr=Object.keys(gradeCounts).sort().map(function(g){return g+":"+gradeCounts[g];}).join(", ")||"ungraded";
-        function pp(v){return v==null?"n/a":(v>=0?"+":"")+v.toFixed(2)+"%";}
-        var stats={
-          totalTrades:allTrades.length,winRate:winRate,breakevenRate:breakevenRate,pf:pf,
-          avgWinPct:avgWinPct(),avgLossPct:avgLossPct(),
-          expectancyPct:pp(expPct),expectancyR:(expR>=0?"+":"")+expR.toFixed(2)+"R",
-          bestSetup:setupBW.best,worstSetup:setupBW.worst,
-          bestSession:sn(sessBW.best),worstSession:sn(sessBW.worst),
-          bestEmotion:emoBW.best,worstEmotion:emoBW.worst,
-          bestDirection:dirBW.best,worstDirection:dirBW.worst,
-          bestInstrument:instBW.best,worstInstrument:instBW.worst,
-          bestTimeframe:tfBW.best,worstTimeframe:tfBW.worst,
-          topViolation:topViol,violationRate:violRate+"%",
-          avgDiscipline:avgDisc,disciplineThreshold:discThr,
-          avgTradePctOnDisciplinedDays:pp(hiAvg),avgTradePctOnUndisciplinedDays:pp(loAvg),
-          avgTradesPerDay:avgPerDay,maxTradesInADay:maxPerDay,
-          avgPctAfterALoss:pp(afterLossAvg),overallAvgPct:pp(expPct),
-          last10AvgPct:pp(last10Avg),priorAvgPct:pp(priorAvg),
-          gradeDistribution:gradeStr,
-          rangeLabel:({thisweek:"this week",week:"last week",month:"last 30 days","3month":"last 3 months",year:"last year",all:"all time"})[range]||range
-        };
-        return <AICoach stats={stats}/>;
-      })()}
       {filtered.length>0&&<AchievementsPanel/>}
       {filtered.length===0&&<div style={{textAlign:"center",padding:"40px 20px",borderTop:"1px dashed #1e293b",marginTop:8}}><div style={{fontSize:14,color:"#475569"}}>No data for this range yet</div></div>}
       {filtered.length>0&&(
