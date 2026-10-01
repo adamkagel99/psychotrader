@@ -3376,7 +3376,7 @@ function TradeForm(props){
           <div style={{padding:"8px 16px",borderBottom:"1px solid #1e293b",display:"flex",gap:16,flexShrink:0,background:"#0a0a0f",alignItems:"center"}}>
             <div style={{flex:1}}>
               <div style={{fontSize:9,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Position{g?" · "+g+" grade":""}</div>
-              <div style={{fontSize:14,fontWeight:700,color:"#818cf8",marginTop:2}}>{_ctr?(pMin+" "):("$"+pMin+" ")}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500}}>– {_ctr?(pMax+" ct"):("$"+pMax)}</span></div>
+              <div style={{fontSize:14,fontWeight:700,color:"#818cf8",marginTop:2}}>{_ctr?(pMax+" ct"):(<>{"$"+pMin+" "}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500}}>– {"$"+pMax}</span></>)}</div>
             </div>
             <div style={{flex:1}}>
               <div style={{fontSize:9,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Risk{g?" · "+g+" grade":""}</div>
@@ -4194,7 +4194,7 @@ function ScalingTargetCard(props){
   function fmtUSD(v){return "$"+v.toLocaleString("en-US",{maximumFractionDigits:0});}
   function fmtPnLUSD(v){if(HIDE_AMOUNTS)return AMT_MASK;if(HIDE_DOLLAR_PNL)return "$•••";return "$"+v.toLocaleString("en-US",{maximumFractionDigits:0});}
   // CHANGED: Position range respects contract-based sizing unit.
-  function fmtPos(sz){return sz.posUnit==="contracts"?(sz.positionMin+"–"+sz.positionMax+" ct"):(fmtUSD(sz.positionMin)+"–"+fmtUSD(sz.positionMax));}
+  function fmtPos(sz){return sz.posUnit==="contracts"?(sz.positionMax+" ct"):(fmtUSD(sz.positionMin)+"–"+fmtUSD(sz.positionMax));}
   return (
     <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid "+(reached?"#166534":"#1e293b"),borderRadius:10}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,gap:8,flexWrap:"wrap"}}>
@@ -9258,7 +9258,7 @@ function SettingsTab(props){
             var hs=false;try{hs=isMonthHalfsizeActive();if(!hs){var _tr=[];try{var _st=JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}");_tr=_st.trades||[];}catch(e){}var _lk=checkDisciplineLock(_tr,null);hs=_lk&&_lk.locked;}}catch(e){}
             if(hs){posMax=Math.round(posMax/2);posMin=Math.round(posMin/2);riskMax=Math.round(riskMax/2);riskMin=Math.round(riskMin/2);}
             var ctr=s.posUnit==="contracts";
-            var posStr=ctr?(posMin+"–"+posMax+" ct"):("$"+posMin+"–$"+posMax);
+            var posStr=ctr?(posMax+" ct"):("$"+posMin+"–$"+posMax);
             return "Computed: Position "+posStr+" · Risk $"+riskMin+"–$"+riskMax+(hs?" (½ size)":"");
           })()}
         </div>
@@ -9316,7 +9316,7 @@ function SettingsTab(props){
                         var bg=isCurrent?"#0a1f10":"transparent";
                         return [
                           <div key={m+"-t"} data-tier={m} style={{padding:"4px 6px",background:bg,borderRadius:3,fontWeight:isCurrent?700:500,color:color}}>${m.toLocaleString()}{isCurrent?" ←":""}</div>,
-                          <div key={m+"-p"} style={{padding:"4px 6px",background:bg,borderRadius:3,color:color}}>{sizes.posUnit==="contracts"?(sizes.positionMin+"–"+sizes.positionMax+" ct"):("$"+sizes.positionMin+"–$"+sizes.positionMax)}</div>,
+                          <div key={m+"-p"} style={{padding:"4px 6px",background:bg,borderRadius:3,color:color}}>{sizes.posUnit==="contracts"?(sizes.positionMax+" ct"):("$"+sizes.positionMin+"–$"+sizes.positionMax)}</div>,
                           <div key={m+"-r"} style={{padding:"4px 6px",background:bg,borderRadius:3,color:color}}>${sizes.riskMin}–${sizes.riskMax}</div>
                         ];
                       })}
