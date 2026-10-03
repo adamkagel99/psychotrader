@@ -10772,18 +10772,19 @@ function App(props){
             {!sidebarCollapsed&&t.label}
           </button>;
         })}
-        {/* CHANGED: Hide-$ toggle pinned to the bottom of the sidebar. marginTop:"auto" pushes
-           it down regardless of sidebar collapse state. In collapsed mode it shows just $/%;
-           expanded mode shows the matching label so the affordance is obvious. */}
-        <button onClick={function(){setSettings(function(s){return Object.assign({},s,{hideDollarPnL:!s.hideDollarPnL});});}} aria-label={settings.hideDollarPnL?"Show $ amounts":"Hide $ amounts"} title={settings.hideDollarPnL?"Showing %. Tap to show $.":"Showing $. Tap to hide."} style={{marginTop:"auto",textAlign:"left",padding:sidebarCollapsed?"11px 0":"11px 12px",background:settings.hideDollarPnL?"#1e1b4b":"none",border:"1px solid "+(settings.hideDollarPnL?"#4338ca":"#1e293b"),borderRadius:8,color:settings.hideDollarPnL?"#a5b4fc":"#94a3b8",fontSize:14,fontWeight:settings.hideDollarPnL?700:500,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:sidebarCollapsed?"center":"flex-start",gap:10}}>
-          {/* CHANGED: collapsed glyph and expanded label use the same font size so the "$"
-             doesn't visually jump when the sidebar collapses/expands. */}
-          {sidebarCollapsed?<span style={{width:20,textAlign:"center",flexShrink:0}}>{settings.hideDollarPnL?"%":"$"}</span>:(settings.hideDollarPnL?"Show $":"Hide $")}
-        </button>
-        {/* CHANGED: Outcome-only toggle — hides ALL magnitudes ($, %, R) so only win/loss shows. */}
-        <button onClick={function(){setSettings(function(s){return Object.assign({},s,{hideAmounts:!s.hideAmounts});});}} aria-label={settings.hideAmounts?"Show amounts":"Hide all amounts (win/loss only)"} title={settings.hideAmounts?"Showing win/loss only. Tap to show amounts.":"Tap to hide all $ / % / R — see only wins & losses."} style={{marginTop:8,textAlign:"left",padding:sidebarCollapsed?"11px 0":"11px 12px",background:settings.hideAmounts?"#1e1b4b":"none",border:"1px solid "+(settings.hideAmounts?"#4338ca":"#1e293b"),borderRadius:8,color:settings.hideAmounts?"#a5b4fc":"#94a3b8",fontSize:14,fontWeight:settings.hideAmounts?700:500,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:sidebarCollapsed?"center":"flex-start",gap:10}}>
-          {sidebarCollapsed?<span style={{width:20,textAlign:"center",flexShrink:0}}>{settings.hideAmounts?"⊘":"W/L"}</span>:(settings.hideAmounts?"Show amounts":"W/L only")}
-        </button>
+        {/* CHANGED: Single merged display toggle — cycles $ → % / R → W/L only → $. Pinned to the
+           bottom of the sidebar; collapsed shows the mode glyph, expanded shows the label. */}
+        {(function(){
+          var mode=settings.hideAmounts?"wl":settings.hideDollarPnL?"pct":"usd";
+          var active=mode!=="usd";
+          var glyph=mode==="wl"?"W/L":mode==="pct"?"%":"$";
+          var label=mode==="wl"?"W/L only":mode==="pct"?"% / R":"Show $";
+          var title=mode==="usd"?"Showing $. Tap for % / R.":mode==="pct"?"Showing % / R. Tap for win/loss only.":"Showing win/loss only. Tap to show $.";
+          function cycle(){setSettings(function(s){var m=s.hideAmounts?"wl":s.hideDollarPnL?"pct":"usd";if(m==="usd")return Object.assign({},s,{hideDollarPnL:true,hideAmounts:false});if(m==="pct")return Object.assign({},s,{hideDollarPnL:false,hideAmounts:true});return Object.assign({},s,{hideDollarPnL:false,hideAmounts:false});});}
+          return <button onClick={cycle} aria-label="Cycle display: dollars, percent, win/loss" title={title} style={{marginTop:"auto",textAlign:"left",padding:sidebarCollapsed?"11px 0":"11px 12px",background:active?"#1e1b4b":"none",border:"1px solid "+(active?"#4338ca":"#1e293b"),borderRadius:8,color:active?"#a5b4fc":"#94a3b8",fontSize:14,fontWeight:active?700:500,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:sidebarCollapsed?"center":"flex-start",gap:10}}>
+            {sidebarCollapsed?<span style={{width:20,textAlign:"center",flexShrink:0,fontSize:glyph==="W/L"?11:14}}>{glyph}</span>:label}
+          </button>;
+        })()}
       </div>}
       <div style={{flex:1,minWidth:0}}>
       <div style={{maxWidth:mobile?560:"min(1800px, 96vw)",margin:"0 auto",padding:mobile?"0 12px 84px":"0 28px 60px"}}>
@@ -10794,11 +10795,14 @@ function App(props){
               {mobile&&(
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
                   <div style={{fontSize:13,fontWeight:800,color:"#a5b4fc",letterSpacing:-0.2}}>Psycho Trader</div>
-                  {/* CHANGED: Hide-$ toggle — on laptop it lives in the sidebar (hidden on mobile),
-                     so surface it here next to the brand. Same toggle action, same styling cues. */}
-                  <button onClick={function(){setSettings(function(s){return Object.assign({},s,{hideDollarPnL:!s.hideDollarPnL});});}} aria-label={settings.hideDollarPnL?"Show $ amounts":"Hide $ amounts"} style={{width:24,height:24,flexShrink:0,background:settings.hideDollarPnL?"#1e1b4b":"#0a0a0f",border:"1px solid "+(settings.hideDollarPnL?"#4338ca":"#334155"),borderRadius:6,color:settings.hideDollarPnL?"#a5b4fc":"#94a3b8",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",padding:0,lineHeight:1}}>{settings.hideDollarPnL?"%":"$"}</button>
-                  {/* CHANGED: Outcome-only chip (mobile). */}
-                  <button onClick={function(){setSettings(function(s){return Object.assign({},s,{hideAmounts:!s.hideAmounts});});}} aria-label={settings.hideAmounts?"Show amounts":"Hide all amounts (win/loss only)"} style={{height:24,padding:"0 6px",flexShrink:0,background:settings.hideAmounts?"#1e1b4b":"#0a0a0f",border:"1px solid "+(settings.hideAmounts?"#4338ca":"#334155"),borderRadius:6,color:settings.hideAmounts?"#a5b4fc":"#94a3b8",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>{settings.hideAmounts?"⊘":"W/L"}</button>
+                  {/* CHANGED: Single merged display chip — cycles $ → % / R → W/L only. */}
+                  {(function(){
+                    var mode=settings.hideAmounts?"wl":settings.hideDollarPnL?"pct":"usd";
+                    var active=mode!=="usd";
+                    var glyph=mode==="wl"?"W/L":mode==="pct"?"%":"$";
+                    function cycle(){setSettings(function(s){var m=s.hideAmounts?"wl":s.hideDollarPnL?"pct":"usd";if(m==="usd")return Object.assign({},s,{hideDollarPnL:true,hideAmounts:false});if(m==="pct")return Object.assign({},s,{hideDollarPnL:false,hideAmounts:true});return Object.assign({},s,{hideDollarPnL:false,hideAmounts:false});});}
+                    return <button onClick={cycle} aria-label="Cycle display: dollars, percent, win/loss" style={{height:24,padding:"0 7px",flexShrink:0,background:active?"#1e1b4b":"#0a0a0f",border:"1px solid "+(active?"#4338ca":"#334155"),borderRadius:6,color:active?"#a5b4fc":"#94a3b8",fontSize:glyph==="W/L"?10:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>{glyph}</button>;
+                  })()}
                 </div>
               )}
               <div style={{fontSize:18,fontWeight:700,color:"#e2e8f0",letterSpacing:-0.3}}>{todayDisplay()}</div>
