@@ -411,13 +411,13 @@ function getMilestones(){
   for(var m5=15000;m5<=100000;m5+=5000)m.push(m5);
   return m;
 }
-// CHANGED: A tier "activates" only once balance is at least 5% above the tier value — the
-// step-up buffer prevents instant re-sizing the moment you cross a tier line. Returns the
-// highest milestone whose 5%-above threshold the balance has cleared.
+// CHANGED: A tier "activates" only once balance is at least 10% above the tier value — the
+// step-up buffer prevents instant re-sizing the moment you cross a tier line (e.g. the $5,000
+// size kicks in at $5,500). Returns the highest milestone whose 10%-above threshold is cleared.
 function getCurrentTier(balance){
   var ms=getMilestones();
   var t=ms[0];
-  for(var i=0;i<ms.length;i++){if(balance>ms[i]*1.05)t=ms[i];}
+  for(var i=0;i<ms.length;i++){if(balance>ms[i]*1.10)t=ms[i];}
   return t;
 }
 // CHANGED: Next milestone strictly above a tier value. Used by contract-based sizing, where the
@@ -4173,55 +4173,75 @@ function ScaleMilestonesScroller(props){
 
 // CHANGED: Standalone scaling/account balance card. Was previously inline in PerformanceTab;
 // moved here so it can render in the Progress widget on the dashboard instead.
+// CHANGED: Scaling reframed as a leveled game. Each milestone tier is a Level; the current level
+// is the highest tier whose 10% step-up buffer the balance has cleared (same getCurrentTier the
+// live sizing uses). The bar fills toward the next level's unlock point (nextTier × 1.10).
 function ScalingTargetCard(props){
   var settings=props.settings||{};
   var liveTotalPnL=props.liveTotalPnL||0;
   var balance=computeAccountBalance(liveTotalPnL);
-  // CHANGED: Target is auto-derived as the next tier in the scaling-milestone schedule (matches
-  // Settings → Auto-Sizing Parameters → Scale Milestones). No dropdown, nothing to configure.
   var milestones=getMilestones();
-  var targetVal=milestones.find(function(m){return m>balance;})||milestones[milestones.length-1];
-  // CHANGED: Position Now sizes use the CURRENT TIER (largest milestone with 5%-above buffer
-  // cleared), matching the live trade-sizing logic in App's sizing effect.
   var currentTier=getCurrentTier(balance);
-  var pctToTarget=targetVal>0?Math.min(100,Math.max(0,(balance/targetVal)*100)):0;
-  var reached=targetVal>0&&balance>=targetVal;
+  var curIdx=milestones.indexOf(currentTier);if(curIdx<0)curIdx=0;
+  var level=curIdx+1;
+  var maxLevel=milestones.length;
+  var isMax=curIdx>=milestones.length-1;
+  var nextTier=isMax?null:milestones[curIdx+1];
+  // Unlock thresholds (balance needed to be AT this level). Level 1 unlocks from $0.
+  var curUnlock=curIdx===0?0:currentTier*1.10;
+  var nextUnlock=isMax?null:nextTier*1.10;
+  var levelProg=isMax?100:Math.min(100,Math.max(0,((balance-curUnlock)/(nextUnlock-curUnlock))*100));
+  var toGo=isMax?0:Math.max(0,nextUnlock-balance);
   var slip=settings.slippagePct!=null?settings.slippagePct:20;
   var posMaxPct=settings.positionMaxPct!=null?settings.positionMaxPct:7.5;
   var riskMaxPct=settings.riskMaxPct!=null?settings.riskMaxPct:33;
-  var sizesAtTarget=calcPosSizes(targetVal,{sizingMode:settings.sizingMode,slippagePct:slip,positionMaxPct:posMaxPct,riskMaxPct:riskMaxPct,positionMaxDollar:settings.positionMaxDollar,positionMaxContracts:settings.positionMaxContracts,riskPerContract:settings.riskPerContract,riskMaxDollar:settings.riskMaxDollar});
-  var sizesNow=calcPosSizes(currentTier,{sizingMode:settings.sizingMode,slippagePct:slip,positionMaxPct:posMaxPct,riskMaxPct:riskMaxPct,positionMaxDollar:settings.positionMaxDollar,positionMaxContracts:settings.positionMaxContracts,riskPerContract:settings.riskPerContract,riskMaxDollar:settings.riskMaxDollar});
+  function sizesFor(tier){return calcPosSizes(tier,{sizingMode:settings.sizingMode,slippagePct:slip,positionMaxPct:posMaxPct,riskMaxPct:riskMaxPct,positionMaxDollar:settings.positionMaxDollar,positionMaxContracts:settings.positionMaxContracts,riskPerContract:settings.riskPerContract,riskMaxDollar:settings.riskMaxDollar});}
+  var sizesNow=sizesFor(currentTier);
+  var sizesNext=isMax?null:sizesFor(nextTier);
   function fmtUSD(v){return "$"+v.toLocaleString("en-US",{maximumFractionDigits:0});}
   function fmtPnLUSD(v){if(HIDE_AMOUNTS)return AMT_MASK;if(HIDE_DOLLAR_PNL)return "$•••";return "$"+v.toLocaleString("en-US",{maximumFractionDigits:0});}
-  // CHANGED: Position range respects contract-based sizing unit.
   function fmtPos(sz){return sz.posUnit==="contracts"?(sz.positionMax+" ct"):(fmtUSD(sz.positionMin)+"–"+fmtUSD(sz.positionMax));}
+  var accent=isMax?"#facc15":"#818cf8";
   return (
-    <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid "+(reached?"#166534":"#1e293b"),borderRadius:10}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,gap:8,flexWrap:"wrap"}}>
-        <div style={{fontSize:10,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Account Balance</div>
-        <div style={{fontSize:10,color:"#64748b",letterSpacing:0.5,fontWeight:600}}>Next tier</div>
+    <div style={{marginBottom:12,padding:"12px 14px",background:"linear-gradient(135deg,#15131f 0%,#0d0d12 60%)",border:"1px solid "+(isMax?"#a16207":"#312e81"),borderRadius:10}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,gap:8}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}>
+          <div style={{width:44,height:44,flexShrink:0,borderRadius:10,background:isMax?"radial-gradient(circle at 30% 25%,#facc15,#a16207)":"radial-gradient(circle at 30% 25%,#6366f1,#312e81)",border:"1px solid "+(isMax?"#facc15":"#4338ca"),display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",boxShadow:"0 0 12px "+(isMax?"#a1620755":"#4338ca55")}}>
+            <div style={{fontSize:8,color:isMax?"#422006":"#c7d2fe",fontWeight:800,letterSpacing:1,lineHeight:1}}>LVL</div>
+            <div style={{fontSize:18,color:"#fff",fontWeight:900,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>{level}</div>
+          </div>
+          <div style={{minWidth:0}}>
+            <div style={{fontSize:10,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Scaling Level</div>
+            <div style={{fontSize:13,fontWeight:700,color:"#e2e8f0"}}>{isMax?"Max level — top tier":("Trading at "+fmtPnLUSD(currentTier)+" tier")}</div>
+          </div>
+        </div>
+        <div style={{textAlign:"right",flexShrink:0}}>
+          <div style={{fontSize:9,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Balance</div>
+          <div style={{fontSize:16,fontWeight:800,color:accent,fontVariantNumeric:"tabular-nums",letterSpacing:-0.3}}>{fmtPnLUSD(balance)}</div>
+        </div>
       </div>
-      <div style={{display:"flex",alignItems:"baseline",gap:10,marginBottom:10,flexWrap:"wrap"}}>
-        <div style={{fontSize:26,fontWeight:800,color:reached?"#22c55e":"#818cf8",letterSpacing:-0.5,fontVariantNumeric:"tabular-nums"}}>{fmtPnLUSD(balance)}</div>
-        <div style={{fontSize:12,color:"#94a3b8"}}>of <span style={{color:reached?"#86efac":"#cbd5e1",fontWeight:700}}>{fmtPnLUSD(targetVal)}</span> target</div>
+      {/* XP-style progress toward the next level */}
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:"#94a3b8",fontWeight:700,letterSpacing:0.5,marginBottom:4}}>
+        <span>LV {level}</span>
+        <span style={{color:isMax?"#facc15":"#64748b"}}>{isMax?"★ MAXED":("LV "+(level+1))}</span>
       </div>
-      <div style={{height:8,background:"#0a0a0f",borderRadius:4,overflow:"hidden",marginBottom:6}}>
-        <div style={{height:"100%",width:pctToTarget+"%",background:reached?"#22c55e":"#6366f1",transition:"width 0.4s"}}/>
+      <div style={{height:10,background:"#0a0a0f",borderRadius:5,overflow:"hidden",border:"1px solid #1e293b"}}>
+        <div style={{height:"100%",width:levelProg+"%",background:isMax?"linear-gradient(90deg,#a16207,#facc15)":"linear-gradient(90deg,#4338ca,#818cf8)",transition:"width 0.4s"}}/>
       </div>
-      <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#94a3b8",marginBottom:10,fontWeight:600}}>
-        <span style={{fontVariantNumeric:"tabular-nums"}}>{pctToTarget.toFixed(1)}%</span>
-        <span style={{color:reached?"#86efac":"#cbd5e1"}}>{reached?"✓ Milestone reached":fmtPnLUSD(Math.max(0,targetVal-balance))+" to go"}</span>
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#94a3b8",marginTop:5,marginBottom:10,fontWeight:600}}>
+        <span style={{fontVariantNumeric:"tabular-nums"}}>{Math.round(levelProg)}%</span>
+        <span style={{color:isMax?"#facc15":"#cbd5e1"}}>{isMax?"Top of the ladder":(fmtPnLUSD(toGo)+" to Level "+(level+1))}</span>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,paddingTop:10,borderTop:"1px solid #1e293b"}}>
-        <div style={{background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:6,padding:"8px 10px"}}>
-          <div style={{fontSize:9,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Position now</div>
+        <div style={{background:"#0a0a0f",border:"1px solid #312e81",borderRadius:6,padding:"8px 10px"}}>
+          <div style={{fontSize:9,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>This level</div>
           <div style={{fontSize:13,fontWeight:700,color:"#818cf8",marginTop:3,fontVariantNumeric:"tabular-nums"}}>{fmtPos(sizesNow)}</div>
           <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>Risk {fmtUSD(sizesNow.riskMax)}</div>
         </div>
-        <div style={{background:"#0a0a0f",border:"1px solid "+(reached?"#166534":"#1e293b"),borderRadius:6,padding:"8px 10px"}}>
-          <div style={{fontSize:9,color:reached?"#86efac":"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>At target</div>
-          <div style={{fontSize:13,fontWeight:700,color:reached?"#86efac":"#cbd5e1",marginTop:3,fontVariantNumeric:"tabular-nums"}}>{fmtPos(sizesAtTarget)}</div>
-          <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>Risk {fmtUSD(sizesAtTarget.riskMax)}</div>
+        <div style={{background:"#0a0a0f",border:"1px solid "+(isMax?"#a16207":"#1e293b"),borderRadius:6,padding:"8px 10px"}}>
+          <div style={{fontSize:9,color:isMax?"#facc15":"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>{isMax?"Maxed":"Next level unlocks"}</div>
+          <div style={{fontSize:13,fontWeight:700,color:isMax?"#facc15":"#cbd5e1",marginTop:3,fontVariantNumeric:"tabular-nums"}}>{isMax?fmtPos(sizesNow):fmtPos(sizesNext)}</div>
+          <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>Risk {fmtUSD(isMax?sizesNow.riskMax:sizesNext.riskMax)}</div>
         </div>
       </div>
     </div>
@@ -7605,12 +7625,16 @@ function DisciplineScatter(props){
         var _ds=DEFAULT_DISCIPLINE_SCORING;try{var _st=JSON.parse(localStorage.getItem("tf-disc-scoring")||"null");if(_st)_ds=Object.assign({},_ds,_st);}catch(e){}
         var _sen={};try{var _to=JSON.parse(localStorage.getItem("tf-trade-options")||"null");if(_to&&_to.emotionSentiments)_sen=_to.emotionSentiments;}catch(e){}
         var v=(t.violations||[]).slice();
-        var sm=parseFloat(t.posMaxAtEntry)||0;
+        // CHANGED: Contract-based sizing — the cap in settings.positionMax is a CONTRACT count,
+        // so compare total contracts to it (not the $ position size), or every trade falsely
+        // flags "Oversized entry" and drops to 85. Mirrors effectiveViolations.
+        var _ctr=(settings.sizingMode||"pct")==="contracts";
+        var sm=_ctr?0:(parseFloat(t.posMaxAtEntry)||0);
         var sf=parseFloat(t.sizeFraction)||1;
         var gm=t.grade==="A"?1:t.grade==="B"?0.75:t.grade==="C"?0.5:1;
         var lpm=(parseFloat(settings.positionMax)||0)*sf*gm;
         var cap=t.grade?lpm:Math.max(sm,lpm);
-        var pos=parseFloat(t.positionSize)||0;
+        var pos=_ctr?tradeTotalContracts(t):(parseFloat(t.positionSize)||0);
         var oi=v.indexOf("Oversized entry");
         if(cap>0&&pos>cap){if(oi<0)v.push("Oversized entry");}else if(oi>=0){v.splice(oi,1);}
         var mri=v.indexOf("Max risk exceeded");
@@ -9311,7 +9335,7 @@ function SettingsTab(props){
                       {milestones.map(function(m){
                         var sizes=calcPosSizes(m,{useDirect:true,sizingMode:settings.sizingMode,slippagePct:slip,positionMaxPct:posMaxPct,riskMaxPct:riskMaxPct,positionMaxDollar:settings.positionMaxDollar,positionMaxContracts:settings.positionMaxContracts,riskPerContract:settings.riskPerContract,riskMaxDollar:settings.riskMaxDollar});
                         var isCurrent=m===currentTier;
-                        var isReached=balance>m*1.05;
+                        var isReached=balance>m*1.10;
                         var color=isCurrent?"#86efac":(isReached?"#64748b":"#cbd5e1");
                         var bg=isCurrent?"#0a1f10":"transparent";
                         return [
