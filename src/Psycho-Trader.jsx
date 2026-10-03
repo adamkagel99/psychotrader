@@ -4713,12 +4713,11 @@ function PerfProgressCard(props){
           );
         })}
       </div>
-      {open&&<>
+      {/* CHANGED: Scaling Level card is always visible on the dashboard (no longer gated behind expand). */}
       <div style={{padding:"12px 14px 4px"}}>
         <ScalingTargetCard liveTotalPnL={props.todayPnL||0} settings={props.settings||{}}/>
       </div>
       <button onClick={function(){if(props.onNavigate)props.onNavigate();}} style={{width:"100%",padding:"10px",background:"none",border:"none",borderTop:"1px solid #1e293b",color:"#a5b4fc",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>View full performance →</button>
-      </>}
     </div>
   );
 }
