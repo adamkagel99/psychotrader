@@ -4198,43 +4198,12 @@ function ScalingTargetCard(props){
   function sizesFor(tier){return calcPosSizes(tier,{sizingMode:settings.sizingMode,slippagePct:slip,positionMaxPct:posMaxPct,riskMaxPct:riskMaxPct,positionMaxDollar:settings.positionMaxDollar,positionMaxContracts:settings.positionMaxContracts,riskPerContract:settings.riskPerContract,riskMaxDollar:settings.riskMaxDollar});}
   var sizesNow=sizesFor(currentTier);
   var sizesNext=isMax?null:sizesFor(nextTier);
-  // CHANGED: Level-up notification — fires when the current level rises above the last-acknowledged
-  // level. First run baselines silently; a drop lowers the baseline so re-leveling notifies again.
-  var [levelUp,setLevelUp]=useState(null);
-  var [levelDown,setLevelDown]=useState(null);
-  useEffect(function(){
-    var key="tf-level-reached";
-    var seen=NaN;try{seen=parseInt(localStorage.getItem(key),10);}catch(e){}
-    if(isNaN(seen)){try{localStorage.setItem(key,String(level));}catch(e){}return;}
-    if(level>seen){setLevelUp(level);setLevelDown(null);try{localStorage.setItem(key,String(level));}catch(e){}}
-    else if(level<seen){setLevelDown(level);setLevelUp(null);try{localStorage.setItem(key,String(level));}catch(e){}}
-  },[level]);
   function fmtUSD(v){return "$"+v.toLocaleString("en-US",{maximumFractionDigits:0});}
   function fmtPnLUSD(v){if(HIDE_AMOUNTS)return AMT_MASK;if(HIDE_DOLLAR_PNL)return "$•••";return "$"+v.toLocaleString("en-US",{maximumFractionDigits:0});}
   function fmtPos(sz){return sz.posUnit==="contracts"?(sz.positionMax+" ct"):(fmtUSD(sz.positionMin)+"–"+fmtUSD(sz.positionMax));}
   var accent=isMax?"#facc15":"#818cf8";
   return (
     <div style={{marginBottom:12,padding:"12px 14px",background:"linear-gradient(135deg,#15131f 0%,#0d0d12 60%)",border:"1px solid "+(isMax?"#a16207":"#312e81"),borderRadius:10}}>
-      {levelUp!=null&&(
-        <div style={{marginBottom:10,padding:"10px 12px",background:"linear-gradient(135deg,#312e81,#4338ca)",border:"1px solid #818cf8",borderRadius:8,display:"flex",alignItems:"center",gap:10,boxShadow:"0 0 16px #4338ca55"}}>
-          <span style={{fontSize:22,lineHeight:1}}>🎉</span>
-          <div style={{minWidth:0,flex:1}}>
-            <div style={{fontSize:14,fontWeight:800,color:"#fff",letterSpacing:0.3}}>Level Up! You reached Level {levelUp}</div>
-            <div style={{fontSize:11,color:"#c7d2fe",marginTop:1}}>New size unlocked: {fmtPos(sizesNow)} · Risk {fmtUSD(sizesNow.riskMax)}</div>
-          </div>
-          <button onClick={function(){setLevelUp(null);}} style={{flexShrink:0,padding:"4px 10px",background:"rgba(255,255,255,0.12)",border:"1px solid #a5b4fc",borderRadius:6,color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Nice</button>
-        </div>
-      )}
-      {levelDown!=null&&(
-        <div style={{marginBottom:10,padding:"10px 12px",background:"linear-gradient(135deg,#7f1d1d,#991b1b)",border:"1px solid #ef4444",borderRadius:8,display:"flex",alignItems:"center",gap:10,boxShadow:"0 0 16px #7f1d1d55"}}>
-          <span style={{fontSize:22,lineHeight:1}}>⚠️</span>
-          <div style={{minWidth:0,flex:1}}>
-            <div style={{fontSize:14,fontWeight:800,color:"#fff",letterSpacing:0.3}}>Level Down — back to Level {levelDown}</div>
-            <div style={{fontSize:11,color:"#fecaca",marginTop:1}}>Size reduced: {fmtPos(sizesNow)} · Risk {fmtUSD(sizesNow.riskMax)}</div>
-          </div>
-          <button onClick={function(){setLevelDown(null);}} style={{flexShrink:0,padding:"4px 10px",background:"rgba(255,255,255,0.12)",border:"1px solid #fca5a5",borderRadius:6,color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>OK</button>
-        </div>
-      )}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,gap:8}}>
         <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}>
           <div style={{width:44,height:44,flexShrink:0,borderRadius:10,background:isMax?"radial-gradient(circle at 30% 25%,#facc15,#a16207)":"radial-gradient(circle at 30% 25%,#6366f1,#312e81)",border:"1px solid "+(isMax?"#facc15":"#4338ca"),display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",boxShadow:"0 0 12px "+(isMax?"#a1620755":"#4338ca55")}}>
@@ -10709,6 +10678,17 @@ function App(props){
   var preCheckComplete=isPreCheckComplete(state.preChecklist);
   var totalPnL=state.trades.filter(function(t){return t.status!=="open";}).reduce(function(s,t){return s+tradeNetPnl(t);},0);
   var liveTrades=state.trades.filter(function(t){return t.status==="open";});
+  // CHANGED: Scaling level-up / level-down notification lives in the app header. Detect here so it
+  // shows across every tab. First run baselines silently; a drop re-arms the next climb.
+  var [levelBanner,setLevelBanner]=useState(null);
+  useEffect(function(){
+    var bal=computeAccountBalance(totalPnL);
+    var ms=getMilestones();var ct=getCurrentTier(bal);var idx=ms.indexOf(ct);if(idx<0)idx=0;var lvl=idx+1;
+    var key="tf-level-reached";var seen=NaN;try{seen=parseInt(localStorage.getItem(key),10);}catch(e){}
+    if(isNaN(seen)){try{localStorage.setItem(key,String(lvl));}catch(e){}return;}
+    if(lvl>seen){setLevelBanner({dir:"up",level:lvl});try{localStorage.setItem(key,String(lvl));}catch(e){}}
+    else if(lvl<seen){setLevelBanner({dir:"down",level:lvl});try{localStorage.setItem(key,String(lvl));}catch(e){}}
+  },[totalPnL]);
   // CHANGED: Compute effective size-fraction (session sizeFraction × 0.5 when discipline-locked)
   // up here so both tradeStatus and the display values below share the same scaling.
   var sessForSf=getSessions(settings).find(function(s){return s.id===phase;});
@@ -10855,6 +10835,15 @@ function App(props){
               </div>
             </div>
           </div>
+          {/* CHANGED: Scaling level-up / level-down banner — shown in the app header, across all tabs. */}
+          {levelBanner&&(function(){
+            var up=levelBanner.dir==="up";
+            return <div style={{marginTop:8,padding:"8px 12px",background:up?"linear-gradient(135deg,#312e81,#4338ca)":"linear-gradient(135deg,#7f1d1d,#991b1b)",border:"1px solid "+(up?"#818cf8":"#ef4444"),borderRadius:8,display:"flex",alignItems:"center",gap:10,boxShadow:"0 0 16px "+(up?"#4338ca55":"#7f1d1d55")}}>
+              <span style={{fontSize:20,lineHeight:1}}>{up?"🎉":"⚠️"}</span>
+              <div style={{minWidth:0,flex:1,fontSize:14,fontWeight:800,color:"#fff",letterSpacing:0.3}}>{up?("Level Up! You reached Level "+levelBanner.level):("Level Down — back to Level "+levelBanner.level)}</div>
+              <button onClick={function(){setLevelBanner(null);}} style={{flexShrink:0,padding:"4px 10px",background:"rgba(255,255,255,0.12)",border:"1px solid "+(up?"#a5b4fc":"#fca5a5"),borderRadius:6,color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{up?"Nice":"OK"}</button>
+            </div>;
+          })()}
         </div>
         {(function(){
           // CHANGED: Derive from the SAME live-tier calcPosSizes used by Settings → Computed, so
