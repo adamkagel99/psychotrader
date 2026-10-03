@@ -1039,12 +1039,16 @@ function buildSessionMap(todayPnL,todayRiskMax,todayTradeCount,todayTrades){
   });
   var tc=parseInt(todayTradeCount)||0;
   var todayKey=todayStr();
-  if(!map[todayKey]&&(tc>0||todayPnL!==0||todayRiskMax>0)){
+  // CHANGED: Today is driven by LIVE state (the source of truth), so edits and deletions reflect
+  // immediately. Previously the journal snapshot won and today's count could only ever increase,
+  // so deleting today's only trade left it lingering in the calendar/summary.
+  var hadJournalToday=!!map[todayKey];
+  if(tc>0||todayPnL!==0||todayRiskMax>0){
     var todayRTotal=Array.isArray(todayTrades)?dayR(todayTrades.filter(function(t){return t&&t.status!=="open";}),todayRiskMax):(todayRiskMax>0?todayPnL/todayRiskMax:0);
-    map[todayKey]={pnl:todayPnL,riskMax:todayRiskMax||0,rTotal:todayRTotal,tradeCount:tc,noTradeDay:false};
-  }else if(map[todayKey]&&tc>map[todayKey].tradeCount){
-    var todayRTotal2=Array.isArray(todayTrades)?dayR(todayTrades.filter(function(t){return t&&t.status!=="open";}),todayRiskMax):map[todayKey].rTotal;
-    map[todayKey]=Object.assign({},map[todayKey],{tradeCount:tc,rTotal:todayRTotal2});
+    map[todayKey]={pnl:todayPnL,riskMax:todayRiskMax||0,rTotal:todayRTotal,tradeCount:tc,noTradeDay:false,wasLocked:hadJournalToday?map[todayKey].wasLocked:false};
+  }else if(hadJournalToday&&!map[todayKey].noTradeDay&&map[todayKey].tradeCount>0){
+    // Live state has no trades today (e.g. the only trade was deleted) — clear the stale snapshot.
+    map[todayKey]=Object.assign({},map[todayKey],{pnl:0,rTotal:0,tradeCount:0});
   }
   return map;
 }
