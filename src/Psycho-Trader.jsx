@@ -1856,6 +1856,31 @@ function MonthlyTargetBanner(props){
     </div>
   );
 }
+// CHANGED: Daily P&L goal banner — mirrors MonthlyTargetBanner but fires when TODAY's P&L reaches
+// the daily target from the goal cards. Nudges the trader to consider stopping for the day.
+function dailyGoalBannerDismissed(){try{return localStorage.getItem("tf-daily-goal-banner-dismissed")===todayStr();}catch(e){return false;}}
+function dismissDailyGoalBanner(){try{localStorage.setItem("tf-daily-goal-banner-dismissed",todayStr());}catch(e){}}
+function DailyTargetBanner(props){
+  var goalsLocal=(function(){try{return JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};}catch(e){return {};}})();
+  var settingsLocal=(function(){try{return JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};}catch(e){return {};}})();
+  var dailyTarget=resolveGoalTargets(goalsLocal,settingsLocal).daily||0;
+  if(dailyTarget<=0)return null;
+  // Today's P&L — live closed-trade total for today (same source the Today strip uses).
+  var todayPnL=parseFloat(props.totalPnL)||0;
+  if(todayPnL<dailyTarget)return null;
+  if(dailyGoalBannerDismissed())return null;
+  var fmt=function(n){if(HIDE_AMOUNTS)return AMT_MASK;return "$"+Math.round(n).toLocaleString();};
+  return (
+    <div style={{marginBottom:props.compact?0:12,padding:props.compact?"8px 12px":"12px 16px",background:"linear-gradient(135deg,#14532d,#166534)",border:"1px solid #22c55e",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+      <div style={{minWidth:0}}>
+        <div style={{fontSize:13,fontWeight:800,color:"#fff",display:"flex",alignItems:"center",gap:7}}>🎯 Daily target hit — {fmt(todayPnL)} of {fmt(dailyTarget)} · protect it, consider stopping</div>
+      </div>
+      <div style={{display:"flex",gap:6,flexShrink:0}}>
+        <button onClick={function(){dismissDailyGoalBanner();if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"none",border:"1px solid #166534",borderRadius:6,color:"#86efac",fontSize:12,fontWeight:600,whiteSpace:"nowrap",cursor:"pointer",fontFamily:"inherit"}}>Dismiss</button>
+      </div>
+    </div>
+  );
+}
 function streakNudgeDismissedAt(){try{var v=parseInt(localStorage.getItem("tf-streak-nudge-dismissed-at"),10);return isNaN(v)?0:v;}catch(e){return 0;}}
 function dismissStreakNudge(streakLen){try{localStorage.setItem("tf-streak-nudge-dismissed-at",String(streakLen));}catch(e){}}
 function saveAllowanceTarget(v){try{if(v>0)localStorage.setItem("tf-allowance-target",String(v));else localStorage.removeItem("tf-allowance-target");localStorage.removeItem("tf-allowance-notif-dismissed");}catch(e){}}
@@ -10833,8 +10858,11 @@ function App(props){
                always visible across tabs, sized to fill the space between date and session. On
                mobile the header is too narrow for the banner's buttons; falls back to the global
                render below. */}
-            {!mobile&&<div style={{flex:"1 1 auto",minWidth:0,display:"flex",justifyContent:"center"}}>
-              <div style={{width:"100%",maxWidth:680}}>
+            {!mobile&&<div style={{flex:"1 1 auto",minWidth:0,display:"flex",flexDirection:"column",gap:6,justifyContent:"center"}}>
+              <div style={{width:"100%",maxWidth:680,alignSelf:"center"}}>
+                <DailyTargetBanner totalPnL={totalPnL} bumpReloadKey={bumpReloadKey} compact={true}/>
+              </div>
+              <div style={{width:"100%",maxWidth:680,alignSelf:"center"}}>
                 <MonthlyTargetBanner totalPnL={totalPnL} bumpReloadKey={bumpReloadKey} onWithdraw={function(amt){setPendingWithdrawAmount(amt);setTab("settings");}} compact={true}/>
               </div>
             </div>}
@@ -10872,6 +10900,7 @@ function App(props){
                the date and the session readout) so it persists across tabs without taking
                another row. On mobile the header is too narrow — fall back to rendering above
                the tab content. */}
+            {mobile&&<DailyTargetBanner totalPnL={totalPnL} bumpReloadKey={bumpReloadKey}/>}
             {mobile&&<MonthlyTargetBanner totalPnL={totalPnL} bumpReloadKey={bumpReloadKey} onWithdraw={function(amt){setPendingWithdrawAmount(amt);setTab("settings");}}/>}
             {tab==="dashboard"&&<DashboardTab key={reloadKey} mobile={mobile} settings={settings} phase={phase} state={state} setState={setState} checklistVersion={checklistVersion} onNavigateToJournal={function(){setTab("trades");}} onStartTrade={function(){var t=mkTrade();t.sessionId=phase!=="closed"?phase:null;setTrade(t);setShowForm(true);setTab("trades");}} preCheckComplete={preCheckComplete} currentAccount={computeAccountBalance(totalPnL)} displayPosMin={dPosMin} displayPosMax={dPosMax} displayRiskMin={dRiskMin} displayRiskMax={dRiskMax} totalPnL={totalPnL} todayTrades={state.trades} prevPnL={prevPnL} prevDate={prevDate} prevRiskMax={prevRiskMax} onNavigateToTrade={navigateToTrade} eventsReloadKey={eventsReloadKey} eventCurrencyFilter={eventCurrencyFilter} setEventCurrencyFilter={setEventCurrencyFilter} eventImpactFilter={eventImpactFilter} setEventImpactFilter={setEventImpactFilter} onNavigateToSettings={function(){setSettingsFocus("economicEvents");setTab("settings");}} onNavigateToPerformance={function(){setTab("performance");}} onNavigateToGoals={function(){setTab("goals");}} onWithdraw={function(amt){setPendingWithdrawAmount(amt);setTab("settings");}} bumpReloadKey={bumpReloadKey} tradeStatus={tradeStatus}/>}
             {tab==="trades"&&<TradesTab mobile={mobile} state={state} setState={setState} showForm={showForm} setShowForm={setShowForm} trade={trade} setTrade={setTrade} saveTrade={saveTrade} deleteTrade={deleteTrade} tradeStatus={tradeStatus} phase={phase} settings={settings} preCheckComplete={preCheckComplete} totalPnL={totalPnL} initialDate={tradesInitialDate} reloadKey={reloadKey} bumpReloadKey={bumpReloadKey} timezone={settings.timezone} liveTrades={liveTrades} openLiveTrade={function(lt){setLiveTradeManaging(lt);}} displayPosMin={dPosMin} displayPosMax={dPosMax} displayRiskMin={dRiskMin} displayRiskMax={dRiskMax} tradeOptions={tradeOptions} autoAddViolations={autoAddViolations} refreshHistory={bumpReloadKey} checklistVersion={checklistVersion} onNavigateToHalfSize={function(){setSettingsFocus("positionSizing");setTab("settings");}}/>}
