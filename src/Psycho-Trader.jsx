@@ -1840,11 +1840,14 @@ function MonthlyTargetBanner(props){
   if(halfOn)return null;
   if(isMonthGoalBannerDismissed())return null;
   var allowance=getWithdrawalAllowance(totalPnL);
-  var fmt=function(n){if(HIDE_AMOUNTS)return AMT_MASK;return "$"+Math.round(n).toLocaleString();};
+  // CHANGED: When $/amounts are hidden, drop the figures entirely (no "$•••") — just the message.
+  var hideVals=hideCurrency();
+  var fmt=function(n){return "$"+Math.round(n).toLocaleString();};
+  var msg=hideVals?"🏁 Monthly target hit":("🏁 Monthly target hit — "+fmt(monthPnLLive)+" of "+fmt(monthlyTarget));
   return (
     <div style={{marginBottom:props.compact?0:12,padding:props.compact?"8px 12px":"12px 16px",background:"linear-gradient(135deg,#422006,#713f12)",border:"1px solid #facc15",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
       <div style={{minWidth:0}}>
-        <div style={{fontSize:13,fontWeight:800,color:"#fff",display:"flex",alignItems:"center",gap:7}}>🏁 Monthly target hit — {fmt(monthPnLLive)} of {fmt(monthlyTarget)}</div>
+        <div style={{fontSize:13,fontWeight:800,color:"#fff",display:"flex",alignItems:"center",gap:7}}>{msg}</div>
       </div>
       <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap"}}>
         {/* CHANGED: Half-size is a suggestion, not a forced lock. The banner only renders while
@@ -1869,11 +1872,14 @@ function DailyTargetBanner(props){
   var todayPnL=parseFloat(props.totalPnL)||0;
   if(todayPnL<dailyTarget)return null;
   if(dailyGoalBannerDismissed())return null;
-  var fmt=function(n){if(HIDE_AMOUNTS)return AMT_MASK;return "$"+Math.round(n).toLocaleString();};
+  // CHANGED: When $/amounts are hidden, drop the figures entirely (no "$•••") — just the message.
+  var hideVals=hideCurrency();
+  var fmt=function(n){return "$"+Math.round(n).toLocaleString();};
+  var msg=hideVals?"🎯 Daily target hit · protect it, consider stopping":("🎯 Daily target hit — "+fmt(todayPnL)+" of "+fmt(dailyTarget)+" · protect it, consider stopping");
   return (
     <div style={{marginBottom:props.compact?0:12,padding:props.compact?"8px 12px":"12px 16px",background:"linear-gradient(135deg,#14532d,#166534)",border:"1px solid #22c55e",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
       <div style={{minWidth:0}}>
-        <div style={{fontSize:13,fontWeight:800,color:"#fff",display:"flex",alignItems:"center",gap:7}}>🎯 Daily target hit — {fmt(todayPnL)} of {fmt(dailyTarget)} · protect it, consider stopping</div>
+        <div style={{fontSize:13,fontWeight:800,color:"#fff",display:"flex",alignItems:"center",gap:7}}>{msg}</div>
       </div>
       <div style={{display:"flex",gap:6,flexShrink:0}}>
         <button onClick={function(){dismissDailyGoalBanner();if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"none",border:"1px solid #166534",borderRadius:6,color:"#86efac",fontSize:12,fontWeight:600,whiteSpace:"nowrap",cursor:"pointer",fontFamily:"inherit"}}>Dismiss</button>
