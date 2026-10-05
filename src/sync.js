@@ -616,6 +616,18 @@ if (typeof window !== "undefined") {
   // CHANGED: Cloud wipe — exposed so the app's "Clear Data" button can drop the user's cloud rows
   // BEFORE clearing localStorage. Without this, the next page-load pulls today's data back from
   // the cloud and "Clear Data" looks broken.
+  // CHANGED: Precise per-trade cloud delete. The handleSet guard intentionally refuses to clear a
+  // day's cloud trades when the local entry's trades array is empty (protects against a spuriously
+  // empty local state wiping real cloud data). But that also meant deleting a day's LAST trade never
+  // propagated — the cloud row survived and the next pull's merge resurrected it. The app calls this
+  // on every trade deletion to remove that exact row by client_id, which is unambiguous and safe.
+  window.__psychoSyncDeleteTrade = async function (tradeId) {
+    if (!currentUserId || tradeId == null) return;
+    try {
+      await supabase.from("trades").delete().eq("user_id", currentUserId).eq("client_id", String(tradeId));
+    } catch (e) { console.error("Trade delete sync failed:", e); }
+  };
+
   window.__psychoSyncWipe = async function () {
     if (!currentUserId) return;
     const uid = currentUserId;

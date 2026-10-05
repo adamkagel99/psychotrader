@@ -5122,6 +5122,8 @@ function TradesTab(props){
     var dateKey=isToday?todayStr():selectedDate;
     var written=safeWriteJournalEntry("journal:"+dateKey.replace(/\//g,"-"),newEntry);
     if(written)newEntry=written;
+    // CHANGED: Propagate the deletion to the cloud trades table by id so it isn't resurrected on pull.
+    try{if(typeof window!=="undefined"&&typeof window.__psychoSyncDeleteTrade==="function")window.__psychoSyncDeleteTrade(tradeId);}catch(e){}
     if(isToday){
       setTodayJournalEntry(newEntry);
       props.setState(function(s){return Object.assign({},s,{trades:(s.trades||[]).filter(function(x){return x.id!==tradeId;})});});
@@ -10656,6 +10658,10 @@ function App(props){
   function deleteTrade(id){
     var ut=state.trades.filter(function(t){return t.id!==id;});
     setState(function(s){return Object.assign({},s,{trades:ut});});
+    // CHANGED: Propagate the deletion to the cloud trades table by id. The journal push guard won't
+    // clear cloud trades when the day's local trades go empty, so without this the deleted trade is
+    // resurrected on the next pull/reload.
+    try{if(typeof window!=="undefined"&&typeof window.__psychoSyncDeleteTrade==="function")window.__psychoSyncDeleteTrade(id);}catch(e){}
     // CHANGED: Keep today's journal entry in sync after deletion.
     try{
       var key="journal:"+todayStr().replace(/\//g,"-");
