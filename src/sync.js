@@ -178,6 +178,14 @@ export async function pullFromCloud(userId) {
     if (typeof row.key === "string" && SKIP_KEYS.has(row.key)) return;
     // tf-settings and its timestamp are resolved by last-write-wins below, not overwritten here.
     if (row.key === "tf-settings" || row.key === "tf-settings-mtime") return;
+    // CHANGED: tf-state is the device's LIVE working state (today's trades, drafts, checklist). It
+    // has no last-write-wins guard, so blindly overwriting it from the cloud resurrects a trade the
+    // user just deleted: local is updated, but the stale cloud blob clobbers it on the next pull.
+    // The authoritative cross-device record is journal_days + the trades table (rebuilt below), so
+    // keep a present local copy and only adopt the cloud blob on a device that has none yet.
+    if (row.key === "tf-state") {
+      try { if (window.localStorage.getItem("tf-state") != null) return; } catch (e) {}
+    }
     const out = typeof row.value === "object" ? JSON.stringify(row.value) : String(row.value);
     rawSetItem(row.key, out);
   });
@@ -216,7 +224,9 @@ export async function pullFromCloud(userId) {
   // present once set and is never "removed on another device" — so a cloud row briefly missing
   // (e.g. an interrupted restore push) must not silently wipe the user's settings and reset
   // setup grade criteria / sizing / sessions to defaults. Keep the local copy authoritative.
-  const NEVER_DELETE = new Set(["tf-settings", "tf-settings-mtime"]);
+  // CHANGED: tf-state added — it's the live device working state; a briefly-missing cloud row must
+  // never wipe today's local trades/drafts.
+  const NEVER_DELETE = new Set(["tf-settings", "tf-settings-mtime", "tf-state"]);
   for (let i = window.localStorage.length - 1; i >= 0; i--) {
     const k = window.localStorage.key(i);
     if (isSyncableKv(k) && !cloudKeys.has(k) && !NEVER_DELETE.has(k)) {
