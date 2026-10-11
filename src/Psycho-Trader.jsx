@@ -7509,7 +7509,7 @@ function WhatsWorkingPanel(props){
   var working=rows.filter(function(r){return r.exp>0;}).sort(function(a,b){return b.exp-a.exp;}).slice(0,3);
   var hurting=rows.filter(function(r){return r.exp<0;}).sort(function(a,b){return a.exp-b.exp;}).slice(0,3);
   // CHANGED: when $ is hidden, expectancy is shown as average % per trade.
-  var fmtExp=function(r){if(HIDE_DOLLAR_PNL)return (r.expPct>=0?"+":"")+r.expPct.toFixed(2)+"%";return (r.exp>=0?"+":"-")+"$"+Math.abs(r.exp).toFixed(0);};
+  var fmtExp=function(r){return (r.expPct>=0?"+":"")+r.expPct.toFixed(2)+"%";};
   function Col(p){return (
     <div style={{flex:1,minWidth:0,padding:"10px 12px",background:"#0d0d12",border:"1px solid "+p.bd,borderRadius:8,display:"flex",flexDirection:"column"}}>
       <div style={{fontSize:10,color:p.titleColor,letterSpacing:1,textTransform:"uppercase",fontWeight:700,marginBottom:6,display:"flex",alignItems:"center",gap:6}}><span>{p.icon}</span>{p.title}</div>
@@ -8381,7 +8381,7 @@ function PerformanceTab(props){
               if(selectedMetric==="breakeven")return <MetricChart entries={filtered} minTrades={20} label="Breakeven Rate" color="#94a3b8" compute={computeBE} format={fmtPct}/>;
               if(selectedMetric==="avgWin")return <MetricChart entries={filtered} minTrades={20} label="Avg Win" color="#22c55e" compute={computeAvgWinPct} format={fmtPct}/>;
               if(selectedMetric==="avgLoss")return <MetricChart entries={filtered} minTrades={20} label="Avg Loss" color="#ef4444" compute={computeAvgLossPct} format={fmtPct}/>;
-              if(selectedMetric==="expectancy")return <MetricChart entries={filtered} minTrades={20} label="Expectancy / Trade" color={expValue>=0?"#22c55e":"#ef4444"} compute={HIDE_DOLLAR_PNL?computeExpPct:computeExp} format={fmtDollar}/>;
+              if(selectedMetric==="expectancy")return <MetricChart entries={filtered} minTrades={20} label="Expectancy / Trade" color={expValue>=0?"#22c55e":"#ef4444"} compute={computeExpPct} format={fmtPct}/>;
               // CHANGED: Avg Pos Size chart — running average position size across the slice.
               // In $ mode plots dollars; in Hide-$ mode plots % of account balance at slice end.
               if(selectedMetric==="avgPosSize"){
@@ -8443,7 +8443,7 @@ function PerformanceTab(props){
                 })()} color="#94a3b8" sub={posSizes.length+" trades"}/>
                 <StatTile label="Avg Win" active={selectedMetric==="avgWin"} onClick={function(){setSelectedMetric("avgWin");}} value={avgWinPct()} color="#22c55e" sub={hideCurrency()?"":("+$"+avgWin.toFixed(0))}/>
                 <StatTile label="Avg Loss" active={selectedMetric==="avgLoss"} onClick={function(){setSelectedMetric("avgLoss");}} value={avgLossPct()} color="#ef4444" sub={hideCurrency()?"":("-$"+Math.abs(avgLoss).toFixed(0))}/>
-                <StatTile label="Expectancy" active={selectedMetric==="expectancy"} onClick={function(){setSelectedMetric("expectancy");}} value={HIDE_DOLLAR_PNL?expPct():((expValue>=0?"+":"-")+"$"+Math.abs(expValue).toFixed(2))} color={expValue>=0?"#22c55e":"#ef4444"} sub={HIDE_DOLLAR_PNL?"":expPct()}/>
+                <StatTile label="Expectancy" active={selectedMetric==="expectancy"} onClick={function(){setSelectedMetric("expectancy");}} value={expPct()} color={expValue>=0?"#22c55e":"#ef4444"} sub={hideCurrency()?"":((expValue>=0?"+":"-")+"$"+Math.abs(expValue).toFixed(2))}/>
               </div>
               {/* CHANGED: Chart embedded directly under Overview tiles — clicking a tile swaps the chart. */}
               <div style={{marginTop:14,paddingTop:12,borderTop:"1px solid #1e293b"}}>{renderChart()}</div>
