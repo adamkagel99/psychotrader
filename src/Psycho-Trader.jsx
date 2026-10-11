@@ -6088,8 +6088,8 @@ function JournalTab(props){
             <div style={{background:"#0a0a0f",borderRadius:8,padding:"8px 10px",border:"1px solid #1e293b"}}><div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>Discipline</div><div style={{fontSize:18,fontWeight:700,color:discColor(liveDiscipline),marginTop:2}}>{liveDiscipline}</div></div>
           </div>
           {trades.length>0&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            <div style={{background:"#0a0a0f",borderRadius:8,padding:"8px 10px",border:"1px solid #1e293b"}}><div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>Avg Win</div><div style={{fontSize:15,fontWeight:700,color:"#22c55e",marginTop:2}}>{HIDE_DOLLAR_PNL?("+"+avgWinPct.toFixed(2)+"%"):"$"+avgWin.toFixed(2)}</div></div>
-            <div style={{background:"#0a0a0f",borderRadius:8,padding:"8px 10px",border:"1px solid #1e293b"}}><div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>Avg Loss</div><div style={{fontSize:15,fontWeight:700,color:"#ef4444",marginTop:2}}>{HIDE_DOLLAR_PNL?("-"+avgLossPct.toFixed(2)+"%"):"$"+avgLoss.toFixed(2)}</div></div>
+            <div style={{background:"#0a0a0f",borderRadius:8,padding:"8px 10px",border:"1px solid #1e293b"}}><div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>Avg Win</div><div style={{fontSize:15,fontWeight:700,color:"#22c55e",marginTop:2}}>{"+"+avgWinPct.toFixed(2)+"%"}</div></div>
+            <div style={{background:"#0a0a0f",borderRadius:8,padding:"8px 10px",border:"1px solid #1e293b"}}><div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>Avg Loss</div><div style={{fontSize:15,fontWeight:700,color:"#ef4444",marginTop:2}}>{"-"+avgLossPct.toFixed(2)+"%"}</div></div>
           </div>}
         </div>
         <div style={CS({marginBottom:14})}>
@@ -8379,8 +8379,8 @@ function PerformanceTab(props){
               if(selectedMetric==="winRate")return <MetricChart entries={filtered} minTrades={20} label="Win Rate" color="#22c55e" compute={computeWR} format={fmtPct}/>;
               if(selectedMetric==="lossRate")return <MetricChart entries={filtered} minTrades={20} label="Loss Rate" color="#ef4444" compute={computeLR} format={fmtPct} invertChange/>;
               if(selectedMetric==="breakeven")return <MetricChart entries={filtered} minTrades={20} label="Breakeven Rate" color="#94a3b8" compute={computeBE} format={fmtPct}/>;
-              if(selectedMetric==="avgWin")return <MetricChart entries={filtered} minTrades={20} label="Avg Win" color="#22c55e" compute={HIDE_DOLLAR_PNL?computeAvgWinPct:computeAvgWin} format={fmtDollar}/>;
-              if(selectedMetric==="avgLoss")return <MetricChart entries={filtered} minTrades={20} label="Avg Loss" color="#ef4444" compute={HIDE_DOLLAR_PNL?computeAvgLossPct:computeAvgLoss} format={fmtDollar}/>;
+              if(selectedMetric==="avgWin")return <MetricChart entries={filtered} minTrades={20} label="Avg Win" color="#22c55e" compute={computeAvgWinPct} format={fmtPct}/>;
+              if(selectedMetric==="avgLoss")return <MetricChart entries={filtered} minTrades={20} label="Avg Loss" color="#ef4444" compute={computeAvgLossPct} format={fmtPct}/>;
               if(selectedMetric==="expectancy")return <MetricChart entries={filtered} minTrades={20} label="Expectancy / Trade" color={expValue>=0?"#22c55e":"#ef4444"} compute={HIDE_DOLLAR_PNL?computeExpPct:computeExp} format={fmtDollar}/>;
               // CHANGED: Avg Pos Size chart — running average position size across the slice.
               // In $ mode plots dollars; in Hide-$ mode plots % of account balance at slice end.
@@ -8441,8 +8441,8 @@ function PerformanceTab(props){
                   if(bal<=0||avgPosSize<=0)return "—";
                   return (avgPosSize/bal*100).toFixed(2)+"%";
                 })()} color="#94a3b8" sub={posSizes.length+" trades"}/>
-                <StatTile label="Avg Win" active={selectedMetric==="avgWin"} onClick={function(){setSelectedMetric("avgWin");}} value={HIDE_DOLLAR_PNL?avgWinPct():("+$"+avgWin.toFixed(0))} color="#22c55e" sub={HIDE_DOLLAR_PNL?"":(avgWinPct())}/>
-                <StatTile label="Avg Loss" active={selectedMetric==="avgLoss"} onClick={function(){setSelectedMetric("avgLoss");}} value={HIDE_DOLLAR_PNL?avgLossPct():("-$"+Math.abs(avgLoss).toFixed(0))} color="#ef4444" sub={HIDE_DOLLAR_PNL?"":(avgLossPct())}/>
+                <StatTile label="Avg Win" active={selectedMetric==="avgWin"} onClick={function(){setSelectedMetric("avgWin");}} value={avgWinPct()} color="#22c55e" sub={hideCurrency()?"":("+$"+avgWin.toFixed(0))}/>
+                <StatTile label="Avg Loss" active={selectedMetric==="avgLoss"} onClick={function(){setSelectedMetric("avgLoss");}} value={avgLossPct()} color="#ef4444" sub={hideCurrency()?"":("-$"+Math.abs(avgLoss).toFixed(0))}/>
                 <StatTile label="Expectancy" active={selectedMetric==="expectancy"} onClick={function(){setSelectedMetric("expectancy");}} value={HIDE_DOLLAR_PNL?expPct():((expValue>=0?"+":"-")+"$"+Math.abs(expValue).toFixed(2))} color={expValue>=0?"#22c55e":"#ef4444"} sub={HIDE_DOLLAR_PNL?"":expPct()}/>
               </div>
               {/* CHANGED: Chart embedded directly under Overview tiles — clicking a tile swaps the chart. */}
@@ -8655,7 +8655,7 @@ function PerformanceTab(props){
                     ? AMT_MASK
                     : isLock
                     ? (g.worstPnl<0?"-$"+Math.abs(g.worstPnl).toFixed(2):"—")
-                    : (g.lossN>0?(HIDE_DOLLAR_PNL?(avgLossPct.toFixed(2)+"%"):("-$"+Math.abs(avgLoss).toFixed(2))):"—");
+                    : (g.lossN>0?("-"+Math.abs(avgLossPct).toFixed(2)+"%"):"—");
                   var unit=isLock?"day":"trade";
                   return (
                     <div key={k} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:i<keys.length-1?"1px solid #1e293b":"none",gap:8}}>
@@ -8706,7 +8706,7 @@ function PerformanceTab(props){
               <StatSec title="Untagged Trades" colSpan={props.mobile?1:6}>
                 {cats.map(function(c,i){
                   var g=c.stat;
-                  var lossStr=(g.l>0?(HIDE_DOLLAR_PNL?(g.avgLossPct.toFixed(2)+"%"):("-$"+Math.abs(g.avgLoss).toFixed(2))):"—");
+                  var lossStr=(g.l>0?("-"+Math.abs(g.avgLossPct).toFixed(2)+"%"):"—");
                   return (
                     <div key={c.label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:i<cats.length-1?"1px solid #1e293b":"none",gap:8}}>
                       <div style={{flex:1,minWidth:0,display:"flex",alignItems:"center",gap:7}}>
