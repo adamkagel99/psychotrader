@@ -1866,6 +1866,11 @@ function MonthlyTargetBanner(props){
 // suppress a later loss warning on the same day (and vice-versa).
 function dailyGoalBannerDismissed(dir){try{return localStorage.getItem("tf-daily-goal-banner-dismissed")===todayStr()+":"+(dir||"gain");}catch(e){return false;}}
 function dismissDailyGoalBanner(dir){try{localStorage.setItem("tf-daily-goal-banner-dismissed",todayStr()+":"+(dir||"gain"));}catch(e){}}
+// CHANGED: "Done for the day" — a manual, day-scoped flag the trader sets to commit to stopping.
+// Advisory (matches the app's philosophy): it doesn't hard-lock trading, but the New Trade button
+// asks for confirmation while it's set, and the Today strip / Journal show a committed state.
+function isDoneForDay(){try{return localStorage.getItem("tf-done-for-day")===todayStr();}catch(e){return false;}}
+function setDoneForDay(v){try{if(v)localStorage.setItem("tf-done-for-day",todayStr());else localStorage.removeItem("tf-done-for-day");}catch(e){}}
 function DailyTargetBanner(props){
   var goalsLocal=(function(){try{return JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};}catch(e){return {};}})();
   var settingsLocal=(function(){try{return JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};}catch(e){return {};}})();
@@ -4492,6 +4497,8 @@ function PerformanceSummary(props){
 // band, with challenges/achievements/scaling embedded below.
 // CHANGED: Today-first summary strip — the most decision-relevant numbers at a glance.
 function TodayStrip(props){
+  // CHANGED: "Done for the day" commitment toggle (day-scoped). Advisory — see isDoneForDay().
+  var _dfd=useState(isDoneForDay());var doneForDay=_dfd[0],setDoneState=_dfd[1];
   var settings=props.settings||{};
   var riskMax=parseFloat(settings.riskMax)||0;
   var todayTrades=(props.todayTrades||[]).filter(function(t){return t&&t.status!=="open";});
@@ -4564,6 +4571,17 @@ function TodayStrip(props){
             </div>
           );
         })}
+      </div>
+      {/* CHANGED: Done-for-the-day commitment button. Day-scoped, advisory. When set, the Journal's
+          New Trade button asks for confirmation before opening. */}
+      <div style={{padding:props.mobile?"10px 12px":"12px 14px",background:"#0c0c12",borderTop:"1px solid #1e293b"}}>
+        <button onClick={function(){var nv=!doneForDay;setDoneForDay(nv);setDoneState(nv);}}
+          style={{width:"100%",padding:props.mobile?"10px 12px":"11px 14px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:props.mobile?13:14,fontWeight:700,letterSpacing:0.2,
+            background:doneForDay?"linear-gradient(135deg,#14532d,#166534)":"#15151f",
+            border:"1px solid "+(doneForDay?"#22c55e":"#334155"),
+            color:doneForDay?"#bbf7d0":"#cbd5e1",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+          {doneForDay?"✓ Done for the day · tap to undo":"🏁 Done for the day"}
+        </button>
       </div>
     </div>
   );
@@ -5465,7 +5483,13 @@ function TradesTab(props){
           {/* CHANGED: On mobile, the action button stretches to the full row width below the header pills. */}
           {/* CHANGED: New Trade button is always enabled — disciplined sizing/locks are advisory,
              not blockers. Removes the previous disabled branch driven by tradeStatus. */}
-          {isToday&&<button onClick={function(){var t=mkTrade();t.sessionId=phase!=="closed"?phase:null;setTrade(t);setShowForm(true);}} style={{padding:props.mobile?"10px 12px":"8px 16px",background:"#4f46e5",color:"#fff",border:"none",borderRadius:6,fontSize:props.mobile?13:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flex:props.mobile?1:"none"}}>+ New Trade</button>}
+          {isToday&&<button onClick={function(){
+            // CHANGED: If the trader marked themselves done for the day, confirm before re-opening
+            // the trade form. Advisory only — proceeding clears the done flag since they're trading again.
+            if(isDoneForDay()&&!window.confirm("You marked yourself done for the day. Start another trade anyway?"))return;
+            if(isDoneForDay()){setDoneForDay(false);if(props.bumpReloadKey)props.bumpReloadKey();}
+            var t=mkTrade();t.sessionId=phase!=="closed"?phase:null;setTrade(t);setShowForm(true);
+          }} style={{padding:props.mobile?"10px 12px":"8px 16px",background:"#4f46e5",color:"#fff",border:"none",borderRadius:6,fontSize:props.mobile?13:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flex:props.mobile?1:"none"}}>+ New Trade</button>}
           {!isToday&&<button onClick={function(){var t=mkTrade();setPastNewTrade(Object.assign({},t,{time:new Date().toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"})}));}} style={{padding:props.mobile?"10px 12px":"8px 16px",background:"#4f46e5",color:"#fff",border:"none",borderRadius:6,fontSize:props.mobile?13:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flex:props.mobile?1:"none"}}>+ Add Trade</button>}
         </div>
         {pickerOpen&&<CalendarPicker selectedDate={selectedDate} onSelect={function(d){setSelectedDate(d);setPickerOpen(false);}} onClose={function(){setPickerOpen(false);}} todayPnL={totalPnL} riskMax={parseFloat(settings.riskMax)||0} settings={settings} todayTrades={state.trades}/>}
