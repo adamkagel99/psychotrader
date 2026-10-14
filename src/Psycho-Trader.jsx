@@ -4572,16 +4572,13 @@ function TodayStrip(props){
           );
         })}
       </div>
-      {/* CHANGED: Done-for-the-day commitment button. Day-scoped, advisory. When set, the Journal's
-          New Trade button asks for confirmation before opening. */}
+      {/* CHANGED: Done-for-the-day commitment button. Day-scoped. A hard stop with no undo — once set,
+          it becomes a committed pill and the New Trade button is disabled for the rest of the day. */}
       <div style={{padding:props.mobile?"10px 12px":"12px 14px",background:"#0c0c12",borderTop:"1px solid #1e293b"}}>
-        <button onClick={function(){var nv=!doneForDay;setDoneForDay(nv);setDoneState(nv);}}
-          style={{width:"100%",padding:props.mobile?"10px 12px":"11px 14px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:props.mobile?13:14,fontWeight:700,letterSpacing:0.2,
-            background:doneForDay?"linear-gradient(135deg,#14532d,#166534)":"#15151f",
-            border:"1px solid "+(doneForDay?"#22c55e":"#334155"),
-            color:doneForDay?"#bbf7d0":"#cbd5e1",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-          {doneForDay?"✓ Done for the day · tap to undo":"🏁 Done for the day"}
-        </button>
+        {doneForDay
+          ?<div style={{width:"100%",padding:props.mobile?"10px 12px":"11px 14px",borderRadius:8,fontFamily:"inherit",fontSize:props.mobile?13:14,fontWeight:700,letterSpacing:0.2,background:"linear-gradient(135deg,#14532d,#166534)",border:"1px solid #22c55e",color:"#bbf7d0",display:"flex",alignItems:"center",justifyContent:"center",gap:8,boxSizing:"border-box"}}>✓ Done for the day</div>
+          :<button onClick={function(){setDoneForDay(true);setDoneState(true);}}
+            style={{width:"100%",padding:props.mobile?"10px 12px":"11px 14px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:props.mobile?13:14,fontWeight:700,letterSpacing:0.2,background:"#15151f",border:"1px solid #334155",color:"#cbd5e1",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>🏁 Done for the day</button>}
       </div>
     </div>
   );
@@ -5082,6 +5079,8 @@ function TradesTab(props){
   var [editingId,setEditingId]=useState(null);
   var [editDraft,setEditDraft]=useState(null);
   var [pastNewTrade,setPastNewTrade]=useState(null);
+  // CHANGED: "Done for the day" commitment — a hard stop (New Trade disabled) with no undo.
+  var [doneForDay,setDoneForDayState]=useState(isDoneForDay());
   function startEdit(t){setEditingId(t.id);setEditDraft(Object.assign({},t));}
   function cancelEdit(){setEditingId(null);setEditDraft(null);}
   var [pickerOpen,setPickerOpen]=useState(false);
@@ -5483,13 +5482,11 @@ function TradesTab(props){
           {/* CHANGED: On mobile, the action button stretches to the full row width below the header pills. */}
           {/* CHANGED: New Trade button is always enabled — disciplined sizing/locks are advisory,
              not blockers. Removes the previous disabled branch driven by tradeStatus. */}
-          {isToday&&<button onClick={function(){
-            // CHANGED: If the trader marked themselves done for the day, confirm before re-opening
-            // the trade form. Advisory only — proceeding clears the done flag since they're trading again.
-            if(isDoneForDay()&&!window.confirm("You marked yourself done for the day. Start another trade anyway?"))return;
-            if(isDoneForDay()){setDoneForDay(false);if(props.bumpReloadKey)props.bumpReloadKey();}
-            var t=mkTrade();t.sessionId=phase!=="closed"?phase:null;setTrade(t);setShowForm(true);
-          }} style={{padding:props.mobile?"10px 12px":"8px 16px",background:"#4f46e5",color:"#fff",border:"none",borderRadius:6,fontSize:props.mobile?13:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flex:props.mobile?1:"none"}}>+ New Trade</button>}
+          {/* CHANGED: When done for the day, the New Trade button is a hard stop — disabled, no
+             confirm, no undo. A committed "Done for the day" pill sits in its place. */}
+          {isToday&&doneForDay&&<span style={{padding:props.mobile?"10px 12px":"8px 16px",background:"linear-gradient(135deg,#14532d,#166534)",border:"1px solid #22c55e",borderRadius:6,color:"#bbf7d0",fontSize:props.mobile?13:14,fontWeight:700,whiteSpace:"nowrap",flex:props.mobile?1:"none",textAlign:"center",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>✓ Done for the day</span>}
+          {isToday&&!doneForDay&&<button onClick={function(){var t=mkTrade();t.sessionId=phase!=="closed"?phase:null;setTrade(t);setShowForm(true);}} style={{padding:props.mobile?"10px 12px":"8px 16px",background:"#4f46e5",color:"#fff",border:"none",borderRadius:6,fontSize:props.mobile?13:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flex:props.mobile?1:"none"}}>+ New Trade</button>}
+          {isToday&&!doneForDay&&<button onClick={function(){setDoneForDay(true);setDoneForDayState(true);if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:props.mobile?"10px 12px":"8px 16px",background:"#15151f",color:"#cbd5e1",border:"1px solid #334155",borderRadius:6,fontSize:props.mobile?13:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flex:props.mobile?1:"none"}}>🏁 Done for the day</button>}
           {!isToday&&<button onClick={function(){var t=mkTrade();setPastNewTrade(Object.assign({},t,{time:new Date().toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"})}));}} style={{padding:props.mobile?"10px 12px":"8px 16px",background:"#4f46e5",color:"#fff",border:"none",borderRadius:6,fontSize:props.mobile?13:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flex:props.mobile?1:"none"}}>+ Add Trade</button>}
         </div>
         {pickerOpen&&<CalendarPicker selectedDate={selectedDate} onSelect={function(d){setSelectedDate(d);setPickerOpen(false);}} onClose={function(){setPickerOpen(false);}} todayPnL={totalPnL} riskMax={parseFloat(settings.riskMax)||0} settings={settings} todayTrades={state.trades}/>}
