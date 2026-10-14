@@ -1862,8 +1862,10 @@ function MonthlyTargetBanner(props){
 }
 // CHANGED: Daily P&L goal banner — mirrors MonthlyTargetBanner but fires when TODAY's P&L reaches
 // the daily target from the goal cards. Nudges the trader to consider stopping for the day.
-function dailyGoalBannerDismissed(){try{return localStorage.getItem("tf-daily-goal-banner-dismissed")===todayStr();}catch(e){return false;}}
-function dismissDailyGoalBanner(){try{localStorage.setItem("tf-daily-goal-banner-dismissed",todayStr());}catch(e){}}
+// CHANGED: Dismissal is scoped by day AND direction, so dismissing the gain warning doesn't also
+// suppress a later loss warning on the same day (and vice-versa).
+function dailyGoalBannerDismissed(dir){try{return localStorage.getItem("tf-daily-goal-banner-dismissed")===todayStr()+":"+(dir||"gain");}catch(e){return false;}}
+function dismissDailyGoalBanner(dir){try{localStorage.setItem("tf-daily-goal-banner-dismissed",todayStr()+":"+(dir||"gain"));}catch(e){}}
 function DailyTargetBanner(props){
   var goalsLocal=(function(){try{return JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};}catch(e){return {};}})();
   var settingsLocal=(function(){try{return JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};}catch(e){return {};}})();
@@ -1871,19 +1873,40 @@ function DailyTargetBanner(props){
   if(dailyTarget<=0)return null;
   // Today's P&L — live closed-trade total for today (same source the Today strip uses).
   var todayPnL=parseFloat(props.totalPnL)||0;
-  if(todayPnL<dailyTarget)return null;
-  if(dailyGoalBannerDismissed())return null;
-  // CHANGED: When $/amounts are hidden, drop the figures entirely (no "$•••") — just the message.
+  // CHANGED: Fire at 75% of the daily stop in EITHER direction. "stop" magnitude = the daily target;
+  // gain side warns as you approach the target (protect it), loss side warns as you approach the
+  // same magnitude of loss (consider stopping). Also renders in W/L mode (figures dropped).
+  var thresh=dailyTarget*0.75;
+  var dir=todayPnL>=thresh?"gain":(todayPnL<=-thresh?"loss":null);
+  if(!dir)return null;
+  if(dailyGoalBannerDismissed(dir))return null;
+  var isLoss=dir==="loss";
+  var hit=isLoss?(todayPnL<=-dailyTarget):(todayPnL>=dailyTarget);
   var hideVals=hideCurrency();
-  var fmt=function(n){return "$"+Math.round(n).toLocaleString();};
-  var msg=hideVals?"🎯 Daily target hit · protect it, consider stopping":("🎯 Daily target hit — "+fmt(todayPnL)+" of "+fmt(dailyTarget)+" · protect it, consider stopping");
+  var fmt=function(n){return "$"+Math.round(Math.abs(n)).toLocaleString();};
+  var msg;
+  if(isLoss){
+    msg=hideVals
+      ?(hit?"🛑 Daily loss limit hit · stop trading":"⚠️ 75% to daily loss limit · consider stopping")
+      :(hit?("🛑 Daily loss limit hit — -"+fmt(todayPnL)+" of -"+fmt(dailyTarget)+" · stop trading")
+           :("⚠️ 75% to daily loss limit — -"+fmt(todayPnL)+" of -"+fmt(dailyTarget)+" · consider stopping"));
+  }else{
+    msg=hideVals
+      ?(hit?"🎯 Daily target hit · protect it, consider stopping":"🎯 75% to daily target · protect your gains")
+      :(hit?("🎯 Daily target hit — "+fmt(todayPnL)+" of "+fmt(dailyTarget)+" · protect it, consider stopping")
+           :("🎯 75% to daily target — "+fmt(todayPnL)+" of "+fmt(dailyTarget)+" · protect your gains"));
+  }
+  var bg=isLoss?"linear-gradient(135deg,#450a0a,#7f1d1d)":"linear-gradient(135deg,#14532d,#166534)";
+  var border=isLoss?"#ef4444":"#22c55e";
+  var dismissBorder=isLoss?"#7f1d1d":"#166534";
+  var dismissColor=isLoss?"#fca5a5":"#86efac";
   return (
-    <div style={{marginBottom:props.compact?0:12,padding:props.compact?"8px 12px":"12px 16px",background:"linear-gradient(135deg,#14532d,#166534)",border:"1px solid #22c55e",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+    <div style={{marginBottom:props.compact?0:12,padding:props.compact?"8px 12px":"12px 16px",background:bg,border:"1px solid "+border,borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
       <div style={{minWidth:0}}>
         <div style={{fontSize:13,fontWeight:800,color:"#fff",display:"flex",alignItems:"center",gap:7}}>{msg}</div>
       </div>
       <div style={{display:"flex",gap:6,flexShrink:0}}>
-        <button onClick={function(){dismissDailyGoalBanner();if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"none",border:"1px solid #166534",borderRadius:6,color:"#86efac",fontSize:12,fontWeight:600,whiteSpace:"nowrap",cursor:"pointer",fontFamily:"inherit"}}>Dismiss</button>
+        <button onClick={function(){dismissDailyGoalBanner(dir);if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"none",border:"1px solid "+dismissBorder,borderRadius:6,color:dismissColor,fontSize:12,fontWeight:600,whiteSpace:"nowrap",cursor:"pointer",fontFamily:"inherit"}}>Dismiss</button>
       </div>
     </div>
   );
@@ -4515,7 +4538,9 @@ function TodayStrip(props){
     :((pnl<0?"-$":"$")+Math.abs(pnl).toFixed(2));
   var tiles=[
     {label:"Today P&L",value:pnlText,color:pnlColor},
-    {label:"R Multiple",value:HIDE_AMOUNTS?AMT_MASK:((rVal>=0?"+":"")+rVal.toFixed(1)+"R"),color:rVal>=0?"#22c55e":"#ef4444"},
+    // CHANGED: R multiple stays visible in W/L mode (R is not a $/% figure) so the Today strip
+    // always shows risk-adjusted performance.
+    {label:"R Multiple",value:((rVal>=0?"+":"")+rVal.toFixed(1)+"R"),color:rVal>=0?"#22c55e":"#ef4444"},
     {label:"Trades",value:cap!=null?(todayTrades.length+" / "+cap):String(todayTrades.length),color:cap!=null&&todayTrades.length>cap?"#ef4444":"#e2e8f0"},
     {label:"Intraday DD",value:ddText,color:ddVal<0?"#ef4444":"#94a3b8"},
     {label:"Discipline",value:Math.round(disc),color:discColor(disc)}
