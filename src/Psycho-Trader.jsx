@@ -438,7 +438,11 @@ function calcPosSizes(a,pcts){
     // CHANGED: Contract-based sizing is now TIER-DERIVED — contracts = next-tier $ ÷ 1000
     // (e.g. balance in $1k–$5k → next tier $5k → 5 contracts; $5k–$10k → 10). Risk cap is a
     // function of the contract count: risk-per-contract × contracts.
-    posMax=Math.floor(nextMilestone(b)/1000);
+    // CHANGED: Contract sizing is EVEN-only — floor the derived count to the nearest even number
+    // (min 2), so e.g. 5→4, 7→6, 15→14. This is the single source of truth, so the tier table,
+    // trade form and computed settings all inherit even sizes.
+    var _rawC=Math.floor(nextMilestone(b)/1000);
+    posMax=Math.max(2,_rawC-(_rawC%2));
     riskMax=Math.round((parseFloat(p.riskPerContract)||0)*posMax);
     posUnit="contracts";
   }else if(p.sizingMode==="dollar"){
