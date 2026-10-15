@@ -1860,6 +1860,38 @@ function MonthlyTargetBanner(props){
     </div>
   );
 }
+// CHANGED: Weekly P&L goal banner — mirrors MonthlyTargetBanner but fires when THIS WEEK's P&L
+// reaches the weekly target from the goal cards. Dismissal is scoped to the current week.
+function isWeekGoalBannerDismissed(){try{return localStorage.getItem("tf-week-goal-banner-dismissed")===getWeekStartStr();}catch(e){return false;}}
+function dismissWeekGoalBanner(){try{localStorage.setItem("tf-week-goal-banner-dismissed",getWeekStartStr());}catch(e){}}
+function WeeklyTargetBanner(props){
+  var goalsLocal=(function(){try{return JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};}catch(e){return {};}})();
+  var settingsLocal=(function(){try{return JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};}catch(e){return {};}})();
+  var weeklyTarget=resolveGoalTargets(goalsLocal,settingsLocal).weekly||0;
+  if(weeklyTarget<=0)return null;
+  var wkStart=getWeekStart();
+  var todayKeyLocal=todayStr();
+  var weekRows=loadJournalRows().filter(function(e){return new Date(e.date)>=wkStart;});
+  var todayInJournal=weekRows.some(function(e){return e.date===todayKeyLocal;});
+  var totalPnL=parseFloat(props.totalPnL)||0;
+  var weekPnLLive=weekRows.reduce(function(s,e){return s+(entryNetPnl(e));},0)+(todayInJournal?0:totalPnL);
+  if(weekPnLLive<weeklyTarget)return null;
+  if(isWeekGoalBannerDismissed())return null;
+  // CHANGED: When $/amounts are hidden, drop the figures entirely (no "$•••") — just the message.
+  var hideVals=hideCurrency();
+  var fmt=function(n){return "$"+Math.round(n).toLocaleString();};
+  var msg=hideVals?"🏁 Weekly target hit":("🏁 Weekly target hit — "+fmt(weekPnLLive)+" of "+fmt(weeklyTarget));
+  return (
+    <div style={{marginBottom:props.compact?0:12,padding:props.compact?"8px 12px":"12px 16px",background:"linear-gradient(135deg,#1e1b4b,#3730a3)",border:"1px solid #818cf8",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+      <div style={{minWidth:0}}>
+        <div style={{fontSize:13,fontWeight:800,color:"#fff",display:"flex",alignItems:"center",gap:7}}>{msg}</div>
+      </div>
+      <div style={{display:"flex",gap:6,flexShrink:0}}>
+        <button onClick={function(){dismissWeekGoalBanner();if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"none",border:"1px solid #4338ca",borderRadius:6,color:"#c7d2fe",fontSize:12,fontWeight:600,whiteSpace:"nowrap",cursor:"pointer",fontFamily:"inherit"}}>Dismiss</button>
+      </div>
+    </div>
+  );
+}
 // CHANGED: Daily P&L goal banner — mirrors MonthlyTargetBanner but fires when TODAY's P&L reaches
 // the daily target from the goal cards. Nudges the trader to consider stopping for the day.
 // CHANGED: Dismissal is scoped by day AND direction, so dismissing the gain warning doesn't also
@@ -10970,6 +11002,9 @@ function App(props){
                 <DailyTargetBanner totalPnL={totalPnL} bumpReloadKey={bumpReloadKey} compact={true}/>
               </div>
               <div style={{width:"100%",maxWidth:680,alignSelf:"center"}}>
+                <WeeklyTargetBanner totalPnL={totalPnL} bumpReloadKey={bumpReloadKey} compact={true}/>
+              </div>
+              <div style={{width:"100%",maxWidth:680,alignSelf:"center"}}>
                 <MonthlyTargetBanner totalPnL={totalPnL} bumpReloadKey={bumpReloadKey} onWithdraw={function(amt){setPendingWithdrawAmount(amt);setTab("settings");}} compact={true}/>
               </div>
             </div>}
@@ -11008,6 +11043,7 @@ function App(props){
                another row. On mobile the header is too narrow — fall back to rendering above
                the tab content. */}
             {mobile&&<DailyTargetBanner totalPnL={totalPnL} bumpReloadKey={bumpReloadKey}/>}
+            {mobile&&<WeeklyTargetBanner totalPnL={totalPnL} bumpReloadKey={bumpReloadKey}/>}
             {mobile&&<MonthlyTargetBanner totalPnL={totalPnL} bumpReloadKey={bumpReloadKey} onWithdraw={function(amt){setPendingWithdrawAmount(amt);setTab("settings");}}/>}
             {tab==="dashboard"&&<DashboardTab key={reloadKey} mobile={mobile} settings={settings} phase={phase} state={state} setState={setState} checklistVersion={checklistVersion} onNavigateToJournal={function(){setTab("trades");}} onStartTrade={function(){var t=mkTrade();t.sessionId=phase!=="closed"?phase:null;setTrade(t);setShowForm(true);setTab("trades");}} preCheckComplete={preCheckComplete} currentAccount={computeAccountBalance(totalPnL)} displayPosMin={dPosMin} displayPosMax={dPosMax} displayRiskMin={dRiskMin} displayRiskMax={dRiskMax} totalPnL={totalPnL} todayTrades={state.trades} prevPnL={prevPnL} prevDate={prevDate} prevRiskMax={prevRiskMax} onNavigateToTrade={navigateToTrade} eventsReloadKey={eventsReloadKey} eventCurrencyFilter={eventCurrencyFilter} setEventCurrencyFilter={setEventCurrencyFilter} eventImpactFilter={eventImpactFilter} setEventImpactFilter={setEventImpactFilter} onNavigateToSettings={function(){setSettingsFocus("economicEvents");setTab("settings");}} onNavigateToPerformance={function(){setTab("performance");}} onNavigateToGoals={function(){setTab("goals");}} onWithdraw={function(amt){setPendingWithdrawAmount(amt);setTab("settings");}} bumpReloadKey={bumpReloadKey} tradeStatus={tradeStatus}/>}
             {tab==="trades"&&<TradesTab mobile={mobile} state={state} setState={setState} showForm={showForm} setShowForm={setShowForm} trade={trade} setTrade={setTrade} saveTrade={saveTrade} deleteTrade={deleteTrade} tradeStatus={tradeStatus} phase={phase} settings={settings} preCheckComplete={preCheckComplete} totalPnL={totalPnL} initialDate={tradesInitialDate} reloadKey={reloadKey} bumpReloadKey={bumpReloadKey} timezone={settings.timezone} liveTrades={liveTrades} openLiveTrade={function(lt){setLiveTradeManaging(lt);}} displayPosMin={dPosMin} displayPosMax={dPosMax} displayRiskMin={dRiskMin} displayRiskMax={dRiskMax} tradeOptions={tradeOptions} autoAddViolations={autoAddViolations} refreshHistory={bumpReloadKey} checklistVersion={checklistVersion} onNavigateToHalfSize={function(){setSettingsFocus("positionSizing");setTab("settings");}}/>}
