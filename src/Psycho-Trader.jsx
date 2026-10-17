@@ -7521,18 +7521,18 @@ function EquityCurve(props){
   var areaPath=pts.map(function(p,i){return (i===0?"M":"L")+xFor(i).toFixed(1)+","+yFor(p.cum).toFixed(1);}).join("")+"L"+xFor(pts.length-1).toFixed(1)+","+yFor(0).toFixed(1)+"L"+xFor(0).toFixed(1)+","+yFor(0).toFixed(1)+"Z";
   var linePath=pts.map(function(p,i){return (i===0?"M":"L")+xFor(i).toFixed(1)+","+yFor(p.cum).toFixed(1);}).join("");
   var peakPath=pts.map(function(p,i){return (i===0?"M":"L")+xFor(i).toFixed(1)+","+yFor(p.peak).toFixed(1);}).join("");
-  // CHANGED: When $ is hidden, equity is expressed as % return. Denominator = starting balance
-  // at the range's first entry. If that's 0 (e.g. the user's first deposit lands on the same day
-  // as their first entry), fall back to total lifetime deposits so the % is still meaningful
-  // instead of collapsing to 0.00%.
-  var pctDenom=startBal;
-  if(!(pctDenom>0)){
-    try{
-      var dep=0;
-      (loadTransfers()||[]).forEach(function(tf){var a=parseFloat(tf.amount)||0;if(a>0)dep+=a;});
-      if(dep>0)pctDenom=dep;
-    }catch(e){}
-  }
+  // CHANGED: When $ is hidden, equity is expressed as % return. Denominator must MATCH the Total
+  // P&L tile so the headline %, peak, and drawdown agree with it:
+  //   - all / ytd  -> total deposited capital (cumulative invested), same as the tile's all-range %
+  //   - shorter     -> balance at the range's first entry (same as the tile's short-range %)
+  // Dividing cumulative $ by just the pre-first-trade balance inflated the headline (+296% vs the
+  // tile's +44%) and produced an absurd drawdown (-431%).
+  var _isAllRange=(props.range==="all"||props.range==="ytd");
+  var _totalDeposits=0;
+  try{(loadTransfers()||[]).forEach(function(tf){var a=parseFloat(tf.amount)||0;if(a>0)_totalDeposits+=a;});}catch(e){}
+  var pctDenom=(_isAllRange&&_totalDeposits>0)?_totalDeposits:startBal;
+  if(!(pctDenom>0)&&_totalDeposits>0)pctDenom=_totalDeposits;
+  var denomLabel=(_isAllRange&&_totalDeposits>0&&pctDenom===_totalDeposits)?"Invested Capital":"Starting Balance";
   var positive=cum>=0;
   var fmt=function(n){if(HIDE_AMOUNTS)return wlSign(n);if(HIDE_DOLLAR_PNL){var pct=pctDenom>0?(n/pctDenom*100):0;return (pct>=0?"+":"")+pct.toFixed(2)+"%";}return (n>=0?"+":"-")+"$"+Math.abs(n).toFixed(2);};
   // CHANGED: Drawdown also reframed to use the same denominator so it's apples-to-apples with the headline %.
@@ -7569,7 +7569,7 @@ function EquityCurve(props){
         </div>
         <div style={{textAlign:"right",display:"flex",flexDirection:"column",gap:4}}>
           <div>
-            <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Starting Balance</div>
+            <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{denomLabel}</div>
             <div style={{fontSize:12,fontWeight:600,color:"#94a3b8",fontVariantNumeric:"tabular-nums"}}>${Math.round(pctDenom).toLocaleString()}</div>
           </div>
           <div>
