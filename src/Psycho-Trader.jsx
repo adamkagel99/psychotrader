@@ -8549,6 +8549,27 @@ function PerformanceTab(props){
                 if(HIDE_DOLLAR_PNL)return <MetricChart entries={perTradeRows} perPoint={true} label="Position Size" color="#a5b4fc" compute={computeTradePosPct} format={fmtPct}/>;
                 return <MetricChart entries={perTradeRows} perPoint={true} label="Position Size" color="#a5b4fc" compute={computeTradePos} format={function(v){return "$"+Math.round(v).toLocaleString();}}/>;
               }
+              // CHANGED: Avg Contract Price chart — per-trade points of each trade's volume-weighted
+              // entry price, in chronological order. Masked in W/L mode.
+              if(selectedMetric==="avgContractPrice"){
+                var acpRows=[];
+                filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(t&&t.status!=="open")acpRows.push({date:r.date,trades:[t]});});});
+                acpRows.sort(function(a,b){var da=new Date(a.date).getTime(),db=new Date(b.date).getTime();if(da!==db)return da-db;var ma=parseTimeToMinsOfDay(a.trades[0].time)||0,mb=parseTimeToMinsOfDay(b.trades[0].time)||0;return ma-mb;});
+                function computeTradeCP(slice){var t=slice[0]&&slice[0].trades&&slice[0].trades[0];if(!t)return null;var cost=0,qty=0;(t.entries||[]).forEach(function(e){var c=parseFloat(e&&e.contracts),p=parseFloat(e&&e.price);if(!isNaN(c)&&c>0&&!isNaN(p)){cost+=c*p;qty+=c;}});return qty>0?cost/qty:null;}
+                return <MetricChart entries={acpRows} perPoint={true} label="Contract Price" color="#a5b4fc" compute={computeTradeCP} format={HIDE_AMOUNTS?maskFmt:function(v){return "$"+v.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});}}/>;
+              }
+              // CHANGED: Max Loss Streak chart — per-trade points of the running consecutive-loss count
+              // (resets to 0 on any non-losing trade). The tile shows the peak; the chart shows where
+              // the streaks happened. A count, so it's shown in all display modes.
+              if(selectedMetric==="maxLossStreak"){
+                var lsOrdered=[];
+                filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(t&&t.status!=="open")lsOrdered.push({date:r.date,t:t});});});
+                lsOrdered.sort(function(a,b){var da=new Date(a.date).getTime(),db=new Date(b.date).getTime();if(da!==db)return da-db;var ma=parseTimeToMinsOfDay(a.t.time)||0,mb=parseTimeToMinsOfDay(b.t.time)||0;return ma-mb;});
+                var lsRows=[],_run=0;
+                lsOrdered.forEach(function(x){if(tradeNetPnl(x.t)<0)_run++;else _run=0;lsRows.push({date:x.date,trades:[x.t],_streak:_run});});
+                function computeStreak(slice){var r=slice[0];return r?(r._streak||0):null;}
+                return <MetricChart entries={lsRows} perPoint={true} label="Loss Streak" color="#ef4444" compute={computeStreak} format={fmtCount}/>;
+              }
               return <EquityCurve entries={filtered} range={range}/>;
             }
             return <StatSec title="Overview" colSpan={props.mobile?1:6}>
@@ -8590,11 +8611,11 @@ function PerformanceTab(props){
                 <StatTile label="Avg Loss" active={selectedMetric==="avgLoss"} onClick={function(){setSelectedMetric("avgLoss");}} value={HIDE_AMOUNTS?AMT_MASK:avgLossPct()} color="#ef4444" sub={hideCurrency()?"":("-$"+Math.abs(avgLoss).toFixed(0))}/>
                 <StatTile label="Expectancy" active={selectedMetric==="expectancy"} onClick={function(){setSelectedMetric("expectancy");}} value={HIDE_AMOUNTS?AMT_MASK:expPct()} color={expValue>=0?"#22c55e":"#ef4444"} sub={hideCurrency()?"":((expValue>=0?"+":"-")+"$"+Math.abs(expValue).toFixed(2))}/>
                 {/* CHANGED: Avg contract price over the selected range — volume-weighted mean entry
-                   price per contract. Display-only (not a chartable metric). Masked in W/L mode. */}
-                <StatTile label="Avg Contract Price" value={HIDE_AMOUNTS?AMT_MASK:(avgContractPrice>0?("$"+avgContractPrice.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})):"—")} color="#94a3b8" sub={_acpQty>0?(Math.round(_acpQty)+" contracts"):""}/>
+                   price per contract. Click to chart price per trade. Masked in W/L mode. */}
+                <StatTile label="Avg Contract Price" active={selectedMetric==="avgContractPrice"} onClick={function(){setSelectedMetric("avgContractPrice");}} value={HIDE_AMOUNTS?AMT_MASK:(avgContractPrice>0?("$"+avgContractPrice.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})):"—")} color="#94a3b8" sub={_acpQty>0?(Math.round(_acpQty)+" contracts"):""}/>
                 {/* CHANGED: Max losing streak over the selected range — longest consecutive run of
-                   losing trades. A count, shown in all display modes. */}
-                <StatTile label="Max Loss Streak" value={maxLossStreak} color={maxLossStreak>0?"#ef4444":"#94a3b8"} sub={maxLossStreak===1?"1 trade":(maxLossStreak+" trades")}/>
+                   losing trades. Click to chart the running loss streak. A count, shown in all modes. */}
+                <StatTile label="Max Loss Streak" active={selectedMetric==="maxLossStreak"} onClick={function(){setSelectedMetric("maxLossStreak");}} value={maxLossStreak} color={maxLossStreak>0?"#ef4444":"#94a3b8"} sub={maxLossStreak===1?"1 trade":(maxLossStreak+" trades")}/>
               </div>
               {/* CHANGED: Chart embedded directly under Overview tiles — clicking a tile swaps the chart. */}
               <div style={{marginTop:14,paddingTop:12,borderTop:"1px solid #1e293b"}}>{renderChart()}</div>
