@@ -3194,7 +3194,9 @@ function TradeTile(props){
               {pos>0
                 ?<div style={{fontSize:16,fontWeight:700,color:_isOversized?"#fb923c":"#94a3b8",lineHeight:1,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{fmtPositionDisplay(pos)}</div>
                 :<div style={{color:"#475569",fontSize:18,fontWeight:600,lineHeight:1}}>→</div>}
-              {contractsText&&<div style={{fontSize:13,color:"#64748b",fontWeight:600,letterSpacing:0.2,whiteSpace:"nowrap"}}>{contractsText}</div>}
+              {/* CHANGED: Contracts line turns orange (with ⚠) when the trade is oversized, matching
+                  the position $ above. */}
+              {contractsText&&<div title={_isOversized?"Oversized entry — exceeds your position cap":undefined} style={{fontSize:13,color:_isOversized?"#fb923c":"#64748b",fontWeight:_isOversized?700:600,letterSpacing:0.2,whiteSpace:"nowrap"}}>{_isOversized?"⚠ ":""}{contractsText}</div>}
             </div>
           )}
           {!isNaN(avgExit)&&(
@@ -3210,7 +3212,7 @@ function TradeTile(props){
             </div>
           )}
           {((!isNaN(avgEntry)&&!isNaN(avgExit))===false&&!isNaN(avgEntry)===false&&contractsText)&&(
-            <div style={{fontSize:10,color:"#64748b",fontWeight:600,letterSpacing:0.4,marginLeft:6}}>{contractsText}</div>
+            <div title={_isOversized?"Oversized entry — exceeds your position cap":undefined} style={{fontSize:10,color:_isOversized?"#fb923c":"#64748b",fontWeight:_isOversized?700:600,letterSpacing:0.4,marginLeft:6}}>{_isOversized?"⚠ ":""}{contractsText}</div>
           )}
         </div>
       )}
@@ -3219,7 +3221,7 @@ function TradeTile(props){
       {timeText&&(
         <div style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"#64748b",marginTop:8,fontVariantNumeric:"tabular-nums"}}>
           <span>{timeText}</span>
-          {!hasPriceInfo&&contractsText&&<span><span style={{color:"#334155",margin:"0 6px"}}>·</span>{contractsText}</span>}
+          {!hasPriceInfo&&contractsText&&<span><span style={{color:"#334155",margin:"0 6px"}}>·</span><span title={_isOversized?"Oversized entry — exceeds your position cap":undefined} style={{color:_isOversized?"#fb923c":"inherit",fontWeight:_isOversized?700:"inherit"}}>{_isOversized?"⚠ ":""}{contractsText}</span></span>}
         </div>
       )}
 
