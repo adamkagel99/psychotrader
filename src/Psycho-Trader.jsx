@@ -403,13 +403,29 @@ function getBase(a){
 // CHANGED: positionMin and riskMin are now derived from slippagePct (% below max).
 // CHANGED: Risk Max % is now a percentage of Position Max (not the account balance).
 // CHANGED: Also supports fixed-dollar sizing mode (positionMaxDollar, riskMaxDollar).
-// CHANGED: Single source of truth for the scaling milestone schedule. Tiers are $1k → $5k →
-// $10k, then $10k steps after (no tiers between $1k–$5k or $5k–$10k). Used by Settings,
-// Dashboard, and the sizing effect so they all agree on which tier the user is in.
-function getMilestones(){
-  var m=[500,1000,5000,7500,10000,15000,20000];
-  for(var m10=30000;m10<=100000;m10+=10000)m.push(m10);
-  return m;
+// CHANGED: Scaling ladder reworked around contract-based sizing. Each tier maps an account-balance
+// threshold to an even contract count. Designed for ~$60/contract cost with a ~42% average loss
+// (≈$25 effective risk per contract), ramping risk-per-trade from ~2.5% on small accounts down to
+// ~1.5% at scale ("conservatively aggressive"). A tier activates only once balance clears the
+// threshold +10% (see getCurrentTier). This array is the single source of truth: the milestone
+// schedule (getMilestones) and the per-tier contract count (contractsForTier) both derive from it.
+var SCALING_TIERS=[
+  {bal:2000,contracts:2},
+  {bal:5000,contracts:6},
+  {bal:10000,contracts:10},
+  {bal:18000,contracts:18},
+  {bal:30000,contracts:28},
+  {bal:50000,contracts:40},
+  {bal:75000,contracts:54},
+  {bal:100000,contracts:64}
+];
+// Single source of truth for the scaling milestone schedule (the balance thresholds).
+function getMilestones(){return SCALING_TIERS.map(function(t){return t.bal;});}
+// Even contract count for a given tier/base balance — the highest tier whose threshold is ≤ tier.
+function contractsForTier(tier){
+  var best=SCALING_TIERS[0].contracts;
+  for(var i=0;i<SCALING_TIERS.length;i++){if(tier>=SCALING_TIERS[i].bal)best=SCALING_TIERS[i].contracts;}
+  return best;
 }
 // CHANGED: A tier "activates" only once balance is at least 10% above the tier value — the
 // step-up buffer prevents instant re-sizing the moment you cross a tier line (e.g. the $5,000
@@ -435,14 +451,9 @@ function calcPosSizes(a,pcts){
   var slip=p.slippagePct!=null?p.slippagePct:20;
   var posMax,riskMax,posUnit="$";
   if(p.sizingMode==="contracts"){
-    // CHANGED: Contract-based sizing is now TIER-DERIVED — contracts = next-tier $ ÷ 1000
-    // (e.g. balance in $1k–$5k → next tier $5k → 5 contracts; $5k–$10k → 10). Risk cap is a
-    // function of the contract count: risk-per-contract × contracts.
-    // CHANGED: Contract sizing is EVEN-only — floor the derived count to the nearest even number
-    // (min 2), so e.g. 5→4, 7→6, 15→14. This is the single source of truth, so the tier table,
-    // trade form and computed settings all inherit even sizes.
-    var _rawC=Math.floor(nextMilestone(b)/1000);
-    posMax=Math.max(2,_rawC-(_rawC%2));
+    // CHANGED: Contract-based sizing reads the per-tier contract count straight from SCALING_TIERS
+    // (the reworked ladder). Even counts by construction. Risk cap = risk-per-contract × contracts.
+    posMax=contractsForTier(b);
     riskMax=Math.round((parseFloat(p.riskPerContract)||0)*posMax);
     posUnit="contracts";
   }else if(p.sizingMode==="dollar"){
@@ -900,7 +911,7 @@ function getFocusStates(settings){
   });
   return out;
 }
-function defaultSettings(){return {accountSize:0,positionMin:0,positionMax:0,riskMin:0,riskMax:0,gainMultiplier:5,timezone:"America/Los_Angeles",sessions:defaultSessionsForTz("America/Los_Angeles"),tradingWindows:[{start:60,end:1020}],slippagePct:20,positionMaxPct:7.5,positionMaxDollar:500,positionMaxContracts:1,riskPerContract:33,riskMaxPct:33,riskMaxDollar:165,sizingMode:"pct",hideDollarPnL:false,hideAmounts:false,enabledAssetClasses:defaultEnabledAssetClasses(),assetClassSettings:defaultAssetClassSettings(),defaultAssetClass:"options",defaultInstruments:{},focusStates:defaultFocusStates(),enabledGrades:["A","B"]};}
+function defaultSettings(){return {accountSize:0,positionMin:0,positionMax:0,riskMin:0,riskMax:0,gainMultiplier:5,timezone:"America/Los_Angeles",sessions:defaultSessionsForTz("America/Los_Angeles"),tradingWindows:[{start:60,end:1020}],slippagePct:20,positionMaxPct:7.5,positionMaxDollar:500,positionMaxContracts:1,riskPerContract:25,riskMaxPct:33,riskMaxDollar:165,sizingMode:"pct",hideDollarPnL:false,hideAmounts:false,enabledAssetClasses:defaultEnabledAssetClasses(),assetClassSettings:defaultAssetClassSettings(),defaultAssetClass:"options",defaultInstruments:{},focusStates:defaultFocusStates(),enabledGrades:["A","B"]};}
 // Grade metadata — order + colors. C exists for legacy trades but is off by default.
 var ALL_GRADES=["A","B","C"];
 var GRADE_COLORS={A:"#22c55e",B:"#f59e0b",C:"#ef4444"};
@@ -4536,8 +4547,6 @@ function PerformanceSummary(props){
 // band, with challenges/achievements/scaling embedded below.
 // CHANGED: Today-first summary strip — the most decision-relevant numbers at a glance.
 function TodayStrip(props){
-  // CHANGED: "Done for the day" commitment toggle (day-scoped). Advisory — see isDoneForDay().
-  var _dfd=useState(isDoneForDay());var doneForDay=_dfd[0],setDoneState=_dfd[1];
   var settings=props.settings||{};
   var riskMax=parseFloat(settings.riskMax)||0;
   var todayTrades=(props.todayTrades||[]).filter(function(t){return t&&t.status!=="open";});
@@ -4610,14 +4619,6 @@ function TodayStrip(props){
             </div>
           );
         })}
-      </div>
-      {/* CHANGED: Done-for-the-day commitment button. Day-scoped. A hard stop with no undo — once set,
-          it becomes a committed pill and the New Trade button is disabled for the rest of the day. */}
-      <div style={{padding:props.mobile?"10px 12px":"12px 14px",background:"#0c0c12",borderTop:"1px solid #1e293b"}}>
-        {doneForDay
-          ?<div style={{width:"100%",padding:props.mobile?"10px 12px":"11px 14px",borderRadius:8,fontFamily:"inherit",fontSize:props.mobile?13:14,fontWeight:700,letterSpacing:0.2,background:"linear-gradient(135deg,#14532d,#166534)",border:"1px solid #22c55e",color:"#bbf7d0",display:"flex",alignItems:"center",justifyContent:"center",gap:8,boxSizing:"border-box"}}>✓ Done for the day</div>
-          :<button onClick={function(){setDoneForDay(true);setDoneState(true);}}
-            style={{width:"100%",padding:props.mobile?"10px 12px":"11px 14px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:props.mobile?13:14,fontWeight:700,letterSpacing:0.2,background:"#15151f",border:"1px solid #334155",color:"#cbd5e1",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>🏁 Done for the day</button>}
       </div>
     </div>
   );
@@ -5778,8 +5779,10 @@ function TradesTab(props){
         );
       })()}
       {((!isToday&&pastSession)||(isToday&&todayJournalEntry&&(function(){
-        // CHANGED: On TODAY, only render Day Summary once the last enabled session for the current
-        // weekday has ended. Past days always render.
+        // CHANGED: On TODAY, render the Day Summary once the last enabled session for the current
+        // weekday has ended — OR immediately when the trader marks themselves Done for the day.
+        // Past days always render.
+        if(isDoneForDay())return true;
         try{
           var dow=getNow().getDay();
           var sess=getSessions(settings||{}).filter(function(s){return s.enabled!==false&&(s.days||[1,2,3,4,5]).indexOf(dow)>=0;});
@@ -9468,7 +9471,7 @@ function SettingsTab(props){
           <div style={{marginBottom:8}}>
             <div style={{fontSize:11,color:"#64748b",marginBottom:8,lineHeight:1.5,padding:"7px 9px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:6}}>Contracts are derived from your tier: <span style={{color:"#a5b4fc"}}>next-tier $ ÷ 1000</span>. E.g. $1k–$5k → 5 contracts, $5k–$10k → 10.</div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8}}>
-              <div><label style={lbl}>Risk per contract ($)</label><input type="number" step="1" value={settings.riskPerContract!=null?settings.riskPerContract:33} onChange={function(e){setSettings(function(s){return Object.assign({},s,{riskPerContract:parseFloat(e.target.value)||0});});}} style={fld}/></div>
+              <div><label style={lbl}>Risk per contract ($)</label><input type="number" step="1" value={settings.riskPerContract!=null?settings.riskPerContract:25} onChange={function(e){setSettings(function(s){return Object.assign({},s,{riskPerContract:parseFloat(e.target.value)||0});});}} style={fld}/></div>
             </div>
             <div style={{fontSize:11,color:"#64748b",marginTop:6,lineHeight:1.5}}>Risk Max = risk/contract × contracts.</div>
           </div>
