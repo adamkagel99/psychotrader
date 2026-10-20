@@ -4314,8 +4314,12 @@ function ScalingTargetCard(props){
   var posMaxPct=settings.positionMaxPct!=null?settings.positionMaxPct:7.5;
   var riskMaxPct=settings.riskMaxPct!=null?settings.riskMaxPct:33;
   function sizesFor(tier){return calcPosSizes(tier,{sizingMode:settings.sizingMode,slippagePct:slip,positionMaxPct:posMaxPct,riskMaxPct:riskMaxPct,positionMaxDollar:settings.positionMaxDollar,positionMaxContracts:settings.positionMaxContracts,riskPerContract:settings.riskPerContract,riskMaxDollar:settings.riskMaxDollar});}
-  var sizesNow=sizesFor(currentTier);
-  var sizesNext=isMax?null:sizesFor(nextTier);
+  // CHANGED: When half-size is active (Settings → Position Sizing), the tier figures shown here are
+  // halved to match what you'd actually trade, with a ½ badge. Mirrors the Settings "Computed" line.
+  var halfOn=false;try{halfOn=isMonthHalfsizeActive();}catch(e){}
+  function applyHalf(sz){if(!sz||!halfOn)return sz;return Object.assign({},sz,{positionMin:Math.round(sz.positionMin/2),positionMax:Math.round(sz.positionMax/2),riskMin:Math.round(sz.riskMin/2),riskMax:Math.round(sz.riskMax/2)});}
+  var sizesNow=applyHalf(sizesFor(currentTier));
+  var sizesNext=isMax?null:applyHalf(sizesFor(nextTier));
   function fmtUSD(v){return "$"+v.toLocaleString("en-US",{maximumFractionDigits:0});}
   function fmtPnLUSD(v){if(HIDE_AMOUNTS)return AMT_MASK;if(HIDE_DOLLAR_PNL)return "$•••";return "$"+v.toLocaleString("en-US",{maximumFractionDigits:0});}
   function fmtPos(sz){return sz.posUnit==="contracts"?(sz.positionMax+" ct"):(fmtUSD(sz.positionMin)+"–"+fmtUSD(sz.positionMax));}
@@ -4329,7 +4333,10 @@ function ScalingTargetCard(props){
             <div style={{fontSize:18,color:"#fff",fontWeight:900,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>{level}</div>
           </div>
           <div style={{minWidth:0}}>
-            <div style={{fontSize:10,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Scaling Level</div>
+            <div style={{display:"flex",alignItems:"center",gap:6}}>
+              <div style={{fontSize:10,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Scaling Level</div>
+              {halfOn&&<span style={{fontSize:9,fontWeight:800,color:"#fcd34d",background:"#1c1408",border:"1px solid #a16207",borderRadius:4,padding:"1px 5px",letterSpacing:0.5,whiteSpace:"nowrap"}} title="Half-size is active — tier sizes shown are halved">½ SIZE</span>}
+            </div>
             <div style={{fontSize:13,fontWeight:700,color:"#e2e8f0"}}>{isMax?"Max level — top tier":("Trading at "+fmtPnLUSD(currentTier)+" tier")}</div>
           </div>
         </div>
