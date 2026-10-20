@@ -4216,7 +4216,7 @@ function PhotoGallery(props){
               return (
                 <button key={i} onClick={function(){setLightbox(i);}} style={{position:"relative",width:120,height:120,flexShrink:0,padding:0,border:"1px solid "+border,borderRadius:6,overflow:"hidden",cursor:"pointer",background:"#000"}}>
                   <img src={shot.src} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}} draggable={false}/>
-                  <div style={{position:"absolute",bottom:0,left:0,right:0,padding:"3px 5px",background:"linear-gradient(transparent,#000000dd)",fontSize:9,color:"#cbd5e1",textAlign:"left"}}>{fmtD(shot.date)}{shot.instrument?" · "+shot.instrument:""}{!isNaN(parseFloat(shot.pctPnl))?<span style={{color:parseFloat(shot.pctPnl)>=0?"#86efac":"#fca5a5",fontWeight:700,marginLeft:4}}>{(parseFloat(shot.pctPnl)>=0?"+":"")+parseFloat(shot.pctPnl).toFixed(2)+"%"}</span>:null}</div>
+                  <div style={{position:"absolute",bottom:0,left:0,right:0,padding:"3px 5px",background:"linear-gradient(transparent,#000000dd)",fontSize:9,color:"#cbd5e1",textAlign:"left"}}>{fmtD(shot.date)}{shot.instrument?" · "+shot.instrument:""}{!isNaN(parseFloat(shot.pctPnl))?<span style={{color:parseFloat(shot.pctPnl)>=0?"#86efac":"#fca5a5",fontWeight:700,marginLeft:4}}>{/* CHANGED: In W/L mode show only the win/loss sign, never the % return. */}{HIDE_AMOUNTS?wlSign(shot.pctPnl):((parseFloat(shot.pctPnl)>=0?"+":"")+parseFloat(shot.pctPnl).toFixed(2)+"%")}</span>:null}</div>
                 </button>
               );
             })}
@@ -4239,8 +4239,12 @@ function PhotoGallery(props){
                 var pc=parseFloat(L.pctPnl),dl=parseFloat(L.pnl);
                 var pos=!isNaN(pc)?pc>=0:dl>=0;
                 var parts=[];
-                if(!isNaN(pc))parts.push((pc>=0?"+":"")+pc.toFixed(2)+"%");
-                if(!HIDE_DOLLAR_PNL&&!isNaN(dl))parts.push((dl>=0?"+$":"-$")+Math.abs(dl).toFixed(2));
+                // CHANGED: In W/L mode show only the win/loss sign — no % return, no $.
+                if(HIDE_AMOUNTS){parts.push(wlSign(!isNaN(pc)?pc:dl));}
+                else{
+                  if(!isNaN(pc))parts.push((pc>=0?"+":"")+pc.toFixed(2)+"%");
+                  if(!HIDE_DOLLAR_PNL&&!isNaN(dl))parts.push((dl>=0?"+$":"-$")+Math.abs(dl).toFixed(2));
+                }
                 return <span style={{color:pos?"#22c55e":"#ef4444",fontWeight:700,marginLeft:6}}>{parts.join(" · ")}</span>;
               })()}
               <span style={{color:"#64748b",marginLeft:8}}>{lightbox+1}/{shots.length}</span>
@@ -6515,6 +6519,13 @@ function GoalRing(props){
              goal-met (greener accent). */}
           {/* CHANGED: auto-shrink the percentage text when it's 4+ digits so it never overflows the ring. */}
           {(function(){
+            // CHANGED: In W/L mode, the ring-center progress % on an AMOUNT goal (P&L, account,
+            // withdrawal) reveals the $ figure (e.g. 80% of a $500 target = $400), so mask it.
+            // Win-rate / discipline goals are genuine %s and stay; count goals stay too.
+            var isAmountGoal=!!gp.formatValue&&!isPercent;
+            if(HIDE_AMOUNTS&&isAmountGoal){
+              return <span style={{fontSize:cmp?12:17,fontWeight:800,color:ringColor,lineHeight:1}}>{AMT_MASK}</span>;
+            }
             var n=Math.round(pctRaw);
             var digits=String(Math.abs(n)).length;
             var base=cmp?12:17;
