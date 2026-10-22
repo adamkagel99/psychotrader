@@ -1101,6 +1101,22 @@ function calculateStreak(includeToday){
   }
   return streak;
 }
+// CHANGED: Total NET profit accumulated across the CURRENT green streak — the same consecutive
+// green trading days calculateStreak counts. Used to suggest a withdrawal = allowance% of it.
+function greenStreakProfit(includeToday){
+  var rows=loadJournalRows();var byDate={};rows.forEach(function(r){byDate[r.date]=r;});
+  var sum=0;var checkDate=getPT();checkDate.setHours(0,0,0,0);
+  if(!includeToday)checkDate.setDate(checkDate.getDate()-1);
+  for(var i=0;i<400;i++){
+    var key=checkDate.toLocaleDateString("en-US");var dow=checkDate.getDay();
+    var isWeekend=(dow===0||dow===6);var isHoliday=!!MARKET_HOLIDAYS[key];var row=byDate[key];
+    var hadTrades=row&&((row.trades&&row.trades.length>0)||(row.wins||0)+(row.losses||0)>0);
+    if(isWeekend||isHoliday||!hadTrades){checkDate.setDate(checkDate.getDate()-1);continue;}
+    if(parseFloat(row.pnl)>0){sum+=entryNetPnl(row);checkDate.setDate(checkDate.getDate()-1);}
+    else break;
+  }
+  return sum;
+}
 // CHANGED: CLEAN-DAY STREAK — process-based, NOT profit-based. A day is "clean" when its
 // discipline score (process-only) stays at or above the lock threshold. Per design choice,
 // violations are allowed as long as the score survives the bar. Only trading days count;
@@ -4920,18 +4936,30 @@ function DashboardTab(props){
          the streak length at the time so the banner only returns if the streak grows further. */}
       {(function(){
         var streak=calculateStreak(true);
-        var threshold=getStreakNudgeThreshold();
-        if(streak<threshold)return null;
-        if(streakNudgeDismissedAt()>=streak)return null;
+        // CHANGED: Recurring profit-take nudge — fires at every 5th consecutive green day (5, 10,
+        // 15 …). The milestone is the highest multiple of 5 reached; dismissal is keyed to it, so the
+        // banner stays until dismissed and then returns only at the next 5-day mark (not days 6–9).
+        var INTERVAL=5;
+        var milestone=streak>=INTERVAL?Math.floor(streak/INTERVAL)*INTERVAL:0;
+        if(milestone<INTERVAL)return null;
+        if(streakNudgeDismissedAt()>=milestone)return null;
+        // CHANGED: Suggest a withdrawal = allowance% of the NET profit earned since day 1 of this
+        // green streak. Clicking Withdraw prefills that amount. Masked in W/L / $-hidden modes.
+        var _pct=getWithdrawalAllowancePct();
+        var _streakProfit=greenStreakProfit(true);
+        var _suggested=Math.max(0,Math.round(_streakProfit*(_pct/100)));
+        var _showAmt=_suggested>0&&!hideCurrency();
         return (
           <div style={{marginBottom:12,padding:"12px 16px",background:"linear-gradient(135deg,#064e3b,#065f46)",border:"1px solid #10b981",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
             <div style={{minWidth:0}}>
               <div style={{fontSize:13,fontWeight:800,color:"#fff",display:"flex",alignItems:"center",gap:7}}>💰 {streak}-day green streak — pay yourself</div>
-              <div style={{fontSize:11,color:"#a7f3d0",marginTop:3,lineHeight:1.5}}>Lock in some of these gains before greed cranks up size.</div>
+              {_showAmt
+                ?<div style={{fontSize:11,color:"#a7f3d0",marginTop:3,lineHeight:1.5}}>Suggested: <span style={{color:"#fff",fontWeight:800}}>${_suggested.toLocaleString()}</span> <span style={{color:"#6ee7b7"}}>({_pct}% of ${Math.round(_streakProfit).toLocaleString()} earned this streak)</span></div>
+                :<div style={{fontSize:11,color:"#a7f3d0",marginTop:3,lineHeight:1.5}}>Lock in some of these gains before greed cranks up size.</div>}
             </div>
             <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0}}>
-              {props.onWithdraw&&<button onClick={function(){props.onWithdraw("");}} style={{padding:"6px 12px",background:"#022c22",border:"1px solid #10b981",borderRadius:6,color:"#a7f3d0",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Withdraw →</button>}
-              <button onClick={function(){dismissStreakNudge(streak);if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"#0a0a0f44",border:"1px solid #065f46",borderRadius:6,color:"#a7f3d0",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Dismiss</button>
+              {props.onWithdraw&&<button onClick={function(){props.onWithdraw(_showAmt?String(_suggested):"");}} style={{padding:"6px 12px",background:"#022c22",border:"1px solid #10b981",borderRadius:6,color:"#a7f3d0",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Withdraw{_showAmt?" $"+_suggested.toLocaleString():""} →</button>}
+              <button onClick={function(){dismissStreakNudge(milestone);if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"#0a0a0f44",border:"1px solid #065f46",borderRadius:6,color:"#a7f3d0",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Dismiss</button>
             </div>
           </div>
         );
@@ -9190,6 +9218,8 @@ function SettingsTab(props){
   // CHANGED: Inline editable allowance % — typing updates localStorage immediately so the
   // displayed allowance recomputes on the next render.
   var [allowancePctInput,setAllowancePctInput]=useState(function(){return String(getWithdrawalAllowancePct());});
+  // CHANGED: On/off toggle state for the withdrawal-allowance suggestion (green-streak nudge, goals).
+  var [allowanceEnabledState,setAllowanceEnabledState]=useState(function(){return getAllowanceEnabled();});
   var [instruments,setInstruments]=useState(loadInstruments());
   var [newInst,setNewInst]=useState({symbol:"",name:"",classId:"options"});
   var [eventsReloadKey,setEventsReloadKey]=useState(0);
@@ -9399,6 +9429,26 @@ function SettingsTab(props){
                 );})()}
               </div>
               {/* CHANGED: Half-size trading toggle moved to Position Sizing Parameters section. */}
+              {/* CHANGED: Withdrawal allowance — on/off toggle + the % of profit suggested for payout.
+                  Drives the green-streak "pay yourself" nudge and the Total Withdrawn goal. */}
+              <div style={{marginBottom:12,padding:"10px 12px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontSize:12,color:"#e2e8f0",fontWeight:700}}>Withdrawal allowance</div>
+                    <div style={{fontSize:11,color:"#64748b",marginTop:2,lineHeight:1.4}}>Suggest paying yourself a % of profit (green-streak nudge).</div>
+                  </div>
+                  <button onClick={function(){var nv=!allowanceEnabledState;setAllowanceEnabled(nv);setAllowanceEnabledState(nv);if(props.bumpReloadKey)props.bumpReloadKey();}} aria-label="Toggle withdrawal allowance suggestions" style={{flexShrink:0,width:44,height:24,borderRadius:12,border:"1px solid "+(allowanceEnabledState?"#4338ca":"#334155"),background:allowanceEnabledState?"#4338ca":"#1e293b",position:"relative",cursor:"pointer",padding:0}}>
+                    <span style={{position:"absolute",top:2,left:allowanceEnabledState?22:2,width:18,height:18,borderRadius:"50%",background:"#fff",transition:"left 0.15s"}}/>
+                  </button>
+                </div>
+                {allowanceEnabledState&&(
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginTop:10}}>
+                    <label style={{fontSize:11,color:"#94a3b8",fontWeight:600,whiteSpace:"nowrap"}}>Allowance %</label>
+                    <input type="number" min="0" max="100" step="1" value={allowancePctInput} onChange={function(e){var v=e.target.value;setAllowancePctInput(v);var n=parseFloat(v);if(!isNaN(n)&&n>=0){setWithdrawalAllowancePct(n);if(props.bumpReloadKey)props.bumpReloadKey();}}} style={Object.assign({},fld,{width:90,padding:"6px 9px",fontSize:13})}/>
+                    <span style={{fontSize:12,color:"#64748b"}}>of profit (default 40%)</span>
+                  </div>
+                )}
+              </div>
             </>
           );
         })()}
