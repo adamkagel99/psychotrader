@@ -1556,7 +1556,10 @@ function defaultWeeklyFromMonthly(goals,sp){
 //   - weekly overridden    -> daily = weekly/daysThisWeek,    monthly = daily×daysThisMonth
 //   - daily overridden     -> weekly = daily×daysThisWeek,    monthly = daily×daysThisMonth
 //   - none                 -> daily = computeDailyTarget(sp)
-function resolveGoalTargets(goals,sp){
+// RAW targets (no half-size adjustment). The half-size trigger checks (isWeeklyGoalHit /
+// isMonthlyGoalHit) MUST use this — not resolveGoalTargets — or resolve→isMonthHalfsizeActive→
+// goal-hit→resolve would recurse infinitely.
+function resolveGoalTargetsRaw(goals,sp){
   goals=goals||{};
   var mp=parseFloat(goals.monthlyPnL)||0;
   var wp=parseFloat(goals.weeklyPnL)||0;
@@ -1568,14 +1571,17 @@ function resolveGoalTargets(goals,sp){
   else if(wp>0){daily=wp/tdW;anchor="weekly";}
   else if(dp>0){daily=dp;anchor="daily";}
   else {daily=computeDailyTarget(sp)||0;anchor="auto";}
-  // CHANGED: When the Settings half-size toggle is on, HALVE the daily and weekly P&L targets to
-  // match the reduced sizing. Monthly is left unchanged — it's the trigger for half-size, so we
-  // don't retroactively lower it. (Only the Settings toggle — isMonthHalfsizeActive — counts here,
-  // not a discipline lock.)
+  return {daily:daily,weekly:daily*tdW,monthly:daily*tdM,anchor:anchor};
+}
+// Half-size-aware targets for DISPLAY (goal cards + banners). When the Settings half-size toggle is
+// on, the daily and weekly P&L targets are halved to match the reduced sizing. Monthly is left
+// unchanged — it's the trigger for half-size, so we don't retroactively lower it. Only the Settings
+// toggle (isMonthHalfsizeActive) counts, not a discipline lock.
+function resolveGoalTargets(goals,sp){
+  var r=resolveGoalTargetsRaw(goals,sp);
   var _half=false;try{_half=isMonthHalfsizeActive();}catch(e){}
-  var dailyOut=_half?daily/2:daily;
-  var weeklyOut=_half?(daily*tdW)/2:(daily*tdW);
-  return {daily:dailyOut,weekly:weeklyOut,monthly:daily*tdM,anchor:anchor,halfSize:_half};
+  if(!_half)return {daily:r.daily,weekly:r.weekly,monthly:r.monthly,anchor:r.anchor,halfSize:false};
+  return {daily:r.daily/2,weekly:r.weekly/2,monthly:r.monthly,anchor:r.anchor,halfSize:true};
 }
 // Daily target derived from session sizing + gain hard stops. Falls back to 0 if unset.
 function getDailyTarget(){
@@ -1725,7 +1731,7 @@ function isMonthlyGoalHit(todayLivePnL){
   try{
     var goals=JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};
     var settings=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};
-    var target=resolveGoalTargets(goals,settings).monthly||0;
+    var target=resolveGoalTargetsRaw(goals,settings).monthly||0;
     if(target<=0)return false;
     var moStart=new Date();moStart=new Date(moStart.getFullYear(),moStart.getMonth(),1);
     var todayKey=todayStr();
@@ -1741,7 +1747,7 @@ function isWeeklyGoalHit(todayLivePnL){
   try{
     var goals=JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};
     var settings=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};
-    var target=resolveGoalTargets(goals,settings).weekly||0;
+    var target=resolveGoalTargetsRaw(goals,settings).weekly||0;
     if(target<=0)return false;
     // Week start = Sunday-anchored week containing today.
     var d=new Date();var dow=d.getDay();var weekStart=new Date(d.getFullYear(),d.getMonth(),d.getDate()-dow);
