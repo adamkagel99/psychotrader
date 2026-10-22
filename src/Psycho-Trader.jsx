@@ -1568,7 +1568,14 @@ function resolveGoalTargets(goals,sp){
   else if(wp>0){daily=wp/tdW;anchor="weekly";}
   else if(dp>0){daily=dp;anchor="daily";}
   else {daily=computeDailyTarget(sp)||0;anchor="auto";}
-  return {daily:daily,weekly:daily*tdW,monthly:daily*tdM,anchor:anchor};
+  // CHANGED: When the Settings half-size toggle is on, HALVE the daily and weekly P&L targets to
+  // match the reduced sizing. Monthly is left unchanged — it's the trigger for half-size, so we
+  // don't retroactively lower it. (Only the Settings toggle — isMonthHalfsizeActive — counts here,
+  // not a discipline lock.)
+  var _half=false;try{_half=isMonthHalfsizeActive();}catch(e){}
+  var dailyOut=_half?daily/2:daily;
+  var weeklyOut=_half?(daily*tdW)/2:(daily*tdW);
+  return {daily:dailyOut,weekly:weeklyOut,monthly:daily*tdM,anchor:anchor,halfSize:_half};
 }
 // Daily target derived from session sizing + gain hard stops. Falls back to 0 if unset.
 function getDailyTarget(){
