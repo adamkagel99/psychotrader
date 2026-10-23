@@ -119,6 +119,8 @@ let currentUserId = null;
 let patched = false;
 const pending = new Map(); // key -> { type, op }
 let flushTimer = null;
+// CHANGED: Guard so the app-lifecycle flush handlers (visibilitychange / pagehide) are bound once.
+let lifecycleBound = false;
 // CHANGED: While a restore is running, the debounced push queue is suspended. restoreFromFile
 // (in the app) writes every backup key via the PATCHED localStorage.setItem, which queues a
 // flush; that flush would otherwise fire mid-restore and race __psychoSyncRestore's own
@@ -553,6 +555,29 @@ export function startSync(userId) {
     rawRemove.call(this, k);
     if (this === window.localStorage) queue(k, "remove");
   };
+
+  // CHANGED: Flush pending writes the moment the app is backgrounded or closed. On mobile the page
+  // is frozen (app switch, screen lock, swipe-away) BEFORE the 800ms debounce timer fires, so the
+  // last writes never reach the cloud — this is why mobile appears "not to sync" while a laptop
+  // (its tab stays open long enough for the debounce) syncs fine. visibilitychange→hidden is the
+  // reliable mobile "backgrounded" signal and fires while the page is still alive enough to run the
+  // push; pagehide/beforeunload cover an actual close. Each cancels the debounce and flushes now.
+  if (typeof document !== "undefined" && !lifecycleBound) {
+    lifecycleBound = true;
+    const flushOnLeave = function () {
+      if (!currentUserId) return;
+      if (restoreInProgress) return; // don't race an in-flight restore
+      if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+      if (pending.size > 0) { try { flush(); } catch (e) {} }
+    };
+    try {
+      document.addEventListener("visibilitychange", function () {
+        if (document.visibilityState === "hidden") flushOnLeave();
+      });
+      window.addEventListener("pagehide", flushOnLeave);
+      window.addEventListener("beforeunload", flushOnLeave);
+    } catch (e) {}
+  }
 }
 
 export function stopSync() {
