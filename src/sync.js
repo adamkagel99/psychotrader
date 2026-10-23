@@ -119,8 +119,10 @@ let currentUserId = null;
 let patched = false;
 const pending = new Map(); // key -> { type, op }
 let flushTimer = null;
-// CHANGED: Guard so the app-lifecycle flush handlers (visibilitychange / pagehide) are bound once.
+// CHANGED: Guard so the app-lifecycle handlers (visibilitychange / pagehide / pageshow) are bound
+// once, plus the timestamp of when the app was last backgrounded (drives the reopen re-pull).
 let lifecycleBound = false;
+let lastHiddenAt = 0;
 // CHANGED: While a restore is running, the debounced push queue is suspended. restoreFromFile
 // (in the app) writes every backup key via the PATCHED localStorage.setItem, which queues a
 // flush; that flush would otherwise fire mid-restore and race __psychoSyncRestore's own
@@ -556,12 +558,20 @@ export function startSync(userId) {
     if (this === window.localStorage) queue(k, "remove");
   };
 
-  // CHANGED: Flush pending writes the moment the app is backgrounded or closed. On mobile the page
-  // is frozen (app switch, screen lock, swipe-away) BEFORE the 800ms debounce timer fires, so the
-  // last writes never reach the cloud — this is why mobile appears "not to sync" while a laptop
-  // (its tab stays open long enough for the debounce) syncs fine. visibilitychange→hidden is the
-  // reliable mobile "backgrounded" signal and fires while the page is still alive enough to run the
-  // push; pagehide/beforeunload cover an actual close. Each cancels the debounce and flushes now.
+  // CHANGED: App-lifecycle sync — handles BOTH directions that break specifically on mobile:
+  //
+  //  PUSH on background: every local write is pushed on an 800ms debounce. On mobile the page is
+  //  frozen (app switch, screen lock, swipe-away) BEFORE that timer fires, so the last writes never
+  //  reach the cloud. visibilitychange→hidden / pagehide / beforeunload flush pending writes now.
+  //
+  //  PULL on reopen: the startup pull only runs on a COLD load. Mobile browsers restore the app
+  //  from memory / bfcache on reopen WITHOUT re-running startup, so the device keeps showing stale
+  //  data while the cloud (and the laptop) have newer. A laptop tab is rarely restored this way, so
+  //  it looks like "only mobile won't sync." On reopen after being backgrounded we reload, which
+  //  re-runs the cold-load pull and renders fresh cloud data:
+  //    - pageshow with persisted=true  → restored from bfcache (the main mobile reopen path)
+  //    - visible again after >8s hidden → in-memory resume that bfcache didn't cover
+  //  The 8s floor avoids reloading on quick tab flicks.
   if (typeof document !== "undefined" && !lifecycleBound) {
     lifecycleBound = true;
     const flushOnLeave = function () {
@@ -570,12 +580,26 @@ export function startSync(userId) {
       if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
       if (pending.size > 0) { try { flush(); } catch (e) {} }
     };
+    const reloadForFreshData = function () {
+      if (!currentUserId || restoreInProgress) return;
+      try { window.location.reload(); } catch (e) {}
+    };
     try {
       document.addEventListener("visibilitychange", function () {
-        if (document.visibilityState === "hidden") flushOnLeave();
+        if (document.visibilityState === "hidden") {
+          lastHiddenAt = Date.now();
+          flushOnLeave();
+        } else if (document.visibilityState === "visible") {
+          if (lastHiddenAt && (Date.now() - lastHiddenAt) > 8000) reloadForFreshData();
+        }
       });
       window.addEventListener("pagehide", flushOnLeave);
       window.addEventListener("beforeunload", flushOnLeave);
+      // Restored from bfcache (mobile reopen) — the page's JS heap is intact, so no startup pull
+      // ran. Reload to pull fresh cloud data.
+      window.addEventListener("pageshow", function (e) {
+        if (e && e.persisted) reloadForFreshData();
+      });
     } catch (e) {}
   }
 }
