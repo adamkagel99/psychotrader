@@ -176,20 +176,18 @@ export async function pullFromCloud(userId) {
   let localSettings = null, settingsMtimeLocal = 0;
   try { localSettings = window.localStorage.getItem("tf-settings"); } catch (e) {}
   try { settingsMtimeLocal = parseInt(window.localStorage.getItem("tf-settings-mtime") || "0", 10) || 0; } catch (e) {}
+  // CHANGED: Same last-write-wins inputs for tf-state (live today-state) as tf-settings.
+  const stateMtimeCloud = (function () { var v = kvByKey["tf-state-mtime"]; var n = parseInt(typeof v === "object" ? JSON.stringify(v) : v, 10); return isNaN(n) ? 0 : n; })();
+  let localState = null, stateMtimeLocal = 0;
+  try { localState = window.localStorage.getItem("tf-state"); } catch (e) {}
+  try { stateMtimeLocal = parseInt(window.localStorage.getItem("tf-state-mtime") || "0", 10) || 0; } catch (e) {}
 
   (kv || []).forEach((row) => {
     if (row.value == null) return;
     if (typeof row.key === "string" && SKIP_KEYS.has(row.key)) return;
-    // tf-settings and its timestamp are resolved by last-write-wins below, not overwritten here.
+    // tf-settings / tf-state and their timestamps are resolved by last-write-wins below.
     if (row.key === "tf-settings" || row.key === "tf-settings-mtime") return;
-    // CHANGED: tf-state is the device's LIVE working state (today's trades, drafts, checklist). It
-    // has no last-write-wins guard, so blindly overwriting it from the cloud resurrects a trade the
-    // user just deleted: local is updated, but the stale cloud blob clobbers it on the next pull.
-    // The authoritative cross-device record is journal_days + the trades table (rebuilt below), so
-    // keep a present local copy and only adopt the cloud blob on a device that has none yet.
-    if (row.key === "tf-state") {
-      try { if (window.localStorage.getItem("tf-state") != null) return; } catch (e) {}
-    }
+    if (row.key === "tf-state" || row.key === "tf-state-mtime") return;
     const out = typeof row.value === "object" ? JSON.stringify(row.value) : String(row.value);
     rawSetItem(row.key, out);
   });
@@ -220,6 +218,33 @@ export async function pullFromCloud(userId) {
       if (!flushTimer) flushTimer = setTimeout(flush, 800);
     }
   })();
+  // CHANGED: tf-state last-write-wins — mirrors tf-settings exactly. Adopt the cloud today-state
+  // only when it is genuinely NEWER than local (so a device that just made an edit/deletion keeps
+  // its own freshest copy and never resurrects it), otherwise keep local and heal the cloud. This
+  // is what lets laptop's today trades appear on mobile on reopen, and today-deletions propagate.
+  (function () {
+    const cloudRaw = kvByKey["tf-state"];
+    const cloudHas = cloudRaw != null;
+    const cloudStr = cloudHas ? (typeof cloudRaw === "object" ? JSON.stringify(cloudRaw) : String(cloudRaw)) : null;
+    if (!localState) {
+      if (cloudHas) {
+        rawSetItem("tf-state", cloudStr);
+        rawSetItem("tf-state-mtime", String(stateMtimeCloud || Date.now()));
+      }
+      return;
+    }
+    if (cloudHas && stateMtimeCloud > stateMtimeLocal) {
+      rawSetItem("tf-state", cloudStr);
+      rawSetItem("tf-state-mtime", String(stateMtimeCloud));
+      return;
+    }
+    if (!stateMtimeLocal) { stateMtimeLocal = Date.now(); rawSetItem("tf-state-mtime", String(stateMtimeLocal)); }
+    if (!cloudHas || cloudStr !== localState || stateMtimeCloud !== stateMtimeLocal) {
+      pending.set("tf-state", { op: "set" });
+      pending.set("tf-state-mtime", { op: "set" });
+      if (!flushTimer) flushTimer = setTimeout(flush, 800);
+    }
+  })();
   // CHANGED: Reconcile deletions. If a syncable key exists in localStorage but NOT in the cloud
   // KV result, it was deleted on another device — remove it locally so cross-device disables
   // (e.g. turning off half-size on mobile) actually propagate to laptop and vice-versa.
@@ -230,7 +255,7 @@ export async function pullFromCloud(userId) {
   // setup grade criteria / sizing / sessions to defaults. Keep the local copy authoritative.
   // CHANGED: tf-state added — it's the live device working state; a briefly-missing cloud row must
   // never wipe today's local trades/drafts.
-  const NEVER_DELETE = new Set(["tf-settings", "tf-settings-mtime", "tf-state"]);
+  const NEVER_DELETE = new Set(["tf-settings", "tf-settings-mtime", "tf-state", "tf-state-mtime"]);
   for (let i = window.localStorage.length - 1; i >= 0; i--) {
     const k = window.localStorage.key(i);
     if (isSyncableKv(k) && !cloudKeys.has(k) && !NEVER_DELETE.has(k)) {
@@ -330,6 +355,26 @@ export async function pullFromCloud(userId) {
     });
     rawSetItem("journal:" + keyDate, JSON.stringify(entry));
   });
+
+  // CHANGED: Propagate DAY deletions across devices. A past day that exists locally but is ABSENT
+  // from the cloud journal_days result was deleted on another device — remove it locally so it
+  // stops reappearing (the "deleted day keeps coming back on the other device" bug). Guards:
+  //   - only when the days query actually returned an array (never mass-wipe on a failed query)
+  //   - never today's key (today may be live-only and not yet pushed to the cloud)
+  //   - never a day with a push still pending (created locally, not yet synced)
+  if (Array.isArray(days)) {
+    const cloudDayKeys = new Set((days || []).map((d) => "journal:" + isoToKeyDate(d.date)));
+    const _now = new Date();
+    const todayKey = "journal:" + (_now.getMonth() + 1) + "-" + _now.getDate() + "-" + _now.getFullYear();
+    for (let i = window.localStorage.length - 1; i >= 0; i--) {
+      const k = window.localStorage.key(i);
+      if (!k || !isJournalKey(k)) continue;
+      if (k === todayKey) continue;
+      if (cloudDayKeys.has(k)) continue;
+      if (pending.has(k)) continue; // a local-only day whose push hasn't landed yet
+      rawRemove.call(window.localStorage, k);
+    }
+  }
 }
 
 function tradeRowToApp(t) {
@@ -544,11 +589,20 @@ export function startSync(userId) {
     // (the "settings don't save overnight" bug). Only bump on a real change so a same-value
     // re-serialize on load doesn't falsely mark local as newer than another device.
     var prevSettings = (this === window.localStorage && k === "tf-settings") ? rawGet.call(this, k) : null;
+    var prevState = (this === window.localStorage && k === "tf-state") ? rawGet.call(this, k) : null;
     rawSet.call(this, k, v);
     if (this === window.localStorage) {
       if (k === "tf-settings" && settingsChanged(v, prevSettings)) {
         try { rawSet.call(window.localStorage, "tf-settings-mtime", String(Date.now())); } catch (e) {}
         queue("tf-settings-mtime", "set");
+      }
+      // CHANGED: tf-state (live working state incl. today's trades) gets the SAME last-write-wins
+      // stamp as tf-settings. The pull then adopts a newer device's today-state and propagates
+      // today-trade deletions — replacing the old blanket keep-local guard that blocked ALL
+      // cross-device "today" sync (laptop's today trades never reached mobile, and vice-versa).
+      if (k === "tf-state" && v !== prevState) {
+        try { rawSet.call(window.localStorage, "tf-state-mtime", String(Date.now())); } catch (e) {}
+        queue("tf-state-mtime", "set");
       }
       queue(k, "set");
     }
