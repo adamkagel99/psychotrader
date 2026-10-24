@@ -2627,6 +2627,18 @@ function CalendarGrid(props){
   var weekPnLs=weeks.map(function(wk){return wk.reduce(function(s,cell){if(!cell||cell.otherMonth)return s;var dd=sessionMap[cell.ds];return s+(dd?(parseFloat(dd.pnl)||0):0);},0);});
   var monthPnLTotal=weekPnLs.reduce(function(s,w){return s+w;},0);
   var monthGoalHit=monthlyTarget>0&&monthPnLTotal>=monthlyTarget;
+  // CHANGED: Find the DAY the cumulative displayed-month P&L first reached the monthly goal, so a
+  // 🏁 can be placed on that exact date cell (not just the header).
+  var monthGoalMetDs=null;
+  if(monthlyTarget>0){
+    var _cum=0;
+    for(var _gd=1;_gd<=daysInMonth;_gd++){
+      var _gds=(calMonth+1)+"/"+_gd+"/"+calYear;
+      var _gm=sessionMap[_gds];
+      _cum+=_gm?(parseFloat(_gm.pnl)||0):0;
+      if(_cum>=monthlyTarget){monthGoalMetDs=_gds;break;}
+    }
+  }
   return (
     <div>
       {/* CHANGED: Hide the month-nav row while the picker is open so it's the sole focus. */}
@@ -2689,6 +2701,8 @@ function CalendarGrid(props){
               {isNoTrade&&!isToday&&<span style={{fontSize:10,color:"#fbbf24",fontWeight:800,letterSpacing:0.3,lineHeight:1,marginTop:2}}>⊘ NT</span>}
               {earlyClose&&<div style={{position:"absolute",top:2,right:3,width:4,height:4,borderRadius:"50%",background:"#f59e0b"}}/>}
               {dayGoalHit&&<div style={{position:"absolute",bottom:1,right:4,fontSize:11,color:"#facc15",fontWeight:900,lineHeight:1,textShadow:"0 0 3px rgba(250,204,21,0.6)"}} title={"Daily goal hit (+"+dayRTotal.toFixed(1)+"R / "+dailyTargetR.toFixed(1)+"R)"}>✓</div>}
+              {/* CHANGED: 🏁 on the exact day the monthly P&L goal was reached. */}
+              {!otherMonth&&ds===monthGoalMetDs&&<div style={{position:"absolute",bottom:1,left:3,fontSize:11,lineHeight:1}} title={"Monthly P&L goal reached this day"}>🏁</div>}
               {dayData&&dayData.wasLocked&&<div style={{position:"absolute",top:2,left:3,fontSize:8,fontWeight:800,color:"#fff",background:"#ef4444",borderRadius:3,padding:"0 3px",lineHeight:"11px",letterSpacing:0.3}} title="Discipline lock triggered">D</div>}
             </button>
           );
@@ -2765,6 +2779,17 @@ function DashboardCalendar(props){
   var _calSettings=(function(){try{return JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};}catch(e){return {};}})();
   var monthlyGoalTarget=resolveGoalTargets(_calGoals,_calSettings).monthly||0;
   var monthGoalHitCal=monthlyGoalTarget>0&&monthPnL>=monthlyGoalTarget;
+  // CHANGED: Day the cumulative month P&L first reached the goal, so the week strip can 🏁 it too.
+  var monthGoalMetDsCal=null;
+  if(monthlyGoalTarget>0){
+    var _cc=0;var _dim=new Date(calYear,calMonth+1,0).getDate();
+    for(var _cd=1;_cd<=_dim;_cd++){
+      var _cds=(calMonth+1)+"/"+_cd+"/"+calYear;
+      var _cm=sessionMap[_cds];
+      _cc+=_cm?(parseFloat(_cm.pnl)||0):0;
+      if(_cc>=monthlyGoalTarget){monthGoalMetDsCal=_cds;break;}
+    }
+  }
   // CHANGED: One readout used in both collapsed (week) and expanded (month) states. In "trades"
   // mode shows a count; in "pnl" mode shows R when Hide-$ is on or $ otherwise.
   var headerScope=open?{pnl:monthPnL,r:monthR,trades:monthTradeCount,hasRisk:monthHasRisk,hasAny:monthTradeCount>0}:{pnl:weekPnL,r:weekR,trades:weekTradeCount,hasRisk:weekRiskMax>0,hasAny:weekDays.some(function(d){return d.tradeCount>0;})};
@@ -2822,6 +2847,8 @@ function DashboardCalendar(props){
               return (
                 <button key={i} onClick={function(){if(props.onSelectDate)props.onSelectDate(d.ds);}} style={{padding:"9px 0 6px",background:bg,border:(d.noTradeDay?"1.5px ":"1px ")+ntStyle+" "+bd,borderRadius:6,cursor:"pointer",fontFamily:"inherit",display:"flex",flexDirection:"column",alignItems:"center",gap:2,minHeight:50,position:"relative"}} title={d.holiday||(d.noTradeDay?"No-trade day (deliberately sat out)":(pnl!=null?(HIDE_DOLLAR_PNL?"":(pnl>=0?"+$":"-$")+Math.abs(pnl).toFixed(2)):""))}>
                   {d.wasLocked&&<div style={{position:"absolute",top:2,left:3,fontSize:8,fontWeight:800,color:"#fff",background:"#ef4444",borderRadius:3,padding:"0 3px",lineHeight:"11px",letterSpacing:0.3}} title="Discipline lock triggered">D</div>}
+                  {/* CHANGED: 🏁 on the exact day the monthly P&L goal was reached. */}
+                  {d.ds===monthGoalMetDsCal&&<div style={{position:"absolute",bottom:1,left:3,fontSize:10,lineHeight:1}} title={"Monthly P&L goal reached this day"}>🏁</div>}
                   {/* CHANGED: Inner letter removed — the column header above takes its place. */}
                   <span style={{fontSize:17,color:col,fontWeight:d.isToday?700:600,lineHeight:1}}>{d.date.getDate()}</span>
                   {d.noTradeDay?(
