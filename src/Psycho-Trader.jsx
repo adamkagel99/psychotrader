@@ -2758,6 +2758,13 @@ function DashboardCalendar(props){
   // handled correctly without a separate month-start anchor (the old override diverged from the
   // cells and from the goal cards, which is the discrepancy this removes).
   var monthRColor=monthR>=0?"#86efac":"#fca5a5";
+  // CHANGED: Monthly-goal-met marker for THIS calendar's own header. The shared CalendarGrid draws
+  // one too, but the dashboard renders it with hideHeader=true, so that marker never shows here —
+  // this is why the flag was missing on the P&L calendar. monthPnL already includes today's live.
+  var _calGoals=(function(){try{return JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};}catch(e){return {};}})();
+  var _calSettings=(function(){try{return JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};}catch(e){return {};}})();
+  var monthlyGoalTarget=resolveGoalTargets(_calGoals,_calSettings).monthly||0;
+  var monthGoalHitCal=monthlyGoalTarget>0&&monthPnL>=monthlyGoalTarget;
   // CHANGED: One readout used in both collapsed (week) and expanded (month) states. In "trades"
   // mode shows a count; in "pnl" mode shows R when Hide-$ is on or $ otherwise.
   var headerScope=open?{pnl:monthPnL,r:monthR,trades:monthTradeCount,hasRisk:monthHasRisk,hasAny:monthTradeCount>0}:{pnl:weekPnL,r:weekR,trades:weekTradeCount,hasRisk:weekRiskMax>0,hasAny:weekDays.some(function(d){return d.tradeCount>0;})};
@@ -2780,6 +2787,7 @@ function DashboardCalendar(props){
       <button onClick={function(){setOpen(function(o){return !o;});}} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",padding:"12px 18px 8px",textAlign:"left",flexWrap:"wrap",gap:6}}>
         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
           <span style={{fontSize:13,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{open?"Calendar":"This Week"}</span>
+          {monthGoalHitCal&&<span style={{fontSize:12}} title={"Monthly P&L goal met"}>🏁</span>}
           {readoutText&&<span onClick={function(e){e.stopPropagation();setSummaryMode(summaryMode==="trades"?"pnl":"trades");}} title={summaryMode==="trades"?"Tap to show P&L":"Tap to show trade count"} style={{fontSize:12,fontWeight:700,color:readoutColor,fontVariantNumeric:"tabular-nums",padding:"2px 7px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:6,cursor:"pointer"}}>{readoutText}</span>}
         </div>
         {open&&(function(){
@@ -2787,7 +2795,7 @@ function DashboardCalendar(props){
           return (
             <span onClick={function(e){e.stopPropagation();}} style={{display:"flex",alignItems:"center",gap:6,marginLeft:6}}>
               <button onClick={function(){move(-1);}} style={{background:"none",border:"1px solid #334155",borderRadius:5,color:"#94a3b8",fontSize:12,cursor:"pointer",fontFamily:"inherit",padding:"2px 8px"}}>‹</button>
-              <span style={{fontSize:13,fontWeight:700,color:"#e2e8f0",minWidth:100,textAlign:"center"}}>{MONTH_NAMES[calMonth]} {calYear}</span>
+              <span style={{fontSize:13,fontWeight:700,color:"#e2e8f0",minWidth:100,textAlign:"center",display:"inline-flex",alignItems:"center",justifyContent:"center",gap:5}}>{MONTH_NAMES[calMonth]} {calYear}{monthGoalHitCal&&<span style={{fontSize:12}} title={"Monthly P&L goal met"}>🏁</span>}</span>
               <button onClick={function(){move(1);}} style={{background:"none",border:"1px solid #334155",borderRadius:5,color:"#94a3b8",fontSize:12,cursor:"pointer",fontFamily:"inherit",padding:"2px 8px"}}>›</button>
             </span>
           );
