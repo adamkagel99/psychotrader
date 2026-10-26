@@ -4755,18 +4755,9 @@ function GoalsSnapshot(props){
   function rFmt(v){if(HIDE_AMOUNTS)return wlSign(v);var r=riskMax>0?v/riskMax:0;return (r>=0?"+":"")+r.toFixed(1)+"R";}
   var pnlVal=HIDE_AMOUNTS?money:(HIDE_DOLLAR_PNL?rFmt:money);
   var pnlTgt=HIDE_AMOUNTS?money:(HIDE_DOLLAR_PNL?rFmt:money);
-  // CHANGED: Daily/weekly/monthly P&L cards show CANONICAL period R (Σ of each day's dayR), matching
-  // the P&L calendar — not P&L$ ÷ current riskMax. Target keeps the current risk unit as its basis.
-  var snapLiveTrades=(props.state&&Array.isArray(props.state.trades)?props.state.trades:[]).filter(function(t){return t&&t.status!=="open";});
-  var todayRowR=rows.find(function(e){return e.date===todayKey;});
-  var sDailyR=todayRowR?dayR(todayRowR.trades||[],(parseFloat(todayRowR.riskMax)||0)||riskMax):dayR(snapLiveTrades,riskMax);
-  var sWeekR=periodR(rows,function(dd){return dd>=wkStart&&dd<=wkEnd;},riskMax,snapLiveTrades,todayKey);
-  var sMonthR=periodR(rows,function(dd){return dd>=moStart;},riskMax,snapLiveTrades,todayKey);
-  function mkPnlVal(rVal){return function(v){if(HIDE_AMOUNTS)return wlSign(v);if(HIDE_DOLLAR_PNL)return (rVal>=0?"+":"")+rVal.toFixed(1)+"R";return money(v);};}
-  var dailyPnlVal=mkPnlVal(sDailyR),weeklyPnlVal=mkPnlVal(sWeekR),monthlyPnlVal=mkPnlVal(sMonthR);
-  // CHANGED: In R mode, the ring % follows the R numbers (value R ÷ target R) so it matches the
-  // "+X.XR of +Y.YR" readout instead of the dollar ratio.
-  function snapPctOv(rVal,target$){var tr=(riskMax>0&&target$>0)?(target$/riskMax):0;return (HIDE_DOLLAR_PNL&&tr>0)?(rVal/tr*100):undefined;}
+  // CHANGED: R mode derives from dollars — R = value$ ÷ current riskMax (rFmt). $ mode and R mode
+  // stay fully reconciled (R × riskMax = $), so the ring % is identical in both.
+  var dailyPnlVal=pnlVal, weeklyPnlVal=pnlVal, monthlyPnlVal=pnlVal;
   // CHANGED: build GoalRing tiles grouped by category to mirror the Goals tab.
   var account=[],perf=[],pnl=[];
   if(!hidden.account&&accountTarget>0)account.push({key:"account",label:"Account Balance",value:props.currentAccount||0,target:accountTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
@@ -4774,9 +4765,9 @@ function GoalsSnapshot(props){
   if(!hidden.monthlyWithdrawals&&monthlyWithdrawalTarget>0)account.push({key:"monthlyWithdrawals",label:"Monthly Withdrawal",value:monthlyWithdrawn,target:monthlyWithdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
   if(!hidden.winRate&&winRateTarget>0)perf.push({key:"winRate",label:"Win Rate",value:oWR,target:winRateTarget,suffix:"%",decimals:0,targetDecimals:0,wrColor:true,compact:true});
   if(!hidden.discipline&&disciplineTarget>0)perf.push({key:"discipline",label:"Discipline",value:aDisc,target:disciplineTarget,suffix:"%",decimals:0,targetDecimals:0,discColor:true,compact:true});
-  if(!hidden.daily&&dailyTarget>0)pnl.push({key:"daily",label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:dailyPnlVal,formatTarget:pnlTgt,compact:true,pctOverride:snapPctOv(sDailyR,dailyTarget)});
-  if(!hidden.weekly&&weeklyTarget>0)pnl.push({key:"weekly",label:"Week P&L",value:weekPnL,target:weeklyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:weeklyPnlVal,formatTarget:pnlTgt,compact:true,pctOverride:snapPctOv(sWeekR,weeklyTarget)});
-  if(!hidden.monthly&&monthlyTarget>0)pnl.push({key:"monthly",label:"Month P&L",value:monthPnL,target:monthlyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:monthlyPnlVal,formatTarget:pnlTgt,compact:true,pctOverride:snapPctOv(sMonthR,monthlyTarget)});
+  if(!hidden.daily&&dailyTarget>0)pnl.push({key:"daily",label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:dailyPnlVal,formatTarget:pnlTgt,compact:true});
+  if(!hidden.weekly&&weeklyTarget>0)pnl.push({key:"weekly",label:"Week P&L",value:weekPnL,target:weeklyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:weeklyPnlVal,formatTarget:pnlTgt,compact:true});
+  if(!hidden.monthly&&monthlyTarget>0)pnl.push({key:"monthly",label:"Month P&L",value:monthPnL,target:monthlyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:monthlyPnlVal,formatTarget:pnlTgt,compact:true});
   // CHANGED: Inject custom goals into the appropriate default section so they show on Home alongside built-ins.
   var customList=Array.isArray(goals.custom)?goals.custom:[];
   function homeCustomVal(g){
@@ -6790,22 +6781,11 @@ function GoalsTab(props){
   var gtRiskMax=parseFloat(settings.riskMax)||0;
   function gtRFmt(v){var r=gtRiskMax>0?v/gtRiskMax:0;return (r>=0?"+":"")+r.toFixed(1)+"R";}
   var pnlFmt=HIDE_DOLLAR_PNL?{formatValue:gtRFmt,formatTarget:gtRFmt}:{};
-  // CHANGED: The daily/weekly/monthly P&L cards show the CANONICAL period R (Σ of each day's dayR),
-  // identical to the P&L calendar — not P&L$ ÷ current riskMax, which diverged from the calendar.
-  // The target keeps the current risk unit as its basis (a forward-looking goal has no per-day R).
-  var gtLiveTrades=(props.state&&Array.isArray(props.state.trades)?props.state.trades:[]).filter(function(t){return t&&t.status!=="open";});
-  var dailyRVal=todayJournal?dayR(todayJournal.trades||[],(parseFloat(todayJournal.riskMax)||0)||gtRiskMax):dayR(gtLiveTrades,gtRiskMax);
-  var weekRVal=periodR(rows,function(dd){return dd>=wkStart&&dd<=wkEnd;},gtRiskMax,gtLiveTrades,today);
-  var monthRVal=periodR(rows,function(dd){return dd>=moStart;},gtRiskMax,gtLiveTrades,today);
-  function gtRStr(r){return (r>=0?"+":"")+r.toFixed(1)+"R";}
   var weeklyTarget=_gtG.weekly;
-  // CHANGED: In R mode, drive the ring from the R numbers shown (value R ÷ target R) so the ring %
-  // matches "+X.XR of +Y.YR" instead of the dollar ratio. target R = target$ ÷ current riskMax.
-  // (Defined after weeklyTarget so all three targets are resolved first.)
-  function gtPctOv(rVal,target$){var tr=(gtRiskMax>0&&target$>0)?(target$/gtRiskMax):0;return tr>0?(rVal/tr*100):undefined;}
-  var dailyPnlFmt=HIDE_DOLLAR_PNL?{formatValue:function(){return gtRStr(dailyRVal);},formatTarget:gtRFmt,pctOverride:gtPctOv(dailyRVal,dailyTarget)}:{};
-  var weeklyPnlFmt=HIDE_DOLLAR_PNL?{formatValue:function(){return gtRStr(weekRVal);},formatTarget:gtRFmt,pctOverride:gtPctOv(weekRVal,weeklyTarget)}:{};
-  var monthlyPnlFmt=HIDE_DOLLAR_PNL?{formatValue:function(){return gtRStr(monthRVal);},formatTarget:gtRFmt,pctOverride:gtPctOv(monthRVal,monthlyTarget)}:{};
+  // CHANGED: R mode now derives from dollars — R = value$ ÷ current riskMax (gtRFmt) for BOTH the
+  // value and the target. This keeps $ mode and R mode fully reconciled (R × riskMax = $) and makes
+  // the ring % identical in both modes. (Replaces the canonical per-day R, which diverged from $.)
+  var dailyPnlFmt=pnlFmt, weeklyPnlFmt=pnlFmt, monthlyPnlFmt=pnlFmt;
   var winRateTarget=parseFloat(goals.winRate)||0;
   // CHANGED: Discipline Score goal is tied directly to the discipline LOCK THRESHOLD setting and
   // is no longer user-editable in Goals. The goal is simply: keep your score above the lock bar.
