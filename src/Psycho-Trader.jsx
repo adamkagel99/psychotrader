@@ -4764,6 +4764,9 @@ function GoalsSnapshot(props){
   var sMonthR=periodR(rows,function(dd){return dd>=moStart;},riskMax,snapLiveTrades,todayKey);
   function mkPnlVal(rVal){return function(v){if(HIDE_AMOUNTS)return wlSign(v);if(HIDE_DOLLAR_PNL)return (rVal>=0?"+":"")+rVal.toFixed(1)+"R";return money(v);};}
   var dailyPnlVal=mkPnlVal(sDailyR),weeklyPnlVal=mkPnlVal(sWeekR),monthlyPnlVal=mkPnlVal(sMonthR);
+  // CHANGED: In R mode, the ring % follows the R numbers (value R ÷ target R) so it matches the
+  // "+X.XR of +Y.YR" readout instead of the dollar ratio.
+  function snapPctOv(rVal,target$){var tr=(riskMax>0&&target$>0)?(target$/riskMax):0;return (HIDE_DOLLAR_PNL&&tr>0)?(rVal/tr*100):undefined;}
   // CHANGED: build GoalRing tiles grouped by category to mirror the Goals tab.
   var account=[],perf=[],pnl=[];
   if(!hidden.account&&accountTarget>0)account.push({key:"account",label:"Account Balance",value:props.currentAccount||0,target:accountTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
@@ -4771,9 +4774,9 @@ function GoalsSnapshot(props){
   if(!hidden.monthlyWithdrawals&&monthlyWithdrawalTarget>0)account.push({key:"monthlyWithdrawals",label:"Monthly Withdrawal",value:monthlyWithdrawn,target:monthlyWithdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
   if(!hidden.winRate&&winRateTarget>0)perf.push({key:"winRate",label:"Win Rate",value:oWR,target:winRateTarget,suffix:"%",decimals:0,targetDecimals:0,wrColor:true,compact:true});
   if(!hidden.discipline&&disciplineTarget>0)perf.push({key:"discipline",label:"Discipline",value:aDisc,target:disciplineTarget,suffix:"%",decimals:0,targetDecimals:0,discColor:true,compact:true});
-  if(!hidden.daily&&dailyTarget>0)pnl.push({key:"daily",label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:dailyPnlVal,formatTarget:pnlTgt,compact:true});
-  if(!hidden.weekly&&weeklyTarget>0)pnl.push({key:"weekly",label:"Week P&L",value:weekPnL,target:weeklyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:weeklyPnlVal,formatTarget:pnlTgt,compact:true});
-  if(!hidden.monthly&&monthlyTarget>0)pnl.push({key:"monthly",label:"Month P&L",value:monthPnL,target:monthlyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:monthlyPnlVal,formatTarget:pnlTgt,compact:true});
+  if(!hidden.daily&&dailyTarget>0)pnl.push({key:"daily",label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:dailyPnlVal,formatTarget:pnlTgt,compact:true,pctOverride:snapPctOv(sDailyR,dailyTarget)});
+  if(!hidden.weekly&&weeklyTarget>0)pnl.push({key:"weekly",label:"Week P&L",value:weekPnL,target:weeklyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:weeklyPnlVal,formatTarget:pnlTgt,compact:true,pctOverride:snapPctOv(sWeekR,weeklyTarget)});
+  if(!hidden.monthly&&monthlyTarget>0)pnl.push({key:"monthly",label:"Month P&L",value:monthPnL,target:monthlyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:monthlyPnlVal,formatTarget:pnlTgt,compact:true,pctOverride:snapPctOv(sMonthR,monthlyTarget)});
   // CHANGED: Inject custom goals into the appropriate default section so they show on Home alongside built-ins.
   var customList=Array.isArray(goals.custom)?goals.custom:[];
   function homeCustomVal(g){
@@ -6558,9 +6561,12 @@ function GoalRing(props){
   var tgt=gp.target||0;
   var isPercent=gp.wrColor||gp.discColor;
   // CHANGED: pctRaw is the true progress (can exceed 100); pct is capped for the ring fill.
-  var pctRaw=isPercent?Math.max(gp.value,0):(tgt>0?Math.max(gp.value/tgt*100,0):0);
+  // pctOverride lets the caller drive the ring from a DIFFERENT basis than value/target — used in R
+  // mode so the ring % matches the displayed R numbers (canonical per-day R) instead of the dollar
+  // ratio, which otherwise diverge (e.g. ring 105% vs +28.7R of +31.3R = 92%).
+  var pctRaw=isPercent?Math.max(gp.value,0):(gp.pctOverride!=null?Math.max(gp.pctOverride,0):(tgt>0?Math.max(gp.value/tgt*100,0):0));
   var pct=Math.min(pctRaw,100);
-  var over=tgt>0&&gp.value>=tgt;
+  var over=gp.pctOverride!=null?(gp.pctOverride>=100):(tgt>0&&gp.value>=tgt);
   var dec=gp.decimals!=null?gp.decimals:2;
   var tdec=gp.targetDecimals!=null?gp.targetDecimals:dec;
   var prefix=gp.prefix||"";
@@ -6792,10 +6798,14 @@ function GoalsTab(props){
   var weekRVal=periodR(rows,function(dd){return dd>=wkStart&&dd<=wkEnd;},gtRiskMax,gtLiveTrades,today);
   var monthRVal=periodR(rows,function(dd){return dd>=moStart;},gtRiskMax,gtLiveTrades,today);
   function gtRStr(r){return (r>=0?"+":"")+r.toFixed(1)+"R";}
-  var dailyPnlFmt=HIDE_DOLLAR_PNL?{formatValue:function(){return gtRStr(dailyRVal);},formatTarget:gtRFmt}:{};
-  var weeklyPnlFmt=HIDE_DOLLAR_PNL?{formatValue:function(){return gtRStr(weekRVal);},formatTarget:gtRFmt}:{};
-  var monthlyPnlFmt=HIDE_DOLLAR_PNL?{formatValue:function(){return gtRStr(monthRVal);},formatTarget:gtRFmt}:{};
   var weeklyTarget=_gtG.weekly;
+  // CHANGED: In R mode, drive the ring from the R numbers shown (value R ÷ target R) so the ring %
+  // matches "+X.XR of +Y.YR" instead of the dollar ratio. target R = target$ ÷ current riskMax.
+  // (Defined after weeklyTarget so all three targets are resolved first.)
+  function gtPctOv(rVal,target$){var tr=(gtRiskMax>0&&target$>0)?(target$/gtRiskMax):0;return tr>0?(rVal/tr*100):undefined;}
+  var dailyPnlFmt=HIDE_DOLLAR_PNL?{formatValue:function(){return gtRStr(dailyRVal);},formatTarget:gtRFmt,pctOverride:gtPctOv(dailyRVal,dailyTarget)}:{};
+  var weeklyPnlFmt=HIDE_DOLLAR_PNL?{formatValue:function(){return gtRStr(weekRVal);},formatTarget:gtRFmt,pctOverride:gtPctOv(weekRVal,weeklyTarget)}:{};
+  var monthlyPnlFmt=HIDE_DOLLAR_PNL?{formatValue:function(){return gtRStr(monthRVal);},formatTarget:gtRFmt,pctOverride:gtPctOv(monthRVal,monthlyTarget)}:{};
   var winRateTarget=parseFloat(goals.winRate)||0;
   // CHANGED: Discipline Score goal is tied directly to the discipline LOCK THRESHOLD setting and
   // is no longer user-editable in Goals. The goal is simply: keep your score above the lock bar.
