@@ -4387,9 +4387,10 @@ function ScalingTargetCard(props){
   var sizesNow=applyHalf(sizesFor(currentTier));
   var sizesNext=isMax?null:applyHalf(sizesFor(nextTier));
   function fmtUSD(v){return "$"+v.toLocaleString("en-US",{maximumFractionDigits:0});}
-  // CHANGED: House-money contracts. Once the monthly P&L goal is cleared, the profit ABOVE the goal
-  // can fund EXTRA contracts — risking that excess can't drop you back below the goal. The count is
-  // floor(excess$ ÷ risk-per-contract). Only meaningful in contract sizing mode with a monthly goal.
+  // CHANGED: House-money position. Once the monthly P&L goal is cleared, the profit ABOVE the goal
+  // IS the whole position — not extra contracts on top of the tier. Position = floor(excess$ ÷
+  // risk-per-contract), so even a full loss on it can't drop you back below the monthly goal. Only
+  // meaningful in contract sizing mode with a monthly goal set.
   var houseInfo=(function(){
     try{
       if((settings.sizingMode||"pct")!=="contracts")return null;
@@ -4405,10 +4406,9 @@ function ScalingTargetCard(props){
       var monthPnL=rows.filter(function(e){return new Date(e.date)>=moStart;}).reduce(function(s,e){return s+entryNetPnl(e);},0)+(todayInRows?0:liveTotalPnL);
       var excess=monthPnL-monthlyGoal;
       if(excess<=0)return null;
-      var extra=Math.floor(excess/rpc);
-      if(extra<=0)return null;
-      var base=contractsForTier(currentTier);
-      return {excess:excess,extra:extra,base:base,total:base+extra,rpc:rpc};
+      var contracts=Math.floor(excess/rpc);
+      if(contracts<=0)return null;
+      return {excess:excess,contracts:contracts,rpc:rpc};
     }catch(e){return null;}
   })();
   function fmtPnLUSD(v){if(HIDE_AMOUNTS)return AMT_MASK;if(HIDE_DOLLAR_PNL)return "$•••";return "$"+v.toLocaleString("en-US",{maximumFractionDigits:0});}
@@ -4461,9 +4461,9 @@ function ScalingTargetCard(props){
       </div>
       {/* CHANGED: House-money contracts — shown once the monthly goal is cleared. */}
       {houseInfo&&<div style={{marginTop:8,padding:"8px 10px",background:"linear-gradient(135deg,#052e1a,#064e3b)",border:"1px solid #10b981",borderRadius:6}}>
-        <div style={{fontSize:9,color:"#6ee7b7",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>🎯 Monthly goal cleared · House money</div>
-        <div style={{fontSize:14,fontWeight:800,color:"#fff",marginTop:3,fontVariantNumeric:"tabular-nums"}}>+{houseInfo.extra} contracts allowed <span style={{fontSize:11,fontWeight:600,color:"#a7f3d0"}}>(up to {houseInfo.total} total)</span></div>
-        <div style={{fontSize:10,color:"#6ee7b7",marginTop:2}}>{hideCurrency()?("Funded by profit above your monthly goal ÷ risk/contract"):(fmtUSD(houseInfo.excess)+" above goal ÷ "+fmtUSD(houseInfo.rpc)+"/contract")}</div>
+        <div style={{fontSize:9,color:"#6ee7b7",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>🎯 Monthly goal cleared · House-money position</div>
+        <div style={{fontSize:14,fontWeight:800,color:"#fff",marginTop:3,fontVariantNumeric:"tabular-nums"}}>{houseInfo.contracts} contracts</div>
+        <div style={{fontSize:10,color:"#6ee7b7",marginTop:2}}>{hideCurrency()?("Profit above your monthly goal ÷ risk/contract"):(fmtUSD(houseInfo.excess)+" above goal ÷ "+fmtUSD(houseInfo.rpc)+"/contract")}</div>
       </div>}
     </div>
   );
