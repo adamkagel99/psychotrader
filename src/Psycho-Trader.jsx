@@ -1040,17 +1040,19 @@ function loadJournalRows(){
 // had trades. A day with zero trades (even one with saved pnl=0 / a riskMax) shows blank, not "+0.0R".
 function buildSessionMap(todayPnL,todayRiskMax,todayTradeCount,todayTrades){
   var map={};
+  // CHANGED: R is now DOLLARS-BASED — every day's R = day$ ÷ the CURRENT risk unit (the same
+  // settings.riskMax the goal cards use), not each day's own stamped risk. This makes the calendar's
+  // week/month R reconcile exactly with the P&L goal cards and with $ mode (Σ day$ ÷ riskMax =
+  // month$ ÷ riskMax). Trade-off chosen by the user: no longer the per-day canonical R.
+  var unit=parseFloat(todayRiskMax)||0;
   loadJournalRows().forEach(function(s){
     var trades=Array.isArray(s.trades)?s.trades.filter(function(t){return t&&t.status!=="open";}):[];
     var tc=trades.length||((parseFloat(s.wins)||0)+(parseFloat(s.losses)||0));
-    var rTotal=0;
     // CHANGED: Day P&L is summed from per-trade NET pnl so commission is reflected in the calendar
-    // (and everything else built off this map). Stored s.pnl is gross for any day whose trades were
-    // logged before commissions were configured. Falls back to the stored total only when there are
+    // (and everything else built off this map). Falls back to the stored total only when there are
     // no closed trades to sum (legacy rows that kept a total but no trade array).
     var dayPnlNet=trades.length>0?trades.reduce(function(a,t){return a+tradeNetPnl(t);},0):(parseFloat(s.pnl)||0);
-    if(trades.length>0){rTotal=dayR(trades,s.riskMax);}
-    else if((parseFloat(s.riskMax)||0)>0){rTotal=dayPnlNet/(parseFloat(s.riskMax)||1);}
+    var rTotal=unit>0?(dayPnlNet/unit):0;
     map[s.date]={pnl:dayPnlNet,riskMax:parseFloat(s.riskMax)||0,rTotal:rTotal,tradeCount:tc,noTradeDay:!!s.noTradeDay,wasLocked:!!s.wasLocked};
   });
   var tc=parseInt(todayTradeCount)||0;
@@ -1060,7 +1062,7 @@ function buildSessionMap(todayPnL,todayRiskMax,todayTradeCount,todayTrades){
   // so deleting today's only trade left it lingering in the calendar/summary.
   var hadJournalToday=!!map[todayKey];
   if(tc>0||todayPnL!==0||todayRiskMax>0){
-    var todayRTotal=Array.isArray(todayTrades)?dayR(todayTrades.filter(function(t){return t&&t.status!=="open";}),todayRiskMax):(todayRiskMax>0?todayPnL/todayRiskMax:0);
+    var todayRTotal=unit>0?(todayPnL/unit):0;
     map[todayKey]={pnl:todayPnL,riskMax:todayRiskMax||0,rTotal:todayRTotal,tradeCount:tc,noTradeDay:false,wasLocked:hadJournalToday?map[todayKey].wasLocked:false};
   }else if(hadJournalToday&&!map[todayKey].noTradeDay&&map[todayKey].tradeCount>0){
     // Live state has no trades today (e.g. the only trade was deleted) — clear the stale snapshot.
@@ -4385,6 +4387,30 @@ function ScalingTargetCard(props){
   var sizesNow=applyHalf(sizesFor(currentTier));
   var sizesNext=isMax?null:applyHalf(sizesFor(nextTier));
   function fmtUSD(v){return "$"+v.toLocaleString("en-US",{maximumFractionDigits:0});}
+  // CHANGED: House-money contracts. Once the monthly P&L goal is cleared, the profit ABOVE the goal
+  // can fund EXTRA contracts — risking that excess can't drop you back below the goal. The count is
+  // floor(excess$ ÷ risk-per-contract). Only meaningful in contract sizing mode with a monthly goal.
+  var houseInfo=(function(){
+    try{
+      if((settings.sizingMode||"pct")!=="contracts")return null;
+      var goalsLocal=JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};
+      var monthlyGoal=resolveGoalTargets(goalsLocal,settings).monthly||0;
+      if(monthlyGoal<=0)return null;
+      var rpc=parseFloat(settings.riskPerContract)||0;
+      if(rpc<=0)return null;
+      var rows=loadJournalRows();
+      var n=getPT();var moStart=new Date(n.getFullYear(),n.getMonth(),1);
+      var todayKey=todayStr();
+      var todayInRows=rows.some(function(e){return e.date===todayKey;});
+      var monthPnL=rows.filter(function(e){return new Date(e.date)>=moStart;}).reduce(function(s,e){return s+entryNetPnl(e);},0)+(todayInRows?0:liveTotalPnL);
+      var excess=monthPnL-monthlyGoal;
+      if(excess<=0)return null;
+      var extra=Math.floor(excess/rpc);
+      if(extra<=0)return null;
+      var base=contractsForTier(currentTier);
+      return {excess:excess,extra:extra,base:base,total:base+extra,rpc:rpc};
+    }catch(e){return null;}
+  })();
   function fmtPnLUSD(v){if(HIDE_AMOUNTS)return AMT_MASK;if(HIDE_DOLLAR_PNL)return "$•••";return "$"+v.toLocaleString("en-US",{maximumFractionDigits:0});}
   function fmtPos(sz){return sz.posUnit==="contracts"?(sz.positionMax+" ct"):(fmtUSD(sz.positionMin)+"–"+fmtUSD(sz.positionMax));}
   var accent=isMax?"#facc15":"#818cf8";
@@ -4433,6 +4459,12 @@ function ScalingTargetCard(props){
           <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>Risk {fmtUSD(isMax?sizesNow.riskMax:sizesNext.riskMax)}</div>
         </div>
       </div>
+      {/* CHANGED: House-money contracts — shown once the monthly goal is cleared. */}
+      {houseInfo&&<div style={{marginTop:8,padding:"8px 10px",background:"linear-gradient(135deg,#052e1a,#064e3b)",border:"1px solid #10b981",borderRadius:6}}>
+        <div style={{fontSize:9,color:"#6ee7b7",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>🎯 Monthly goal cleared · House money</div>
+        <div style={{fontSize:14,fontWeight:800,color:"#fff",marginTop:3,fontVariantNumeric:"tabular-nums"}}>+{houseInfo.extra} contracts allowed <span style={{fontSize:11,fontWeight:600,color:"#a7f3d0"}}>(up to {houseInfo.total} total)</span></div>
+        <div style={{fontSize:10,color:"#6ee7b7",marginTop:2}}>{hideCurrency()?("Funded by profit above your monthly goal ÷ risk/contract"):(fmtUSD(houseInfo.excess)+" above goal ÷ "+fmtUSD(houseInfo.rpc)+"/contract")}</div>
+      </div>}
     </div>
   );
 }
@@ -4626,9 +4658,9 @@ function TodayStrip(props){
   var riskMax=parseFloat(settings.riskMax)||0;
   var todayTrades=(props.todayTrades||[]).filter(function(t){return t&&t.status!=="open";});
   var pnl=props.totalPnL||0;
-  // CHANGED: Use canonical dayR helper (sums per-trade R against each trade's stamped sizeFraction).
-  // Self-corrects across mixed-size days and matches the journal's per-trade R.
-  var rVal=dayR(todayTrades,riskMax);
+  // CHANGED: R is dollars-based — today's R = today$ ÷ current riskMax — so it reconciles with the
+  // calendar's today cell, the week/month R, and the P&L goal cards (R × riskMax = $).
+  var rVal=riskMax>0?(pnl/riskMax):0;
   // CHANGED: Single source of truth for today's discipline. If today is already saved to journal,
   // use the stored disciplineScore (kept in sync by the migration + commitment-edit handlers) so
   // the Today strip cannot disagree with the Journal / Performance displays.
@@ -5614,7 +5646,9 @@ function TradesTab(props){
              not blockers. Removes the previous disabled branch driven by tradeStatus. */}
           {/* CHANGED: When done for the day, the New Trade button is a hard stop — disabled, no
              confirm, no undo. A committed "Done for the day" pill sits in its place. */}
-          {isToday&&doneForDay&&<span style={{padding:props.mobile?"10px 12px":"8px 16px",background:"linear-gradient(135deg,#14532d,#166534)",border:"1px solid #22c55e",borderRadius:6,color:"#bbf7d0",fontSize:props.mobile?13:14,fontWeight:700,whiteSpace:"nowrap",flex:props.mobile?1:"none",textAlign:"center",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>✓ Done for the day</span>}
+          {/* CHANGED: The committed pill is tappable to REOPEN trading for today (confirm-gated), so a
+              premature "Done for the day" can't permanently lock you out. */}
+          {isToday&&doneForDay&&<button onClick={function(){if(!window.confirm("Reopen trading for today? This clears \"Done for the day\" so you can add more trades."))return;setDoneForDay(false);setDoneForDayState(false);if(props.bumpReloadKey)props.bumpReloadKey();}} title="Tap to reopen trading for today" style={{padding:props.mobile?"10px 12px":"8px 16px",background:"linear-gradient(135deg,#14532d,#166534)",border:"1px solid #22c55e",borderRadius:6,color:"#bbf7d0",fontSize:props.mobile?13:14,fontWeight:700,whiteSpace:"nowrap",flex:props.mobile?1:"none",textAlign:"center",display:"flex",alignItems:"center",justifyContent:"center",gap:6,cursor:"pointer",fontFamily:"inherit"}}>✓ Done for the day · reopen</button>}
           {isToday&&!doneForDay&&<button onClick={function(){var t=mkTrade();t.sessionId=phase!=="closed"?phase:null;setTrade(t);setShowForm(true);}} style={{padding:props.mobile?"10px 12px":"8px 16px",background:"#4f46e5",color:"#fff",border:"none",borderRadius:6,fontSize:props.mobile?13:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flex:props.mobile?1:"none"}}>+ New Trade</button>}
           {isToday&&!doneForDay&&<button onClick={function(){setDoneForDay(true);setDoneForDayState(true);if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:props.mobile?"10px 12px":"8px 16px",background:"#15151f",color:"#cbd5e1",border:"1px solid #334155",borderRadius:6,fontSize:props.mobile?13:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flex:props.mobile?1:"none"}}>🏁 Done for the day</button>}
           {!isToday&&<button onClick={function(){var t=mkTrade();setPastNewTrade(Object.assign({},t,{time:new Date().toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"})}));}} style={{padding:props.mobile?"10px 12px":"8px 16px",background:"#4f46e5",color:"#fff",border:"none",borderRadius:6,fontSize:props.mobile?13:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flex:props.mobile?1:"none"}}>+ Add Trade</button>}
