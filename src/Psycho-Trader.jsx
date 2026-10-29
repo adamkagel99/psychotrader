@@ -911,7 +911,7 @@ function getFocusStates(settings){
   });
   return out;
 }
-function defaultSettings(){return {accountSize:0,positionMin:0,positionMax:0,riskMin:0,riskMax:0,gainMultiplier:5,timezone:"America/Los_Angeles",sessions:defaultSessionsForTz("America/Los_Angeles"),tradingWindows:[{start:60,end:1020}],slippagePct:20,positionMaxPct:7.5,positionMaxDollar:500,positionMaxContracts:1,riskPerContract:25,riskMaxPct:33,riskMaxDollar:165,sizingMode:"pct",hideDollarPnL:false,hideAmounts:false,enabledAssetClasses:defaultEnabledAssetClasses(),assetClassSettings:defaultAssetClassSettings(),defaultAssetClass:"options",defaultInstruments:{},focusStates:defaultFocusStates(),enabledGrades:["A","B"]};}
+function defaultSettings(){return {accountSize:0,positionMin:0,positionMax:0,riskMin:0,riskMax:0,gainMultiplier:5,timezone:"America/Los_Angeles",sessions:defaultSessionsForTz("America/Los_Angeles"),tradingWindows:[{start:60,end:1020}],slippagePct:20,positionMaxPct:7.5,positionMaxDollar:500,positionMaxContracts:1,riskPerContract:25,contractCost:60,riskMaxPct:33,riskMaxDollar:165,sizingMode:"pct",hideDollarPnL:false,hideAmounts:false,enabledAssetClasses:defaultEnabledAssetClasses(),assetClassSettings:defaultAssetClassSettings(),defaultAssetClass:"options",defaultInstruments:{},focusStates:defaultFocusStates(),enabledGrades:["A","B"]};}
 // Grade metadata — order + colors. C exists for legacy trades but is off by default.
 var ALL_GRADES=["A","B","C"];
 var GRADE_COLORS={A:"#22c55e",B:"#f59e0b",C:"#ef4444"};
@@ -4388,17 +4388,18 @@ function ScalingTargetCard(props){
   var sizesNext=isMax?null:applyHalf(sizesFor(nextTier));
   function fmtUSD(v){return "$"+v.toLocaleString("en-US",{maximumFractionDigits:0});}
   // CHANGED: House-money position. Once the monthly P&L goal is cleared, the profit ABOVE the goal
-  // IS the whole position — position = floor(excess$ ÷ risk-per-contract), using the USER-ENTERED
-  // Risk per contract. So the house-money risk equals the excess exactly: a full loss on it leaves
-  // you right at the monthly goal. Contract sizing mode only, with a monthly goal set.
+  // buys contracts OUTRIGHT at the user-entered contract COST: position = floor(excess$ ÷ cost). The
+  // actual risk per contract (also user-entered) is a fraction of cost (risk ÷ cost), so a full
+  // adverse move still can't drop you below the monthly goal. Contract sizing mode only.
   var houseInfo=(function(){
     try{
       if((settings.sizingMode||"pct")!=="contracts")return null;
       var goalsLocal=JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};
       var monthlyGoal=resolveGoalTargets(goalsLocal,settings).monthly||0;
       if(monthlyGoal<=0)return null;
+      var cost=parseFloat(settings.contractCost)||0;
+      if(cost<=0)return null;
       var rpc=parseFloat(settings.riskPerContract)||0;
-      if(rpc<=0)return null;
       var rows=loadJournalRows();
       var n=getPT();var moStart=new Date(n.getFullYear(),n.getMonth(),1);
       var todayKey=todayStr();
@@ -4406,9 +4407,9 @@ function ScalingTargetCard(props){
       var monthPnL=rows.filter(function(e){return new Date(e.date)>=moStart;}).reduce(function(s,e){return s+entryNetPnl(e);},0)+(todayInRows?0:liveTotalPnL);
       var excess=monthPnL-monthlyGoal;
       if(excess<=0)return null;
-      var contracts=Math.floor(excess/rpc);
+      var contracts=Math.floor(excess/cost);
       if(contracts<=0)return null;
-      return {excess:excess,contracts:contracts,rpc:rpc};
+      return {excess:excess,contracts:contracts,cost:cost,rpc:rpc};
     }catch(e){return null;}
   })();
   function fmtPnLUSD(v){if(HIDE_AMOUNTS)return AMT_MASK;if(HIDE_DOLLAR_PNL)return "$•••";return "$"+v.toLocaleString("en-US",{maximumFractionDigits:0});}
@@ -4463,7 +4464,7 @@ function ScalingTargetCard(props){
       {houseInfo&&<div style={{marginTop:8,padding:"8px 10px",background:"linear-gradient(135deg,#052e1a,#064e3b)",border:"1px solid #10b981",borderRadius:6}}>
         <div style={{fontSize:9,color:"#6ee7b7",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>🎯 Monthly goal cleared · House-money position</div>
         <div style={{fontSize:14,fontWeight:800,color:"#fff",marginTop:3,fontVariantNumeric:"tabular-nums"}}>{houseInfo.contracts} contracts</div>
-        <div style={{fontSize:10,color:"#6ee7b7",marginTop:2}}>{hideCurrency()?("Profit above goal ÷ risk per contract"):(fmtUSD(houseInfo.excess)+" above goal ÷ "+fmtUSD(houseInfo.rpc)+" risk/contract")}</div>
+        <div style={{fontSize:10,color:"#6ee7b7",marginTop:2}}>{hideCurrency()?("Profit above goal ÷ contract cost"):(fmtUSD(houseInfo.excess)+" above goal ÷ "+fmtUSD(houseInfo.cost)+" cost/contract"+(houseInfo.rpc>0?(" · risk "+fmtUSD(houseInfo.rpc)+"/ct"):""))}</div>
       </div>}
     </div>
   );
@@ -9612,6 +9613,9 @@ function SettingsTab(props){
             <div style={{fontSize:11,color:"#64748b",marginBottom:8,lineHeight:1.5,padding:"7px 9px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:6}}>Contracts are derived from your tier: <span style={{color:"#a5b4fc"}}>next-tier $ ÷ 1000</span>. E.g. $1k–$5k → 5 contracts, $5k–$10k → 10.</div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8}}>
               <div><label style={lbl}>Risk per contract ($)</label><input type="number" step="1" value={settings.riskPerContract!=null?settings.riskPerContract:25} onChange={function(e){setSettings(function(s){return Object.assign({},s,{riskPerContract:parseFloat(e.target.value)||0});});}} style={fld}/></div>
+              {/* CHANGED: Contract cost ($) — the full cost to BUY one contract. The house-money
+                 position (after the monthly goal) buys contracts with the excess at this cost. */}
+              <div><label style={lbl}>Contract cost ($)</label><input type="number" step="1" value={settings.contractCost!=null?settings.contractCost:60} onChange={function(e){setSettings(function(s){return Object.assign({},s,{contractCost:parseFloat(e.target.value)||0});});}} style={fld}/><div style={{fontSize:10,color:"#64748b",marginTop:3}}>House-money position = profit above goal ÷ this</div></div>
             </div>
             <div style={{fontSize:11,color:"#64748b",marginTop:6,lineHeight:1.5}}>Risk Max = risk/contract × contracts.</div>
           </div>
