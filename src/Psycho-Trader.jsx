@@ -4464,7 +4464,6 @@ function ScalingTargetCard(props){
       {houseInfo&&<div style={{marginTop:8,padding:"8px 10px",background:"linear-gradient(135deg,#052e1a,#064e3b)",border:"1px solid #10b981",borderRadius:6}}>
         <div style={{fontSize:9,color:"#6ee7b7",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>🎯 Monthly goal cleared · House-money position</div>
         <div style={{fontSize:14,fontWeight:800,color:"#fff",marginTop:3,fontVariantNumeric:"tabular-nums"}}>{houseInfo.contracts} contracts</div>
-        <div style={{fontSize:10,color:"#6ee7b7",marginTop:2}}>{hideCurrency()?("Profit above goal ÷ contract cost"):(fmtUSD(houseInfo.excess)+" above goal ÷ "+fmtUSD(houseInfo.cost)+" cost/contract"+(houseInfo.rpc>0?(" · risk "+fmtUSD(houseInfo.rpc)+"/ct"):""))}</div>
       </div>}
     </div>
   );
