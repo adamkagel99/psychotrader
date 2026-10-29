@@ -427,6 +427,30 @@ function contractsForTier(tier){
   for(var i=0;i<SCALING_TIERS.length;i++){if(tier>=SCALING_TIERS[i].bal)best=SCALING_TIERS[i].contracts;}
   return best;
 }
+// CHANGED: Shared house-money position. Once this month's P&L clears the monthly goal, the profit
+// ABOVE the goal buys contracts outright at the user-entered contract cost: floor(excess$ ÷ cost).
+// Returns 0 when not applicable (not contract mode, no goal/cost, or not yet above goal). Used by
+// the Scaling Level card AND the trade form so they agree.
+function computeHouseMoneyContracts(settings,liveTotalPnL){
+  try{
+    settings=settings||{};
+    if((settings.sizingMode||"pct")!=="contracts")return 0;
+    var goals=JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};
+    var monthlyGoal=resolveGoalTargets(goals,settings).monthly||0;
+    if(monthlyGoal<=0)return 0;
+    var cost=parseFloat(settings.contractCost)||0;
+    if(cost<=0)return 0;
+    var rows=loadJournalRows();
+    var n=getPT();var moStart=new Date(n.getFullYear(),n.getMonth(),1);
+    var todayKey=todayStr();
+    var todayInRows=rows.some(function(e){return e.date===todayKey;});
+    var monthPnL=rows.filter(function(e){return new Date(e.date)>=moStart;}).reduce(function(s,e){return s+entryNetPnl(e);},0)+(todayInRows?0:(parseFloat(liveTotalPnL)||0));
+    var excess=monthPnL-monthlyGoal;
+    if(excess<=0)return 0;
+    var contracts=Math.floor(excess/cost);
+    return contracts>0?contracts:0;
+  }catch(e){return 0;}
+}
 // CHANGED: A tier "activates" only once balance is at least 10% above the tier value — the
 // step-up buffer prevents instant re-sizing the moment you cross a tier line (e.g. the $5,000
 // size kicks in at $5,500). Returns the highest milestone whose 10%-above threshold is cleared.
@@ -2521,6 +2545,8 @@ function MonthYearPicker(props){
     return arr;
   },[draftYear]);
   var absMax=Math.max.apply(null,monthPnLs.map(function(v){return Math.abs(v);}));
+  // CHANGED: Monthly-goal-met flag per month — 🏁 on any month whose net P&L reached the monthly target.
+  var monthlyGoalTarget=(function(){try{var g=JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};var st=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};return resolveGoalTargets(g,st).monthly||0;}catch(e){return 0;}})();
   // CHANGED: Match the calendar day-cell palette exactly — solid #14532d for positive months,
   // solid #7f1d1d for negative. Day cells don't fade by magnitude, so neither does this.
   function tintFor(v){
@@ -2538,7 +2564,8 @@ function MonthYearPicker(props){
         {MONTH_NAMES.map(function(m,i){
           var sel=draftYear===year&&i===month;
           var bg=sel?"#4f46e5":tintFor(monthPnLs[i]);
-          return <button key={m} onClick={function(){onChange(draftYear,i);}} style={{padding:"8px 0",background:bg,border:"none",borderRadius:5,color:sel?"#fff":"#e2e8f0",fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:sel?700:500}}>{m.slice(0,3)}</button>;
+          var goalMet=monthlyGoalTarget>0&&monthPnLs[i]>=monthlyGoalTarget;
+          return <button key={m} onClick={function(){onChange(draftYear,i);}} style={{padding:"8px 0",background:bg,border:"none",borderRadius:5,color:sel?"#fff":"#e2e8f0",fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:sel?700:500,display:"inline-flex",alignItems:"center",justifyContent:"center",gap:4}}>{m.slice(0,3)}{goalMet&&<span style={{fontSize:11}} title="Monthly target met">🏁</span>}</button>;
         })}
       </div>
     </div>
@@ -3562,6 +3589,12 @@ function TradeForm(props){
               <div style={{fontSize:9,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Risk{g?" · "+g+" grade":""}</div>
               <div style={{fontSize:14,fontWeight:700,color:"#ef4444",marginTop:2}}>{"$"+rMin+" "}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500}}>– ${rMax}</span></div>
             </div>
+            {/* CHANGED: House-money position once the monthly goal is cleared — the allowed position
+                funded by profit above the goal (profit above goal ÷ contract cost). */}
+            {props.houseMoneyContracts>0&&<div style={{flex:1}}>
+              <div style={{fontSize:9,color:"#6ee7b7",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>🎯 House money</div>
+              <div style={{fontSize:14,fontWeight:700,color:"#10b981",marginTop:2}}>{props.houseMoneyContracts} ct</div>
+            </div>}
             {!g&&<div style={{fontSize:10,color:"#fbbf24",whiteSpace:"nowrap"}}>Pick grade → A/B/C scales</div>}
           </div>
           );
@@ -4387,31 +4420,9 @@ function ScalingTargetCard(props){
   var sizesNow=applyHalf(sizesFor(currentTier));
   var sizesNext=isMax?null:applyHalf(sizesFor(nextTier));
   function fmtUSD(v){return "$"+v.toLocaleString("en-US",{maximumFractionDigits:0});}
-  // CHANGED: House-money position. Once the monthly P&L goal is cleared, the profit ABOVE the goal
-  // buys contracts OUTRIGHT at the user-entered contract COST: position = floor(excess$ ÷ cost). The
-  // actual risk per contract (also user-entered) is a fraction of cost (risk ÷ cost), so a full
-  // adverse move still can't drop you below the monthly goal. Contract sizing mode only.
-  var houseInfo=(function(){
-    try{
-      if((settings.sizingMode||"pct")!=="contracts")return null;
-      var goalsLocal=JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};
-      var monthlyGoal=resolveGoalTargets(goalsLocal,settings).monthly||0;
-      if(monthlyGoal<=0)return null;
-      var cost=parseFloat(settings.contractCost)||0;
-      if(cost<=0)return null;
-      var rpc=parseFloat(settings.riskPerContract)||0;
-      var rows=loadJournalRows();
-      var n=getPT();var moStart=new Date(n.getFullYear(),n.getMonth(),1);
-      var todayKey=todayStr();
-      var todayInRows=rows.some(function(e){return e.date===todayKey;});
-      var monthPnL=rows.filter(function(e){return new Date(e.date)>=moStart;}).reduce(function(s,e){return s+entryNetPnl(e);},0)+(todayInRows?0:liveTotalPnL);
-      var excess=monthPnL-monthlyGoal;
-      if(excess<=0)return null;
-      var contracts=Math.floor(excess/cost);
-      if(contracts<=0)return null;
-      return {excess:excess,contracts:contracts,cost:cost,rpc:rpc};
-    }catch(e){return null;}
-  })();
+  // CHANGED: House-money position — shared helper so the card and the trade form agree.
+  var houseContracts=computeHouseMoneyContracts(settings,liveTotalPnL);
+  var houseInfo=houseContracts>0?{contracts:houseContracts}:null;
   function fmtPnLUSD(v){if(HIDE_AMOUNTS)return AMT_MASK;if(HIDE_DOLLAR_PNL)return "$•••";return "$"+v.toLocaleString("en-US",{maximumFractionDigits:0});}
   function fmtPos(sz){return sz.posUnit==="contracts"?(sz.positionMax+" ct"):(fmtUSD(sz.positionMin)+"–"+fmtUSD(sz.positionMax));}
   var accent=isMax?"#facc15":"#818cf8";
@@ -5702,7 +5713,7 @@ function TradesTab(props){
         </div>
       </div>
       </div>
-      {isToday&&showForm&&trade&&<TradeForm mobile={props.mobile} trade={trade} setTrade={setTrade} onSave={saveTrade} onCancel={function(){setShowForm(false);setTrade(null);}} settings={settings} tradeOptions={props.tradeOptions} displayPosMin={props.displayPosMin} displayPosMax={props.displayPosMax} displayRiskMin={props.displayRiskMin} displayRiskMax={props.displayRiskMax}/>}
+      {isToday&&showForm&&trade&&<TradeForm mobile={props.mobile} trade={trade} setTrade={setTrade} onSave={saveTrade} onCancel={function(){setShowForm(false);setTrade(null);}} settings={settings} tradeOptions={props.tradeOptions} displayPosMin={props.displayPosMin} displayPosMax={props.displayPosMax} displayRiskMin={props.displayRiskMin} displayRiskMax={props.displayRiskMax} houseMoneyContracts={computeHouseMoneyContracts(settings,totalPnL)}/>}
       {!isToday&&pastNewTrade&&<TradeForm mobile={props.mobile} trade={pastNewTrade} setTrade={setPastNewTrade} onSave={saveNewPastTrade} onCancel={function(){setPastNewTrade(null);}} settings={settings} tradeOptions={props.tradeOptions} displayPosMin={props.displayPosMin} displayPosMax={props.displayPosMax} displayRiskMin={props.displayRiskMin} displayRiskMax={props.displayRiskMax}/>}
       {/* CHANGED: Screenshots moved here from Home. Built from the filtered + sorted trade list so
           Sort/Filter apply. A scope toggle switches between this date's shots and all journal shots. */}
@@ -9609,7 +9620,7 @@ function SettingsTab(props){
           </div>
         ):(settings.sizingMode||"pct")==="contracts"?(
           <div style={{marginBottom:8}}>
-            <div style={{fontSize:11,color:"#64748b",marginBottom:8,lineHeight:1.5,padding:"7px 9px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:6}}>Contracts are derived from your tier: <span style={{color:"#a5b4fc"}}>next-tier $ ÷ 1000</span>. E.g. $1k–$5k → 5 contracts, $5k–$10k → 10.</div>
+            <div style={{fontSize:11,color:"#64748b",marginBottom:8,lineHeight:1.5,padding:"7px 9px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:6}}>Contracts are set per tier on the <span style={{color:"#a5b4fc"}}>scaling ladder</span> (e.g. $2k → 2, $5k → 6, $10k → 10, $18k → 18), stepping up once your balance clears a tier +10%.</div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8}}>
               <div><label style={lbl}>Risk per contract ($)</label><input type="number" step="1" value={settings.riskPerContract!=null?settings.riskPerContract:25} onChange={function(e){setSettings(function(s){return Object.assign({},s,{riskPerContract:parseFloat(e.target.value)||0});});}} style={fld}/></div>
               {/* CHANGED: Contract cost ($) — the full cost to BUY one contract. The house-money
@@ -9671,7 +9682,7 @@ function SettingsTab(props){
                       </div>
                     ):(settings.sizingMode||"pct")==="contracts"?(
                       <div>
-                        Contracts = <span style={{color:"#a5b4fc"}}>next-tier $ ÷ 1000</span> (e.g. $1k–$5k → 5, $5k–$10k → 10)<br/>
+                        Contracts are set <span style={{color:"#a5b4fc"}}>per tier on the scaling ladder</span> (e.g. $2k → 2, $5k → 6, $10k → 10)<br/>
                         Risk Max = <span style={{color:"#a5b4fc"}}>${settings.riskPerContract}</span>/contract × contracts · Risk Min = Risk Max × (1 − <span style={{color:"#a5b4fc"}}>{slip}%</span>)
                       </div>
                     ):(
