@@ -2563,21 +2563,41 @@ function MonthYearPicker(props){
   var [draftYear,setDraftYear]=useState(year);
   // CHANGED: Tint each month button by its net P&L — green/red opacity scaled by magnitude relative
   // to the year's best/worst month. Selected month overrides with the accent fill.
-  var monthPnLs=useMemo(function(){
-    var arr=[0,0,0,0,0,0,0,0,0,0,0,0];
+  // CHANGED: Monthly-goal-met flag per month — 🏁 on any month whose net P&L EVER reached the monthly
+  // target. Must be defined before the memo so the memo can compute the crossing against it.
+  var monthlyGoalTarget=(function(){try{var g=JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};var st=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};return resolveGoalTargets(g,st).monthly||0;}catch(e){return 0;}})();
+  // CHANGED: Compute BOTH each month's net total (for the tint) AND whether it ever reached its goal.
+  // The "reached" flag uses cumulative day-by-day crossing — identical to the calendar's dated 🏁 —
+  // NOT the end-of-month total. A month that crosses mid-month then gives some back with a late red
+  // day still counts as reached (the goal milestone is cemented once hit), so the picker, the
+  // calendar cell, and the header all agree.
+  var monthData=useMemo(function(){
+    var totals=[0,0,0,0,0,0,0,0,0,0,0,0];
+    var byMonth={};
     try{
       loadJournalRows().forEach(function(r){
         if(!r||!r.date)return;
         var d=new Date(r.date);
         if(isNaN(d.getTime())||d.getFullYear()!==draftYear)return;
-        arr[d.getMonth()]+=entryNetPnl(r);
+        var mi=d.getMonth();var p=entryNetPnl(r);
+        totals[mi]+=p;
+        (byMonth[mi]=byMonth[mi]||[]).push({d:d,pnl:p});
       });
     }catch(e){}
-    return arr;
-  },[draftYear]);
+    var crossed=[false,false,false,false,false,false,false,false,false,false,false,false];
+    for(var i=0;i<12;i++){
+      var key=draftYear+"-"+i;
+      if(isGoalAchieved("monthly",key)){crossed[i]=true;continue;}
+      var tgt=getMonthGoalValue(key,monthlyGoalTarget);
+      if(!(tgt>0))continue;
+      var arr=(byMonth[i]||[]).slice().sort(function(a,b){return a.d-b.d;});
+      var cum=0;
+      for(var j=0;j<arr.length;j++){cum+=arr[j].pnl;if(cum>=tgt){crossed[i]=true;break;}}
+    }
+    return {totals:totals,crossed:crossed};
+  },[draftYear,monthlyGoalTarget]);
+  var monthPnLs=monthData.totals;
   var absMax=Math.max.apply(null,monthPnLs.map(function(v){return Math.abs(v);}));
-  // CHANGED: Monthly-goal-met flag per month — 🏁 on any month whose net P&L reached the monthly target.
-  var monthlyGoalTarget=(function(){try{var g=JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};var st=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};return resolveGoalTargets(g,st).monthly||0;}catch(e){return 0;}})();
   // CHANGED: Match the calendar day-cell palette exactly — solid #14532d for positive months,
   // solid #7f1d1d for negative. Day cells don't fade by magnitude, so neither does this.
   function tintFor(v){
@@ -2595,7 +2615,7 @@ function MonthYearPicker(props){
         {MONTH_NAMES.map(function(m,i){
           var sel=draftYear===year&&i===month;
           var bg=sel?"#4f46e5":tintFor(monthPnLs[i]);
-          var mHit=goalMet("monthly",draftYear+"-"+i,monthPnLs[i],getMonthGoalValue(draftYear+"-"+i,monthlyGoalTarget));
+          var mHit=monthData.crossed[i];
           return <button key={m} onClick={function(){onChange(draftYear,i);}} style={{padding:"8px 0",background:bg,border:"none",borderRadius:5,color:sel?"#fff":"#e2e8f0",fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:sel?700:500,display:"inline-flex",alignItems:"center",justifyContent:"center",gap:4}}>{m.slice(0,3)}{mHit&&<span style={{fontSize:11}} title="Monthly target met">🏁</span>}</button>;
         })}
       </div>
