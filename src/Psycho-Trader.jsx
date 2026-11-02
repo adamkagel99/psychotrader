@@ -11164,6 +11164,14 @@ function App(props){
   // open that month's calendar first. Uses each month's recorded goal, falling back to the current.
   useEffect(function(){
     try{
+      // CHANGED: One-time hard-coded backfill — Adam's October 2026 monthly goal was $6,500,
+      // set before per-month goal history existed. Record it once so October cements against the
+      // right number regardless of the current goal. Guard flag makes it idempotent; a later
+      // in-app edit to October's goal still overwrites this via recordMonthGoal.
+      if(localStorage.getItem("tf-oct2026-goal-fix-v1")!=="1"){
+        recordMonthGoal("2026-9",6500);
+        localStorage.setItem("tf-oct2026-goal-fix-v1","1");
+      }
       var goalsL=JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};
       var settingsL=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};
       var curMonthly=resolveGoalTargets(goalsL,settingsL).monthly||0;
