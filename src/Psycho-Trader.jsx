@@ -1633,6 +1633,13 @@ function goalMet(type,key,pnl,target,metDate){
   if(target>0&&pnl>=target){markGoalAchieved(type,key,metDate);return true;}
   return false;
 }
+// CHANGED: Per-month monthly-goal history. Records the monthly goal that applied to each month
+// ("YYYY-M" → $) so a later goal change never re-evaluates PAST months against the new number.
+// Months with no record fall back to the current goal.
+var MONTH_GOAL_HISTORY_KEY="tf-month-goal-history";
+function loadMonthGoalHistory(){try{return JSON.parse(localStorage.getItem(MONTH_GOAL_HISTORY_KEY)||"{}")||{};}catch(e){return {};}}
+function recordMonthGoal(monthKey,value){try{if(value==null||!(parseFloat(value)>0))return;var h=loadMonthGoalHistory();if(h[monthKey]!==parseFloat(value)){h[monthKey]=parseFloat(value);localStorage.setItem(MONTH_GOAL_HISTORY_KEY,JSON.stringify(h));}}catch(e){}}
+function getMonthGoalValue(monthKey,fallback){try{var h=loadMonthGoalHistory();return (h[monthKey]!=null)?parseFloat(h[monthKey]):fallback;}catch(e){return fallback;}}
 // Daily target derived from session sizing + gain hard stops. Falls back to 0 if unset.
 function getDailyTarget(){
   try{var s=localStorage.getItem(SETTINGS_KEY);if(!s)return 0;return computeDailyTarget(JSON.parse(s));}catch(e){return 0;}
@@ -2588,7 +2595,7 @@ function MonthYearPicker(props){
         {MONTH_NAMES.map(function(m,i){
           var sel=draftYear===year&&i===month;
           var bg=sel?"#4f46e5":tintFor(monthPnLs[i]);
-          var mHit=goalMet("monthly",draftYear+"-"+i,monthPnLs[i],monthlyGoalTarget);
+          var mHit=goalMet("monthly",draftYear+"-"+i,monthPnLs[i],getMonthGoalValue(draftYear+"-"+i,monthlyGoalTarget));
           return <button key={m} onClick={function(){onChange(draftYear,i);}} style={{padding:"8px 0",background:bg,border:"none",borderRadius:5,color:sel?"#fff":"#e2e8f0",fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:sel?700:500,display:"inline-flex",alignItems:"center",justifyContent:"center",gap:4}}>{m.slice(0,3)}{mHit&&<span style={{fontSize:11}} title="Monthly target met">🏁</span>}</button>;
         })}
       </div>
@@ -2683,16 +2690,17 @@ function CalendarGrid(props){
   var _monthKeyCG=calYear+"-"+calMonth;
   // Find the DAY the cumulative month P&L first crosses the goal (only to STAMP it the first time).
   var monthGoalMetDs=monthlyMetDate(_monthKeyCG);
-  if(!monthGoalMetDs&&monthlyTarget>0){
+  var _mgCG=getMonthGoalValue(_monthKeyCG,monthlyTarget);
+  if(!monthGoalMetDs&&_mgCG>0){
     var _cum=0;
     for(var _gd=1;_gd<=daysInMonth;_gd++){
       var _gds=(calMonth+1)+"/"+_gd+"/"+calYear;
       var _gm=sessionMap[_gds];
       _cum+=_gm?(parseFloat(_gm.pnl)||0):0;
-      if(_cum>=monthlyTarget){monthGoalMetDs=_gds;break;}
+      if(_cum>=_mgCG){monthGoalMetDs=_gds;break;}
     }
   }
-  var monthGoalHit=goalMet("monthly",_monthKeyCG,monthPnLTotal,monthlyTarget,monthGoalMetDs);
+  var monthGoalHit=goalMet("monthly",_monthKeyCG,monthPnLTotal,getMonthGoalValue(_monthKeyCG,monthlyTarget),monthGoalMetDs);
   // If cemented but the crossing day wasn't stored (older ledger), fall back to the computed one.
   if(monthGoalHit&&!monthGoalMetDs)monthGoalMetDs=monthlyMetDate(_monthKeyCG);
   return (
@@ -2839,16 +2847,17 @@ function DashboardCalendar(props){
   // CHANGED: Cemented monthly-goal-met flag (persists if the goal is later changed).
   var _monthKeyDC=calYear+"-"+calMonth;
   var monthGoalMetDsCal=monthlyMetDate(_monthKeyDC);
-  if(!monthGoalMetDsCal&&monthlyGoalTarget>0){
+  var _mgDC=getMonthGoalValue(_monthKeyDC,monthlyGoalTarget);
+  if(!monthGoalMetDsCal&&_mgDC>0){
     var _cc=0;var _dim=new Date(calYear,calMonth+1,0).getDate();
     for(var _cd=1;_cd<=_dim;_cd++){
       var _cds=(calMonth+1)+"/"+_cd+"/"+calYear;
       var _cm=sessionMap[_cds];
       _cc+=_cm?(parseFloat(_cm.pnl)||0):0;
-      if(_cc>=monthlyGoalTarget){monthGoalMetDsCal=_cds;break;}
+      if(_cc>=_mgDC){monthGoalMetDsCal=_cds;break;}
     }
   }
-  var monthGoalHitCal=goalMet("monthly",_monthKeyDC,monthPnL,monthlyGoalTarget,monthGoalMetDsCal);
+  var monthGoalHitCal=goalMet("monthly",_monthKeyDC,monthPnL,_mgDC,monthGoalMetDsCal);
   if(monthGoalHitCal&&!monthGoalMetDsCal)monthGoalMetDsCal=monthlyMetDate(_monthKeyDC);
   // CHANGED: One readout used in both collapsed (week) and expanded (month) states. In "trades"
   // mode shows a count; in "pnl" mode shows R when Hide-$ is on or $ otherwise.
@@ -6751,6 +6760,9 @@ function GoalsTab(props){
 
   function persist(g){
     try{localStorage.setItem(GOALS_KEY,JSON.stringify(g));}catch(e){}
+    // CHANGED: Record the CURRENT month's monthly goal into history so a future goal change never
+    // re-evaluates this month against the new number.
+    try{var _n=getNow();var _mt=resolveGoalTargets(g,JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")).monthly||0;recordMonthGoal(_n.getFullYear()+"-"+_n.getMonth(),_mt);}catch(e){}
     // CHANGED: Re-read from localStorage after writing so any sync layer that intercepts /
     // transforms the value (e.g. JSON.parse-then-stringify round-trip) is reflected in state.
     // Without this, the editor could show one value while localStorage held a slightly different
@@ -11125,6 +11137,53 @@ function App(props){
     if(lvl>seen){setLevelBanner({dir:"up",level:lvl});try{localStorage.setItem(key,String(lvl));}catch(e){}}
     else if(lvl<seen){setLevelBanner({dir:"down",level:lvl});try{localStorage.setItem(key,String(lvl));}catch(e){}}
   },[totalPnL]);
+  // CHANGED: First-trading-day monthly goal prompt — on the first trading day of a new month, ask
+  // whether to keep last month's P&L goal or edit it. Also cements last month's goal into history.
+  var [monthGoalPrompt,setMonthGoalPrompt]=useState(null);
+  useEffect(function(){
+    try{
+      var now=getPT();var dow=now.getDay();
+      var key=now.getFullYear()+"-"+now.getMonth();
+      if(localStorage.getItem("tf-month-goal-prompt-ack")===key)return; // already handled this month
+      if(dow===0||dow===6)return; // weekend — wait for a trading day
+      var mk=(now.getMonth()+1)+"/"+now.getDate()+"/"+now.getFullYear();
+      if(MARKET_HOLIDAYS[mk])return; // holiday — wait for a trading day
+      var goalsL=JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};
+      var settingsL=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};
+      var resolvedMonthly=0;try{resolvedMonthly=resolveGoalTargets(goalsL,settingsL).monthly||0;}catch(e){}
+      if(resolvedMonthly<=0)return; // no monthly goal set — nothing to keep/edit
+      // Cement the PREVIOUS month's goal (the goal in effect, unchanged) so its 🏁 is judged against it.
+      var pm=new Date(now.getFullYear(),now.getMonth()-1,1);
+      recordMonthGoal(pm.getFullYear()+"-"+pm.getMonth(),resolvedMonthly);
+      setMonthGoalPrompt({monthKey:key,goal:resolvedMonthly,label:MONTH_NAMES[now.getMonth()]});
+    }catch(e){}
+  },[]);
+  function ackMonthGoalPrompt(){try{if(monthGoalPrompt)localStorage.setItem("tf-month-goal-prompt-ack",monthGoalPrompt.monthKey);recordMonthGoal(monthGoalPrompt.monthKey,monthGoalPrompt.goal);}catch(e){}setMonthGoalPrompt(null);}
+  // CHANGED: One-time self-heal — cement every PAST/current month whose net P&L reached its goal, so
+  // the 🏁 shows on the month everywhere (picker, calendar header, dated cell) without needing to
+  // open that month's calendar first. Uses each month's recorded goal, falling back to the current.
+  useEffect(function(){
+    try{
+      var goalsL=JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};
+      var settingsL=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};
+      var curMonthly=resolveGoalTargets(goalsL,settingsL).monthly||0;
+      var byMonth={};
+      loadJournalRows().forEach(function(r){
+        if(!r||!r.date)return;var d=new Date(r.date);if(isNaN(d.getTime()))return;
+        var k=d.getFullYear()+"-"+d.getMonth();
+        (byMonth[k]=byMonth[k]||[]).push({d:d,pnl:entryNetPnl(r),date:r.date});
+      });
+      Object.keys(byMonth).forEach(function(k){
+        if(isGoalAchieved("monthly",k))return;
+        var tgt=getMonthGoalValue(k,curMonthly);
+        if(!(tgt>0))return;
+        var arr=byMonth[k].slice().sort(function(a,b){return a.d-b.d;});
+        var cum=0,cross=null;
+        for(var i=0;i<arr.length;i++){cum+=arr[i].pnl;if(cum>=tgt){cross=arr[i].date;break;}}
+        if(cross)markGoalAchieved("monthly",k,cross);
+      });
+    }catch(e){}
+  },[]);
   // CHANGED: Compute effective size-fraction (session sizeFraction × 0.5 when discipline-locked)
   // up here so both tradeStatus and the display values below share the same scaling.
   var sessForSf=getSessions(settings).find(function(s){return s.id===phase;});
@@ -11203,6 +11262,20 @@ function App(props){
   var mobile=winW<640;
   return (
     <div style={{minHeight:"100vh",background:"#0a0a0f",color:"#e2e8f0",fontFamily:"-apple-system,BlinkMacSystemFont,system-ui,sans-serif",display:"flex"}}>
+      {/* CHANGED: First-trading-day monthly goal prompt. */}
+      {monthGoalPrompt&&(
+        <div onClick={ackMonthGoalPrompt} style={{position:"fixed",inset:0,zIndex:2000,background:"#0a0a0fdd",backdropFilter:"blur(4px)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+          <div onClick={function(e){e.stopPropagation();}} style={{background:"#111118",border:"1px solid #4338ca",borderRadius:14,padding:"20px 22px",width:400,maxWidth:"94vw",boxShadow:"0 16px 48px #000000bb"}}>
+            <div style={{fontSize:13,color:"#a5b4fc",letterSpacing:1,textTransform:"uppercase",fontWeight:700,marginBottom:6}}>🗓 New month · {monthGoalPrompt.label}</div>
+            <div style={{fontSize:15,fontWeight:700,color:"#e2e8f0",marginBottom:4}}>Keep last month's P&L goal?</div>
+            <div style={{fontSize:13,color:"#94a3b8",lineHeight:1.5,marginBottom:16}}>Your monthly goal is <span style={{color:"#fff",fontWeight:800}}>${Math.round(monthGoalPrompt.goal).toLocaleString()}</span>. Keep it for {monthGoalPrompt.label}, or edit it now.</div>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={ackMonthGoalPrompt} style={{flex:1,padding:"11px",background:"#4f46e5",border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Keep goal</button>
+              <button onClick={function(){ackMonthGoalPrompt();setSettingsFocus(null);setTab("goals");}} style={{flex:1,padding:"11px",background:"#15151f",border:"1px solid #334155",borderRadius:8,color:"#cbd5e1",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Edit goal</button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* CHANGED: Collapsible laptop left sidebar navigation — hidden in mobile view. */}
       {!mobile&&<div style={{width:sidebarCollapsed?64:220,flexShrink:0,background:"#111118",borderRight:"1px solid #1e293b",height:"100vh",position:"sticky",top:0,display:"flex",flexDirection:"column",padding:sidebarCollapsed?"22px 8px":"22px 14px",boxSizing:"border-box",transition:"width 0.18s ease"}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:sidebarCollapsed?"center":"space-between",marginBottom:18,minHeight:24,gap:8}}>
