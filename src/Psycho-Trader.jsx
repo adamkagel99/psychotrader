@@ -1609,6 +1609,30 @@ function resolveGoalTargets(goals,sp){
   if(!_half)return {daily:r.daily,weekly:r.weekly,monthly:r.monthly,anchor:r.anchor,halfSize:false};
   return {daily:r.daily/2,weekly:r.weekly/2,monthly:r.monthly,anchor:r.anchor,halfSize:true};
 }
+// CHANGED: Persistent "goal achieved" ledger. Once a day/week/month's P&L reaches its target, the
+// achievement is CEMENTED — so changing the goal later never erases a milestone you already hit.
+// Keys: daily = "M/D/YYYY", weekly = week-start "M/D/YYYY", monthly = "YYYY-M". monthlyDate records
+// the exact day the monthly goal was crossed so the dated 🏁 stays put too.
+var GOAL_LEDGER_KEY="tf-goals-achieved";
+function loadGoalLedger(){try{return JSON.parse(localStorage.getItem(GOAL_LEDGER_KEY)||"{}")||{};}catch(e){return {};}}
+function saveGoalLedger(l){try{localStorage.setItem(GOAL_LEDGER_KEY,JSON.stringify(l));}catch(e){}}
+function isGoalAchieved(type,key){try{var l=loadGoalLedger();return !!(l[type]&&l[type][key]);}catch(e){return false;}}
+function markGoalAchieved(type,key,metDate){
+  try{
+    var l=loadGoalLedger();var changed=false;
+    if(!l[type])l[type]={};
+    if(!l[type][key]){l[type][key]=true;changed=true;}
+    if(type==="monthly"&&metDate){if(!l.monthlyDate)l.monthlyDate={};if(!l.monthlyDate[key]){l.monthlyDate[key]=metDate;changed=true;}}
+    if(changed)saveGoalLedger(l);
+  }catch(e){}
+}
+function monthlyMetDate(key){try{var l=loadGoalLedger();return (l.monthlyDate&&l.monthlyDate[key])||null;}catch(e){return null;}}
+// True if this period's goal was EVER reached (cemented), or is reached now (which also cements it).
+function goalMet(type,key,pnl,target,metDate){
+  if(isGoalAchieved(type,key))return true;
+  if(target>0&&pnl>=target){markGoalAchieved(type,key,metDate);return true;}
+  return false;
+}
 // Daily target derived from session sizing + gain hard stops. Falls back to 0 if unset.
 function getDailyTarget(){
   try{var s=localStorage.getItem(SETTINGS_KEY);if(!s)return 0;return computeDailyTarget(JSON.parse(s));}catch(e){return 0;}
@@ -2564,8 +2588,8 @@ function MonthYearPicker(props){
         {MONTH_NAMES.map(function(m,i){
           var sel=draftYear===year&&i===month;
           var bg=sel?"#4f46e5":tintFor(monthPnLs[i]);
-          var goalMet=monthlyGoalTarget>0&&monthPnLs[i]>=monthlyGoalTarget;
-          return <button key={m} onClick={function(){onChange(draftYear,i);}} style={{padding:"8px 0",background:bg,border:"none",borderRadius:5,color:sel?"#fff":"#e2e8f0",fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:sel?700:500,display:"inline-flex",alignItems:"center",justifyContent:"center",gap:4}}>{m.slice(0,3)}{goalMet&&<span style={{fontSize:11}} title="Monthly target met">🏁</span>}</button>;
+          var mHit=goalMet("monthly",draftYear+"-"+i,monthPnLs[i],monthlyGoalTarget);
+          return <button key={m} onClick={function(){onChange(draftYear,i);}} style={{padding:"8px 0",background:bg,border:"none",borderRadius:5,color:sel?"#fff":"#e2e8f0",fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:sel?700:500,display:"inline-flex",alignItems:"center",justifyContent:"center",gap:4}}>{m.slice(0,3)}{mHit&&<span style={{fontSize:11}} title="Monthly target met">🏁</span>}</button>;
         })}
       </div>
     </div>
@@ -2655,11 +2679,11 @@ function CalendarGrid(props){
   }
   var weekPnLs=weeks.map(function(wk){return wk.reduce(function(s,cell){if(!cell||cell.otherMonth)return s;var dd=sessionMap[cell.ds];return s+(dd?(parseFloat(dd.pnl)||0):0);},0);});
   var monthPnLTotal=weekPnLs.reduce(function(s,w){return s+w;},0);
-  var monthGoalHit=monthlyTarget>0&&monthPnLTotal>=monthlyTarget;
-  // CHANGED: Find the DAY the cumulative displayed-month P&L first reached the monthly goal, so a
-  // 🏁 can be placed on that exact date cell (not just the header).
-  var monthGoalMetDs=null;
-  if(monthlyTarget>0){
+  // CHANGED: Cement the monthly-goal-met flag — once reached it never disappears if the goal changes.
+  var _monthKeyCG=calYear+"-"+calMonth;
+  // Find the DAY the cumulative month P&L first crosses the goal (only to STAMP it the first time).
+  var monthGoalMetDs=monthlyMetDate(_monthKeyCG);
+  if(!monthGoalMetDs&&monthlyTarget>0){
     var _cum=0;
     for(var _gd=1;_gd<=daysInMonth;_gd++){
       var _gds=(calMonth+1)+"/"+_gd+"/"+calYear;
@@ -2668,6 +2692,9 @@ function CalendarGrid(props){
       if(_cum>=monthlyTarget){monthGoalMetDs=_gds;break;}
     }
   }
+  var monthGoalHit=goalMet("monthly",_monthKeyCG,monthPnLTotal,monthlyTarget,monthGoalMetDs);
+  // If cemented but the crossing day wasn't stored (older ledger), fall back to the computed one.
+  if(monthGoalHit&&!monthGoalMetDs)monthGoalMetDs=monthlyMetDate(_monthKeyCG);
   return (
     <div>
       {/* CHANGED: Hide the month-nav row while the picker is open so it's the sole focus. */}
@@ -2708,7 +2735,9 @@ function CalendarGrid(props){
           if(isSelected){bd="#818cf8";}
           var dailyTargetR=(fullDailyTarget>0&&fullRiskMax>0)?(fullDailyTarget/fullRiskMax):0;
           var dayRTotal=dayData?(dayData.rTotal||0):0;
-          var dayGoalHit=dailyTargetR>0&&dayData&&dayData.tradeCount>0&&dayRTotal>=dailyTargetR;
+          // CHANGED: Daily-target-met is CEMENTED per day (goalMet ledger) so it persists if the
+          // daily goal is changed later. Only days that actually traded qualify.
+          var dayGoalHit=!otherMonth&&!!dayData&&dayData.tradeCount>0&&goalMet("daily",ds,parseFloat(dayData.pnl)||0,fullDailyTarget);
           // CHANGED: Other-month cells dimmed but clickable — jumps to that month via onSelect.
           var otherMonthStyle=otherMonth?{opacity:0.35}:{};
           return (
@@ -2807,10 +2836,10 @@ function DashboardCalendar(props){
   var _calGoals=(function(){try{return JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};}catch(e){return {};}})();
   var _calSettings=(function(){try{return JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};}catch(e){return {};}})();
   var monthlyGoalTarget=resolveGoalTargets(_calGoals,_calSettings).monthly||0;
-  var monthGoalHitCal=monthlyGoalTarget>0&&monthPnL>=monthlyGoalTarget;
-  // CHANGED: Day the cumulative month P&L first reached the goal, so the week strip can 🏁 it too.
-  var monthGoalMetDsCal=null;
-  if(monthlyGoalTarget>0){
+  // CHANGED: Cemented monthly-goal-met flag (persists if the goal is later changed).
+  var _monthKeyDC=calYear+"-"+calMonth;
+  var monthGoalMetDsCal=monthlyMetDate(_monthKeyDC);
+  if(!monthGoalMetDsCal&&monthlyGoalTarget>0){
     var _cc=0;var _dim=new Date(calYear,calMonth+1,0).getDate();
     for(var _cd=1;_cd<=_dim;_cd++){
       var _cds=(calMonth+1)+"/"+_cd+"/"+calYear;
@@ -2819,6 +2848,8 @@ function DashboardCalendar(props){
       if(_cc>=monthlyGoalTarget){monthGoalMetDsCal=_cds;break;}
     }
   }
+  var monthGoalHitCal=goalMet("monthly",_monthKeyDC,monthPnL,monthlyGoalTarget,monthGoalMetDsCal);
+  if(monthGoalHitCal&&!monthGoalMetDsCal)monthGoalMetDsCal=monthlyMetDate(_monthKeyDC);
   // CHANGED: One readout used in both collapsed (week) and expanded (month) states. In "trades"
   // mode shows a count; in "pnl" mode shows R when Hide-$ is on or $ otherwise.
   var headerScope=open?{pnl:monthPnL,r:monthR,trades:monthTradeCount,hasRisk:monthHasRisk,hasAny:monthTradeCount>0}:{pnl:weekPnL,r:weekR,trades:weekTradeCount,hasRisk:weekRiskMax>0,hasAny:weekDays.some(function(d){return d.tradeCount>0;})};
@@ -4808,9 +4839,9 @@ function GoalsSnapshot(props){
   if(!hidden.monthlyWithdrawals&&monthlyWithdrawalTarget>0)account.push({key:"monthlyWithdrawals",label:"Monthly Withdrawal",value:monthlyWithdrawn,target:monthlyWithdrawalTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:pnlVal,formatTarget:pnlTgt,compact:true});
   if(!hidden.winRate&&winRateTarget>0)perf.push({key:"winRate",label:"Win Rate",value:oWR,target:winRateTarget,suffix:"%",decimals:0,targetDecimals:0,wrColor:true,compact:true});
   if(!hidden.discipline&&disciplineTarget>0)perf.push({key:"discipline",label:"Discipline",value:aDisc,target:disciplineTarget,suffix:"%",decimals:0,targetDecimals:0,discColor:true,compact:true});
-  if(!hidden.daily&&dailyTarget>0)pnl.push({key:"daily",label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:dailyPnlVal,formatTarget:pnlTgt,compact:true});
-  if(!hidden.weekly&&weeklyTarget>0)pnl.push({key:"weekly",label:"Week P&L",value:weekPnL,target:weeklyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:weeklyPnlVal,formatTarget:pnlTgt,compact:true});
-  if(!hidden.monthly&&monthlyTarget>0)pnl.push({key:"monthly",label:"Month P&L",value:monthPnL,target:monthlyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:monthlyPnlVal,formatTarget:pnlTgt,compact:true});
+  if(!hidden.daily&&dailyTarget>0)pnl.push({key:"daily",label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:dailyPnlVal,formatTarget:pnlTgt,compact:true,goalAchieved:goalMet("daily",todayKey,dailyPnL,dailyTarget)});
+  if(!hidden.weekly&&weeklyTarget>0)pnl.push({key:"weekly",label:"Week P&L",value:weekPnL,target:weeklyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:weeklyPnlVal,formatTarget:pnlTgt,compact:true,goalAchieved:goalMet("weekly",getWeekStartStr(),weekPnL,weeklyTarget)});
+  if(!hidden.monthly&&monthlyTarget>0)pnl.push({key:"monthly",label:"Month P&L",value:monthPnL,target:monthlyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,formatValue:monthlyPnlVal,formatTarget:pnlTgt,compact:true,goalAchieved:goalMet("monthly",(getNow().getFullYear()+"-"+getNow().getMonth()),monthPnL,monthlyTarget)});
   // CHANGED: Inject custom goals into the appropriate default section so they show on Home alongside built-ins.
   var customList=Array.isArray(goals.custom)?goals.custom:[];
   function homeCustomVal(g){
@@ -6602,7 +6633,9 @@ function GoalRing(props){
   // ratio, which otherwise diverge (e.g. ring 105% vs +28.7R of +31.3R = 92%).
   var pctRaw=isPercent?Math.max(gp.value,0):(gp.pctOverride!=null?Math.max(gp.pctOverride,0):(tgt>0?Math.max(gp.value/tgt*100,0):0));
   var pct=Math.min(pctRaw,100);
-  var over=gp.pctOverride!=null?(gp.pctOverride>=100):(tgt>0&&gp.value>=tgt);
+  // CHANGED: goalAchieved cements completion — a card stays "met" (green ring) once the goal was
+  // ever reached, even if the target is later raised.
+  var over=!!gp.goalAchieved||(gp.pctOverride!=null?(gp.pctOverride>=100):(tgt>0&&gp.value>=tgt));
   var dec=gp.decimals!=null?gp.decimals:2;
   var tdec=gp.targetDecimals!=null?gp.targetDecimals:dec;
   var prefix=gp.prefix||"";
@@ -7191,9 +7224,9 @@ function GoalsTab(props){
               <div style={{marginBottom:20}}>
                 <SectionHead icon="💰" title="P&L"/>
                 <div style={gridStyle}>
-                  {dailyTarget>0&&renderStandardCard("daily",Object.assign({label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true},dailyPnlFmt))}
-                  {weeklyTarget>0&&renderStandardCard("weekly",Object.assign({label:"Week P&L",value:weekPnL,target:weeklyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true},weeklyPnlFmt))}
-                  {monthlyTarget>0&&renderStandardCard("monthly",Object.assign({label:"Month P&L",value:monthPnL,target:monthlyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true},monthlyPnlFmt))}
+                  {dailyTarget>0&&renderStandardCard("daily",Object.assign({label:"Today's P&L",value:dailyPnL,target:dailyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,goalAchieved:goalMet("daily",today,dailyPnL,dailyTarget)},dailyPnlFmt))}
+                  {weeklyTarget>0&&renderStandardCard("weekly",Object.assign({label:"Week P&L",value:weekPnL,target:weeklyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,goalAchieved:goalMet("weekly",getWeekStartStr(),weekPnL,weeklyTarget)},weeklyPnlFmt))}
+                  {monthlyTarget>0&&renderStandardCard("monthly",Object.assign({label:"Month P&L",value:monthPnL,target:monthlyTarget,prefix:"$",decimals:0,targetDecimals:0,markComplete:true,goalAchieved:goalMet("monthly",(getNow().getFullYear()+"-"+getNow().getMonth()),monthPnL,monthlyTarget)},monthlyPnlFmt))}
                   {customByBucket.pnl.map(renderInlineCustom)}
                 </div>
               </div>
