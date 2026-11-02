@@ -2784,6 +2784,9 @@ function DashboardCalendar(props){
   // collapse the user's chosen view.
   var [open,setOpen]=useState(function(){try{var v=localStorage.getItem("tf-dash-cal-open");return v===null?(props.defaultOpen||false):v==="1";}catch(e){return props.defaultOpen||false;}});
   useEffect(function(){try{localStorage.setItem("tf-dash-cal-open",open?"1":"0");}catch(e){}},[open]);
+  // CHANGED: Month/year grid picker toggle — clicking the month label opens the Jan–Dec grid
+  // (same MonthYearPicker used in the Journal tab) to jump months and see per-month 🏁 flags.
+  var [showMonthPicker,setShowMonthPicker]=useState(false);
   // CHANGED: Summary readout mode — "pnl" (default, follows Hide-$ toggle for $/R) or "trades"
   // (count of trades). Clicking the readout toggles between these. Persisted per-device. The
   // mode also controls what each day cell shows in the strip / grid.
@@ -2859,6 +2862,10 @@ function DashboardCalendar(props){
   }
   var monthGoalHitCal=goalMet("monthly",_monthKeyDC,monthPnL,_mgDC,monthGoalMetDsCal);
   if(monthGoalHitCal&&!monthGoalMetDsCal)monthGoalMetDsCal=monthlyMetDate(_monthKeyDC);
+  // CHANGED: Header 🏁 shows whenever EITHER the goal is hit OR a dated crossing was found, so the
+  // month header and the dated cell marker are never out of sync (the dated marker could appear
+  // via the crossing loop while the header flag stayed false).
+  var monthGoalShow=monthGoalHitCal||!!monthGoalMetDsCal;
   // CHANGED: One readout used in both collapsed (week) and expanded (month) states. In "trades"
   // mode shows a count; in "pnl" mode shows R when Hide-$ is on or $ otherwise.
   var headerScope=open?{pnl:monthPnL,r:monthR,trades:monthTradeCount,hasRisk:monthHasRisk,hasAny:monthTradeCount>0}:{pnl:weekPnL,r:weekR,trades:weekTradeCount,hasRisk:weekRiskMax>0,hasAny:weekDays.some(function(d){return d.tradeCount>0;})};
@@ -2881,7 +2888,7 @@ function DashboardCalendar(props){
       <button onClick={function(){setOpen(function(o){return !o;});}} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",padding:"12px 18px 8px",textAlign:"left",flexWrap:"wrap",gap:6}}>
         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
           <span style={{fontSize:13,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{open?"Calendar":"This Week"}</span>
-          {monthGoalHitCal&&<span style={{fontSize:12}} title={"Monthly P&L goal met"}>🏁</span>}
+          {monthGoalShow&&<span style={{fontSize:12}} title={"Monthly P&L goal met"}>🏁</span>}
           {readoutText&&<span onClick={function(e){e.stopPropagation();setSummaryMode(summaryMode==="trades"?"pnl":"trades");}} title={summaryMode==="trades"?"Tap to show P&L":"Tap to show trade count"} style={{fontSize:12,fontWeight:700,color:readoutColor,fontVariantNumeric:"tabular-nums",padding:"2px 7px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:6,cursor:"pointer"}}>{readoutText}</span>}
         </div>
         {open&&(function(){
@@ -2889,13 +2896,20 @@ function DashboardCalendar(props){
           return (
             <span onClick={function(e){e.stopPropagation();}} style={{display:"flex",alignItems:"center",gap:6,marginLeft:6}}>
               <button onClick={function(){move(-1);}} style={{background:"none",border:"1px solid #334155",borderRadius:5,color:"#94a3b8",fontSize:12,cursor:"pointer",fontFamily:"inherit",padding:"2px 8px"}}>‹</button>
-              <span style={{fontSize:13,fontWeight:700,color:"#e2e8f0",minWidth:100,textAlign:"center",display:"inline-flex",alignItems:"center",justifyContent:"center",gap:5}}>{MONTH_NAMES[calMonth]} {calYear}{monthGoalHitCal&&<span style={{fontSize:12}} title={"Monthly P&L goal met"}>🏁</span>}</span>
+              <button onClick={function(e){e.stopPropagation();setShowMonthPicker(function(s){return !s;});}} title="Jump to month" style={{background:"none",border:"none",fontSize:13,fontWeight:700,color:"#e2e8f0",minWidth:100,textAlign:"center",display:"inline-flex",alignItems:"center",justifyContent:"center",gap:5,cursor:"pointer",fontFamily:"inherit",padding:0}}>{MONTH_NAMES[calMonth]} {calYear}{monthGoalShow&&<span style={{fontSize:12}} title={"Monthly P&L goal met"}>🏁</span>}</button>
               <button onClick={function(){move(1);}} style={{background:"none",border:"1px solid #334155",borderRadius:5,color:"#94a3b8",fontSize:12,cursor:"pointer",fontFamily:"inherit",padding:"2px 8px"}}>›</button>
             </span>
           );
         })()}
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{display:"inline-block",verticalAlign:"middle",transition:"transform 0.2s",transform:open?"rotate(180deg)":"rotate(0deg)"}}><path d="M2 4l4 4 4-4" stroke="#64748b" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
       </button>
+      {/* CHANGED: Jan–Dec month grid (reuses the Journal tab's picker). Each month shows its 🏁 when
+          its goal was met; selecting one jumps the calendar and closes the grid. */}
+      {open&&showMonthPicker&&(
+        <div style={{padding:"0 14px"}}>
+          <MonthYearPicker year={calYear} month={calMonth} onChange={function(y,m){setCalYear(y);setCalMonth(m);setShowMonthPicker(false);}}/>
+        </div>
+      )}
       {/* CHANGED: Week strip hidden when full calendar is expanded (it's redundant). */}
       {!open&&(
         <div style={{padding:"0 14px 14px"}}>
