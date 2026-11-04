@@ -998,6 +998,21 @@ function hideFromMode(m){
 function modeFromHide(s){s=s||{};return s.hideAmounts?"wl":s.hideDollarPnL?"pct":"usd";}
 function loadViewMode(){try{var v=localStorage.getItem(VIEW_MODE_KEY);if(v==="usd"||v==="pct"||v==="wl")return v;}catch(e){}return null;}
 function saveViewMode(m){try{localStorage.setItem(VIEW_MODE_KEY,m);}catch(e){}}
+// CHANGED: Initialize the hide flags SYNCHRONOUSLY at module load — before React renders anything —
+// so the very first paint after a reload (which is what a resync triggers) is already hidden. The
+// flags are plain module vars that default to false and were previously only flipped true by an
+// effect that runs AFTER the first paint, so hidden $ values flashed for a frame on every resync.
+// Reads the per-device view mode (falling back to the migrated tf-settings value) the same way the
+// settings initializer does, so they agree on the first render.
+(function(){
+  try{
+    var vm=loadViewMode();
+    if(!vm){var s=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};vm=modeFromHide(s);}
+    var h=hideFromMode(vm);
+    HIDE_AMOUNTS=!!h.hideAmounts;
+    HIDE_DOLLAR_PNL=!!h.hideDollarPnL||!!h.hideAmounts;
+  }catch(e){}
+})();
 function fmtMoney(n){if(HIDE_AMOUNTS)return AMT_MASK;if(HIDE_DOLLAR_PNL)return "$•••";var v=Math.abs(parseFloat(n)||0);return "$"+v.toFixed(2);}
 function fmtSignedMoney(n){var v=parseFloat(n)||0;if(HIDE_AMOUNTS)return wlSign(v);if(HIDE_DOLLAR_PNL)return (v>=0?"+":"−")+"$•••";return (v>=0?"+":"−")+"$"+Math.abs(v).toFixed(2);}
 function $fmt(n,opts){opts=opts||{};if(HIDE_AMOUNTS)return opts.signed?wlSign(n):AMT_MASK;if(HIDE_DOLLAR_PNL)return (opts.signed&&n>=0?"+":opts.signed&&n<0?"−":"")+"$•••";var v=parseFloat(n)||0;var sign=opts.signed?(v>=0?"+":"−"):"";return sign+"$"+Math.abs(v).toFixed(opts.decimals!=null?opts.decimals:2);}
@@ -2271,6 +2286,24 @@ function getSessionRStops(session){
     lossR:session.lossStopR!=null?parseFloat(session.lossStopR):-1,
     gainR:session.gainStopR!=null?parseFloat(session.gainStopR):2.5
   };
+}
+// CHANGED: Effective daily gain stop (R) — the user chose to let the PnL GOAL drive the gain stop.
+// When an explicit daily/weekly/monthly PnL goal is set (anchor !== "auto"), "take the win" fires
+// exactly when the day reaches the pacing DAILY $ goal, not at the session's raw gainStopR. The $
+// goal is converted to R using the SAME day-start risk unit dayR() uses, so the banner and the hard
+// gate (both comparing dayR) trigger precisely at the goal, and it stays correct under half-size
+// (goal $ and risk unit are both halved, so the R ratio is unchanged). In auto mode (no explicit
+// goal) the session's own gainStopR is kept — there the daily goal already equals it.
+function effectiveDailyGainR(trades,settings,fallbackGainR){
+  try{
+    var goals=JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};
+    var tg=resolveGoalTargets(goals,settings);
+    if(tg&&tg.anchor&&tg.anchor!=="auto"&&tg.daily>0){
+      var unit=dayRiskUnit(trades,parseFloat(settings.riskMax)||0);
+      if(unit>0)return tg.daily/unit;
+    }
+  }catch(e){}
+  return fallbackGainR;
 }
 function computeAccountBalance(liveTotalPnL){
   try{
@@ -5646,6 +5679,8 @@ function TradesTab(props){
         // so the banner matches the Today strip. Previous "totalPnL / (riskMax × session SF)" gave
         // mixed-sizeFraction days the wrong scale.
         var dayRVal=dayR(state.trades,riskMaxBase);
+        // CHANGED: Gain stop aligned to the daily PnL goal when one is set (see effectiveDailyGainR).
+        var effGainR=effectiveDailyGainR((state.trades||[]).filter(function(t){return t&&t.status!=="open";}),settings,rStops.gainR);
         // Loss approaching
         if(dayRVal<0&&dayRVal<=rStops.lossR*0.8&&dayRVal>rStops.lossR){
           var pct=Math.round(dayRVal/rStops.lossR*100);
@@ -5657,12 +5692,12 @@ function TradesTab(props){
           );
         }
         // Gain approaching
-        if(dayRVal>0&&dayRVal>=rStops.gainR*0.8&&dayRVal<rStops.gainR){
-          var gpct=Math.round(dayRVal/rStops.gainR*100);
+        if(dayRVal>0&&dayRVal>=effGainR*0.8&&dayRVal<effGainR){
+          var gpct=Math.round(dayRVal/effGainR*100);
           return (
             <div style={{marginBottom:10,padding:"6px 10px",background:"#0a1f1066",border:"1px solid #15803d",borderRadius:6,display:"flex",alignItems:"center",gap:8}}>
               <span style={{fontSize:14}}>✓</span>
-              <span style={{fontSize:11,color:"#86efac",fontWeight:600}}>Approaching gain stop · +{dayRVal.toFixed(2)}R / +{rStops.gainR.toFixed(1)}R ({gpct}%)</span>
+              <span style={{fontSize:11,color:"#86efac",fontWeight:600}}>Approaching gain stop · +{dayRVal.toFixed(2)}R / +{effGainR.toFixed(1)}R ({gpct}%)</span>
             </div>
           );
         }
@@ -5675,11 +5710,11 @@ function TradesTab(props){
             </div>
           );
         }
-        if(dayRVal>=rStops.gainR){
+        if(dayRVal>=effGainR){
           return (
             <div style={{marginBottom:10,padding:"8px 12px",background:"#0a1f10",border:"1px solid #22c55e",borderRadius:8}}>
               <div style={{fontSize:11,color:"#86efac",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Gain Stop Hit · Take the Win</div>
-              <div style={{fontSize:12,color:"#bbf7d0",marginTop:2}}>Day at +{dayRVal.toFixed(2)}R · target +{rStops.gainR.toFixed(1)}R. Done for the day.</div>
+              <div style={{fontSize:12,color:"#bbf7d0",marginTop:2}}>Day at +{dayRVal.toFixed(2)}R · target +{effGainR.toFixed(1)}R. Done for the day.</div>
             </div>
           );
         }
@@ -10197,6 +10232,8 @@ function SettingsTab(props){
                   <input disabled={disabled} type="number" step="0.1" value={s.gainStopR!=null?s.gainStopR:2.5} onChange={function(e){var v=parseFloat(e.target.value);updateSession(idx,{gainStopR:isNaN(v)?null:v});}} style={Object.assign({},fld,{padding:"5px 8px",fontSize:12,colorScheme:"dark",color:"#22c55e",fontWeight:600},dFld)}/>
                 </div>
               </div>
+              {/* CHANGED: Gain stop follows the daily PnL goal when one is set (goal-driven alignment). */}
+              <div style={{fontSize:10,color:"#64748b",marginTop:-4,marginBottom:8}}>When a daily/weekly/monthly PnL goal is set, "take the win" fires at that daily goal — this R is the fallback used only in auto mode.</div>
               {/* CHANGED: Per-session default asset class. When set, overrides global default when this session is active. */}
               <div style={{marginBottom:8}}>
                 <label style={lbl}>Default Asset Class</label>
@@ -11284,8 +11321,10 @@ function App(props){
       if(riskMaxNum>0){
         var rStops=getSessionRStops(rule);
         var dayRv=dayR((state.trades||[]).filter(function(t){return t&&t.status!=="open";}),parseFloat(settings.riskMax)||0);
+        // CHANGED: Gain stop aligned to the daily PnL goal when one is set (see effectiveDailyGainR).
+        var effGainR=effectiveDailyGainR((state.trades||[]).filter(function(t){return t&&t.status!=="open";}),settings,rStops.gainR);
         if(dayRv<=rStops.lossR)return {ok:false,reason:"Daily loss stop hit ("+rStops.lossR.toFixed(1)+"R)"+(liveLockForSF.locked?" — half-size":"")};
-        if(dayRv>=rStops.gainR)return {ok:false,reason:"Daily gain stop hit (+"+rStops.gainR.toFixed(1)+"R)"+(liveLockForSF.locked?" — half-size":"")};
+        if(dayRv>=effGainR)return {ok:false,reason:"Daily gain stop hit (+"+effGainR.toFixed(1)+"R)"+(liveLockForSF.locked?" — half-size":"")};
       }
     }
     return {ok:true};
