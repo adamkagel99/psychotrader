@@ -10204,6 +10204,15 @@ function SettingsTab(props){
           var days=s.days||[1,2,3,4,5];
           var disabled=false;
           var dFld={};
+          // CHANGED: When a PnL goal is set, the gain stop is goal-driven (see effectiveDailyGainR),
+          // so the per-session Gain Stop (R) field is inert. Grey it out and show the derived R
+          // instead so the screen never displays a number that isn't the real trigger. Uses RAW
+          // (nominal-size) targets for a stable readout independent of the half-size month toggle.
+          var _goalG=(function(){try{return JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};}catch(e){return {};}})();
+          var _tgRaw=resolveGoalTargetsRaw(_goalG,settings);
+          var _goalDriven=!!(_tgRaw&&_tgRaw.anchor&&_tgRaw.anchor!=="auto"&&_tgRaw.daily>0);
+          var _gainUnit=(parseFloat(settings.riskMax)||0)*(s.sizeFraction!=null?parseFloat(s.sizeFraction):1);
+          var _derivedGainR=(_goalDriven&&_gainUnit>0)?(_tgRaw.daily/_gainUnit):null;
           return (
             <div key={s.id} style={{padding:"10px 12px",marginBottom:8,background:"#0a0a0f",border:"1px solid "+(s.enabled?"#1e293b":"#7f1d1d33"),borderRadius:8,opacity:disabled?0.85:1}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,gap:8}}>
@@ -10228,12 +10237,19 @@ function SettingsTab(props){
                   <input disabled={disabled} type="number" step="0.1" value={s.lossStopR!=null?s.lossStopR:-1} onChange={function(e){var v=parseFloat(e.target.value);updateSession(idx,{lossStopR:isNaN(v)?null:v});}} style={Object.assign({},fld,{padding:"5px 8px",fontSize:12,colorScheme:"dark",color:"#ef4444",fontWeight:600},dFld)}/>
                 </div>
                 <div>
-                  <label style={lbl}>Gain Stop (R)</label>
-                  <input disabled={disabled} type="number" step="0.1" value={s.gainStopR!=null?s.gainStopR:2.5} onChange={function(e){var v=parseFloat(e.target.value);updateSession(idx,{gainStopR:isNaN(v)?null:v});}} style={Object.assign({},fld,{padding:"5px 8px",fontSize:12,colorScheme:"dark",color:"#22c55e",fontWeight:600},dFld)}/>
+                  <label style={lbl}>Gain Stop (R){_goalDriven&&<span style={{color:"#64748b",fontWeight:500}}> · from goal</span>}</label>
+                  {_goalDriven?(
+                    <div title="Goal-driven: take-the-win fires at your daily PnL goal. Clear your PnL goals to edit this manually." style={Object.assign({},fld,{padding:"5px 8px",fontSize:12,fontWeight:600,color:"#64748b",display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"not-allowed",opacity:0.75})}>
+                      <span style={{color:"#22c55e"}}>{_derivedGainR!=null?"+"+_derivedGainR.toFixed(1)+"R":"—"}</span>
+                      <span style={{fontSize:9,letterSpacing:0.5,textTransform:"uppercase",color:"#475569"}}>daily goal</span>
+                    </div>
+                  ):(
+                    <input disabled={disabled} type="number" step="0.1" value={s.gainStopR!=null?s.gainStopR:2.5} onChange={function(e){var v=parseFloat(e.target.value);updateSession(idx,{gainStopR:isNaN(v)?null:v});}} style={Object.assign({},fld,{padding:"5px 8px",fontSize:12,colorScheme:"dark",color:"#22c55e",fontWeight:600},dFld)}/>
+                  )}
                 </div>
               </div>
               {/* CHANGED: Gain stop follows the daily PnL goal when one is set (goal-driven alignment). */}
-              <div style={{fontSize:10,color:"#64748b",marginTop:-4,marginBottom:8}}>When a daily/weekly/monthly PnL goal is set, "take the win" fires at that daily goal — this R is the fallback used only in auto mode.</div>
+              <div style={{fontSize:10,color:"#64748b",marginTop:-4,marginBottom:8}}>{_goalDriven?"Gain stop is driven by your daily PnL goal — \"take the win\" fires there. Clear your PnL goals to set a manual R.":"No PnL goal set — \"take the win\" fires at this R. Set a daily/weekly/monthly PnL goal to drive it from the goal instead."}</div>
               {/* CHANGED: Per-session default asset class. When set, overrides global default when this session is active. */}
               <div style={{marginBottom:8}}>
                 <label style={lbl}>Default Asset Class</label>
