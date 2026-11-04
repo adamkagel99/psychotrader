@@ -101,6 +101,9 @@ const SKIP_KEYS = new Set([
   "tf-dash-cal-open",
   "tf-notebook-open",
   "tf-events-expanded",
+  // CHANGED: Display/hide mode ($ / % / W-L) is a per-device view preference. Syncing it let a
+  // resync pull an older value and unhide amounts the user had hidden on this device. Local-only.
+  "tf-view-mode",
 ]);
 
 function isJournalKey(k) {

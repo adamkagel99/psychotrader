@@ -984,6 +984,20 @@ function wlSign(v){var n=parseFloat(v)||0;return n>0?"+":n<0?"−":"—";}
 function setHideDollarPnL(v){HIDE_DOLLAR_PNL=!!v;}
 // True when the $-hidden branch should run (either plain hide-$ or full outcome-only mode).
 function hideCurrency(){return HIDE_DOLLAR_PNL||HIDE_AMOUNTS;}
+// CHANGED: The display/hide mode ($ → % / R → W/L) is a PER-DEVICE view preference, kept in its own
+// local-only key (tf-view-mode, excluded from cloud sync). It used to live inside the synced
+// tf-settings blob, so a resync — or the full page reload a resync triggers — could pull an older
+// "showing $" copy and unhide amounts the user had deliberately hidden. Storing it per-device fixes
+// that: a sync never resurrects a stale view mode. "usd" = show $, "pct" = % / R, "wl" = win/loss only.
+var VIEW_MODE_KEY="tf-view-mode";
+function hideFromMode(m){
+  if(m==="pct")return {hideDollarPnL:true,hideAmounts:false};
+  if(m==="wl")return {hideDollarPnL:false,hideAmounts:true};
+  return {hideDollarPnL:false,hideAmounts:false};
+}
+function modeFromHide(s){s=s||{};return s.hideAmounts?"wl":s.hideDollarPnL?"pct":"usd";}
+function loadViewMode(){try{var v=localStorage.getItem(VIEW_MODE_KEY);if(v==="usd"||v==="pct"||v==="wl")return v;}catch(e){}return null;}
+function saveViewMode(m){try{localStorage.setItem(VIEW_MODE_KEY,m);}catch(e){}}
 function fmtMoney(n){if(HIDE_AMOUNTS)return AMT_MASK;if(HIDE_DOLLAR_PNL)return "$•••";var v=Math.abs(parseFloat(n)||0);return "$"+v.toFixed(2);}
 function fmtSignedMoney(n){var v=parseFloat(n)||0;if(HIDE_AMOUNTS)return wlSign(v);if(HIDE_DOLLAR_PNL)return (v>=0?"+":"−")+"$•••";return (v>=0?"+":"−")+"$"+Math.abs(v).toFixed(2);}
 function $fmt(n,opts){opts=opts||{};if(HIDE_AMOUNTS)return opts.signed?wlSign(n):AMT_MASK;if(HIDE_DOLLAR_PNL)return (opts.signed&&n>=0?"+":opts.signed&&n<0?"−":"")+"$•••";var v=parseFloat(n)||0;var sign=opts.signed?(v>=0?"+":"−"):"";return sign+"$"+Math.abs(v).toFixed(opts.decimals!=null?opts.decimals:2);}
@@ -10490,8 +10504,18 @@ function App(props){
     return defaultState();
   });
   var [settings,setSettings]=useState(function(){
-    try{var s=localStorage.getItem(SETTINGS_KEY);if(s){var p=JSON.parse(s);return Object.assign({},defaultSettings(),p);}}catch(e){}
-    return defaultSettings();
+    var merged=defaultSettings();
+    try{var s=localStorage.getItem(SETTINGS_KEY);if(s){var p=JSON.parse(s);merged=Object.assign({},defaultSettings(),p);}}catch(e){}
+    // CHANGED: Display/hide mode is per-device and local-only. Seed it from tf-view-mode so a cloud
+    // resync (which can carry an older tf-settings with the mode off) never unhides amounts on this
+    // device. First run with no tf-view-mode yet: migrate the current synced value into it, then it's
+    // authoritative from then on.
+    try{
+      var vm=loadViewMode();
+      if(vm){var h=hideFromMode(vm);merged.hideDollarPnL=h.hideDollarPnL;merged.hideAmounts=h.hideAmounts;}
+      else{saveViewMode(modeFromHide(merged));}
+    }catch(e){}
+    return merged;
   });
   var [tradeOptions,setTradeOptions]=useState(loadOptions());
   // CHANGED: Persist in-progress new-trade form so a sync-triggered remount doesn't lose what the user typed.
@@ -11342,7 +11366,7 @@ function App(props){
           var glyph=mode==="wl"?"W/L":mode==="pct"?"%":"$";
           var label=mode==="wl"?"W/L only":mode==="pct"?"% / R":"Show $";
           var title=mode==="usd"?"Showing $. Tap for % / R.":mode==="pct"?"Showing % / R. Tap for win/loss only.":"Showing win/loss only. Tap to show $.";
-          function cycle(){setSettings(function(s){var m=s.hideAmounts?"wl":s.hideDollarPnL?"pct":"usd";if(m==="usd")return Object.assign({},s,{hideDollarPnL:true,hideAmounts:false});if(m==="pct")return Object.assign({},s,{hideDollarPnL:false,hideAmounts:true});return Object.assign({},s,{hideDollarPnL:false,hideAmounts:false});});}
+          function cycle(){var cur=modeFromHide(settings);var next=cur==="usd"?"pct":cur==="pct"?"wl":"usd";saveViewMode(next);var h=hideFromMode(next);setSettings(function(s){return Object.assign({},s,h);});}
           return <button onClick={cycle} aria-label="Cycle display: dollars, percent, win/loss" title={title} style={{marginTop:"auto",textAlign:"left",padding:sidebarCollapsed?"11px 0":"11px 12px",background:active?"#1e1b4b":"none",border:"1px solid "+(active?"#4338ca":"#1e293b"),borderRadius:8,color:active?"#a5b4fc":"#94a3b8",fontSize:14,fontWeight:active?700:500,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:sidebarCollapsed?"center":"flex-start",gap:10}}>
             {sidebarCollapsed?<span style={{width:20,textAlign:"center",flexShrink:0,fontSize:glyph==="W/L"?11:14}}>{glyph}</span>:label}
           </button>;
@@ -11362,7 +11386,7 @@ function App(props){
                     var mode=settings.hideAmounts?"wl":settings.hideDollarPnL?"pct":"usd";
                     var active=mode!=="usd";
                     var glyph=mode==="wl"?"W/L":mode==="pct"?"%":"$";
-                    function cycle(){setSettings(function(s){var m=s.hideAmounts?"wl":s.hideDollarPnL?"pct":"usd";if(m==="usd")return Object.assign({},s,{hideDollarPnL:true,hideAmounts:false});if(m==="pct")return Object.assign({},s,{hideDollarPnL:false,hideAmounts:true});return Object.assign({},s,{hideDollarPnL:false,hideAmounts:false});});}
+                    function cycle(){var cur=modeFromHide(settings);var next=cur==="usd"?"pct":cur==="pct"?"wl":"usd";saveViewMode(next);var h=hideFromMode(next);setSettings(function(s){return Object.assign({},s,h);});}
                     return <button onClick={cycle} aria-label="Cycle display: dollars, percent, win/loss" style={{height:24,padding:"0 7px",flexShrink:0,background:active?"#1e1b4b":"#0a0a0f",border:"1px solid "+(active?"#4338ca":"#334155"),borderRadius:6,color:active?"#a5b4fc":"#94a3b8",fontSize:glyph==="W/L"?10:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>{glyph}</button>;
                   })()}
                 </div>
