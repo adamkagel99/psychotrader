@@ -9717,7 +9717,8 @@ function OptionsEditor(props){
               onDragEnd={onDragEnd}
               style={{display:"flex",alignItems:"center",gap:4,padding:"3px 8px",background:isDragOver?"#1e1b4b":"#1e293b",border:"1px solid "+(isDragOver?"#4338ca":"#334155"),borderRadius:4,opacity:isDragging?0.4:1,cursor:"grab",transition:"background 0.1s,border-color 0.1s"}}>
               <span style={{fontSize:10,color:"#64748b",cursor:"grab",marginRight:1}}>⠿</span>
-              {sentiments&&onSentimentChange&&<select value={sent||"neutral"} onChange={function(e){var ns=Object.assign({},sentiments);ns[v]=e.target.value;onSentimentChange(ns);}} style={{background:"transparent",border:"none",color:sc,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:600,padding:0}}><option value="positive" style={{background:"#1e293b"}}>+</option><option value="neutral" style={{background:"#1e293b"}}>=</option><option value="negative" style={{background:"#1e293b"}}>-</option></select>}
+              {/* CHANGED: Native select → shared Dropdown, so every menu in the app matches. */}
+              {sentiments&&onSentimentChange&&<Dropdown variant="pill" value={sent||"neutral"} onChange={function(nv){var ns=Object.assign({},sentiments);ns[v]=nv;onSentimentChange(ns);}} options={[{v:"positive",l:"+"},{v:"neutral",l:"="},{v:"negative",l:"−"}]} style={{padding:"1px 8px",fontSize:11,fontWeight:700}}/>}
               <span style={{fontSize:13,color:"#e2e8f0"}}>{v}</span>
               <button onClick={function(){onChange(values.filter(function(x){return x!==v;}));if(sentiments&&onSentimentChange){var ns=Object.assign({},sentiments);delete ns[v];onSentimentChange(ns);}}} style={{background:"none",border:"none",color:"#64748b",fontSize:13,cursor:"pointer",padding:"0 0 0 2px",lineHeight:1,fontFamily:"inherit"}}>×</button>
             </div>
@@ -10112,11 +10113,8 @@ function SettingsTab(props){
                   return (
                     <div style={{display:"flex",alignItems:"center",gap:8,marginTop:10,flexWrap:"wrap"}}>
                       <label style={{fontSize:11,color:"#94a3b8",fontWeight:600,whiteSpace:"nowrap"}}>Trigger on</label>
-                      <select value={period} onChange={function(e){setAllowanceTriggerPeriod(e.target.value);if(props.bumpReloadKey)props.bumpReloadKey();}} style={Object.assign({},fld,{width:150,padding:"6px 9px",fontSize:13,colorScheme:"dark"})}>
-                        <option value="daily">Daily goal</option>
-                        <option value="weekly">Weekly goal</option>
-                        <option value="monthly">Monthly goal</option>
-                      </select>
+                      {/* CHANGED: Native select → shared pill Dropdown, matching the app's other menus. */}
+                      <Dropdown variant="pill" value={period} onChange={function(v){setAllowanceTriggerPeriod(v);if(props.bumpReloadKey)props.bumpReloadKey();}} options={[{v:"daily",l:"Daily goal"},{v:"weekly",l:"Weekly goal"},{v:"monthly",l:"Monthly goal"}]} style={{padding:"5px 12px",fontSize:12}}/>
                       <span style={{fontSize:12,color:"#64748b"}}>reached</span>
                       <div style={{fontSize:10,color:"#475569",marginTop:2,lineHeight:1.5,flexBasis:"100%"}}>Suggests {getWithdrawalAllowancePctRaw()}% of that {noun}'s profit, once per {noun} — dismissing it returns the next {noun}, not the next day. Never fires if no {period} goal is set.</div>
                     </div>
