@@ -1031,7 +1031,7 @@ function computeScaleOutSuggestions(tiers,avgEntry,totalContracts,direction){
 // gain. NOTE: exits record where the user actually SOLD, not the true max favorable excursion, so
 // this reads "where winners commonly got to", never "how far they could have run".
 function computeExitGainStats(){
-  var gains=[],greenTrades=0,totalTrades=0,firstExitShares=[],subsequentShares=[];
+  var gains=[],greenTrades=0,totalTrades=0,firstExitShares=[],subsequentShares=[],tradeRealized=[];
   try{
     loadJournalRows().forEach(function(row){
       var trades=(row&&row.trades)?row.trades:[];
@@ -1046,11 +1046,15 @@ function computeExitGainStats(){
         if(!(avg>0))return;
         totalTrades++;
         var sign=(t.direction==="SHORT"||t.direction==="SELL")?-1:1;
-        var legs=[];
+        var legs=[],wq=0,wsum=0;
         exits.forEach(function(ex){
           var p=parseFloat(ex.price);
           if(isNaN(p))return;
-          legs.push(sign*((p-avg)/avg)*100);
+          var g=sign*((p-avg)/avg)*100;
+          legs.push(g);
+          // Contract-weighted so the trade's REALIZED gain reflects how much came off at each exit.
+          var q=parseFloat(ex.contracts);
+          if(!isNaN(q)&&q>0){wq+=q;wsum+=g*q;}
         });
         if(!legs.length)return;
         // "Went green" = the trade reached any positive gain on at least one exit.
@@ -1059,6 +1063,11 @@ function computeExitGainStats(){
         if(!went)return;
         greenTrades++;
         legs.forEach(function(g){if(g>0)gains.push(g);});
+        // CHANGED: Per-TRADE realized gain — one data point per winner, contract-weighted across its
+        // exits. The per-leg pool above over-weights trades scaled out of many times (a 5-partial
+        // trade contributes 5 points, a single exit contributes 1), so this is the honest answer to
+        // "what does a winner actually return?" and is used as a reality check on the plan.
+        if(wq>0)tradeRealized.push(wsum/wq);
         // Suggested TIER-1 SIZE: the share of the position taken off on the FIRST exit. Only trades
         // with 2+ exits count — a single full exit is 100% by definition and would skew this high.
         if(exits.length>=2){
@@ -1092,7 +1101,10 @@ function computeExitGainStats(){
           gains:gains,
           scaledTrades:firstExitShares.length,
           medFirstShare:medianOf(firstExitShares),
-          medSubsequentShare:medianOf(subsequentShares)};
+          medSubsequentShare:medianOf(subsequentShares),
+          realizedCount:tradeRealized.length,
+          avgTradeRealized:tradeRealized.length?(tradeRealized.reduce(function(a,b){return a+b;},0)/tradeRealized.length):null,
+          medTradeRealized:medianOf(tradeRealized)};
 }
 // G such that `share` of the sorted gains reached >= G — the (1-share) quantile, interpolated.
 function attainmentAtShare(sortedGains,share){
@@ -10683,6 +10695,26 @@ function SettingsTab(props){
                           <div style={{fontSize:15,fontWeight:700,color:(nx.maxContracts>0?nx.runnerContracts:nx.trailPct)>0?"#fbbf24":"#475569",fontVariantNumeric:"tabular-nums"}}>{nx.maxContracts>0?(nx.runnerContracts+" ct"):(nx.trailPct+"%")}</div>
                         </div>
                       </div>
+                      {/* CHANGED: Reality check — the plan's weighted average vs what winners have
+                          actually realized (one contract-weighted data point per winning trade).
+                          A plan averaging well above history mostly won't fill at its deep tiers. */}
+                      {stx.avgTradeRealized!=null&&(function(){
+                        var plan=nx.avgGain,hist=stx.avgTradeRealized;
+                        var over=plan!=null&&hist>0&&plan>hist*1.15;
+                        return (
+                          <div style={{marginBottom:7,padding:"6px 8px",borderRadius:6,background:over?"#1c150933":"#0f172a44",border:"1px solid "+(over?"#78716c":"#1e293b")}}>
+                            <div style={{fontSize:10,color:"#94a3b8",lineHeight:1.5}}>
+                              <span style={{fontWeight:700,color:over?"#fbbf24":"#64748b"}}>{over?"⚠ Reality check":"Reality check"}</span>
+                              {" — your winners actually realize "}
+                              <span style={{color:"#cbd5e1",fontWeight:700}}>+{fmtG(hist)}%</span>
+                              {" on average (median +"+fmtG(stx.medTradeRealized)+"%, "+stx.realizedCount+" winning trades, contract-weighted). "}
+                              {plan!=null?(over
+                                ?("This plan averages +"+fmtG(plan)+"%, about "+Math.round((plan/hist-1)*100)+"% above that — the deeper tiers will often go unfilled.")
+                                :("This plan averages +"+fmtG(plan)+"%, in line with that.")):""}
+                            </div>
+                          </div>
+                        );
+                      })()}
                       <div style={{fontSize:10,color:"#475569",lineHeight:1.5}}>
                         {nx.trailPct>0
                           ?("Plan exits "+nx.plannedPct+"% at fixed targets, averaging "+(nx.avgGain!=null?("+"+fmtG(nx.avgGain)+"%"):"—")+" weighted by the share taken at each tier. The last "+nx.trailPct+"% rides a trailing stop until it triggers — its exit isn't fixed, so it's excluded from the average.")
@@ -10741,6 +10773,7 @@ function SettingsTab(props){
                         :("Based on "+stx.count+" profitable exit"+(stx.count===1?"":"s")+" across "+stx.greenTrades+" green trade"+(stx.greenTrades===1?"":"s")+". ")}
                       Each exit leg counts separately. Exits record where you actually sold — not how far the trade could have run — so treat this as "where winners commonly got to." Exit size is the median {nx.nextIndex===0?"first":"follow-up"}-exit share{nx.sizeFromHistory?"":" (no history yet — using half of what's left)"}, capped at the {nx.remaining}% still unallocated.
                       {nx.maxContracts>0?(" Contracts mode: sized in whole contracts of the "+nx.maxContracts+" currently allowed, keeping "+(nx.runnerContracts>0?(nx.runnerContracts+" ct"):"none")+" free to run on the trail."):""}
+                      {stx.avgTradeRealized!=null?(" For scale: your winners realize +"+fmtG(stx.avgTradeRealized)+"% on average (contract-weighted, "+stx.realizedCount+" trades) — tiers far above that will rarely fill."):""}
                     </div>
                   </div>
                 );
