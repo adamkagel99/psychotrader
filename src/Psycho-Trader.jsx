@@ -10626,7 +10626,7 @@ function SettingsTab(props){
       {/* CHANGED: Scale-Out Plan — user-defined % gain exits surfaced as ghost suggestions in the
           New Trade form's exit slots. See computeScaleOutSuggestions. */}
       <SettingsSection title="Scale-Out Plan (% gain exits)">
-        <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>At each % gain from your entry, exit a % of the position. These show as greyed suggestions in the New Trade form's exit slots (slot 1 = tier 1, slot 2 = tier 2…) once you've entered an entry price and size — tap to accept. Suggested exit price moves in the trade's profit direction; contracts are whole numbers with the last tier taking the remainder so they sum to the full position.</div>
+        <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>At each % gain from your entry, exit part of the position. These show as greyed suggestions in the New Trade form's exit slots (slot 1 = tier 1, slot 2 = tier 2…) once you've entered an entry price and size — tap to accept. Suggested exit price moves in the trade's profit direction. Whatever the tiers don't take is the runner, held on a trailing stop until it triggers.</div>
         {(function(){
           var tiers=Array.isArray(settings.scaleOutTiers)?settings.scaleOutTiers:[];
           function persist(next){setSettings(function(s){return Object.assign({},s,{scaleOutTiers:next});});}
@@ -10634,13 +10634,22 @@ function SettingsTab(props){
           function addTier(){persist(tiers.concat([{gainPct:"",removePct:""}]));}
           function removeTier(i){persist(tiers.filter(function(_,xi){return xi!==i;}));}
           var sumRemove=tiers.reduce(function(a,t){return a+(parseFloat(t.removePct)||0);},0);
+          // CHANGED: In contracts mode the size column is edited as a CONTRACT COUNT, not a percent —
+          // "4 of 6" beats typing 66.7. removePct stays the single stored field so percentage mode
+          // and changing position sizes keep working; contracts are just the editing surface,
+          // converted on the way in and derived on the way out.
+          var maxCtEdit=allowedContracts(settings);
+          var ctStep=maxCtEdit>0?(100/maxCtEdit):0;
+          function pctToCt(p){var v=parseFloat(p);return (maxCtEdit>0&&!isNaN(v))?Math.round(v/ctStep):null;}
+          function ctToPct(c){var v=parseFloat(c);if(isNaN(v))return "";if(v<0)v=0;if(v>maxCtEdit)v=maxCtEdit;return String(Math.round(v*ctStep*10)/10);}
+          var sumCt=maxCtEdit>0?tiers.reduce(function(a,t){var c=pctToCt(t.removePct);return a+(c||0);},0):0;
           return (
             <div>
               {tiers.length>0&&(
                 <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr auto",gap:6,marginBottom:6,alignItems:"center"}}>
                   <span style={{fontSize:10,color:"#64748b",fontWeight:700,textAlign:"center"}}>#</span>
                   <span style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Gain %</span>
-                  <span style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Exit % of position</span>
+                  <span style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{maxCtEdit>0?("Exit contracts (of "+maxCtEdit+")"):"Exit % of position"}</span>
                   <span/>
                 </div>
               )}
@@ -10649,14 +10658,24 @@ function SettingsTab(props){
                   <div key={i} style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr auto",gap:6,marginBottom:6,alignItems:"center"}}>
                     <span style={{fontSize:12,color:"#64748b",fontWeight:700,textAlign:"center"}}>{i+1}</span>
                     <input type="number" step="1" min="0" value={t.gainPct!=null?t.gainPct:""} placeholder="50" onChange={function(e){updateTier(i,{gainPct:e.target.value});}} style={Object.assign({},fld,{padding:"5px 8px",fontSize:12,colorScheme:"dark",color:"#22c55e",fontWeight:600})}/>
-                    <input type="number" step="1" min="0" max="100" value={t.removePct!=null?t.removePct:""} placeholder="50" onChange={function(e){updateTier(i,{removePct:e.target.value});}} style={Object.assign({},fld,{padding:"5px 8px",fontSize:12,colorScheme:"dark",color:"#e2e8f0",fontWeight:600})}/>
+                    {maxCtEdit>0?(
+                      <div style={{position:"relative",display:"flex",alignItems:"center"}}>
+                        <input type="number" step="1" min="0" max={maxCtEdit} value={(function(){var c=pctToCt(t.removePct);return c==null?"":String(c);})()} placeholder={String(Math.max(1,Math.round(maxCtEdit/2)))} onChange={function(e){updateTier(i,{removePct:ctToPct(e.target.value)});}} style={Object.assign({},fld,{padding:"5px 8px",paddingRight:52,fontSize:12,colorScheme:"dark",color:"#e2e8f0",fontWeight:600,width:"100%"})}/>
+                        <span style={{position:"absolute",right:9,fontSize:10,color:"#475569",pointerEvents:"none",fontVariantNumeric:"tabular-nums"}}>{t.removePct?(Math.round(parseFloat(t.removePct)*10)/10+"%"):""}</span>
+                      </div>
+                    ):(
+                      <input type="number" step="1" min="0" max="100" value={t.removePct!=null?t.removePct:""} placeholder="50" onChange={function(e){updateTier(i,{removePct:e.target.value});}} style={Object.assign({},fld,{padding:"5px 8px",fontSize:12,colorScheme:"dark",color:"#e2e8f0",fontWeight:600})}/>
+                    )}
                     <button onClick={function(){removeTier(i);}} aria-label="Delete tier" style={{padding:"4px 9px",background:"#7f1d1d33",border:"1px solid #7f1d1d",borderRadius:4,color:"#fca5a5",fontSize:13,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>
                   </div>
                 );
               })}
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:8,gap:10,flexWrap:"wrap"}}>
                 <button onClick={addTier} style={{padding:"5px 10px",background:"#4f46e5",border:"none",borderRadius:4,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ Add tier</button>
-                {tiers.length>0&&<span style={{fontSize:11,fontWeight:600,color:sumRemove>100?"#f87171":"#64748b"}}>Exits total: {sumRemove}%{sumRemove>100?" · exceeds 100% (earlier tiers capped)":sumRemove<100?(" · last "+(100-sumRemove)+"% rides a trailing stop"):" · no runner left to trail"}</span>}
+                {tiers.length>0&&(maxCtEdit>0
+                  ?<span style={{fontSize:11,fontWeight:600,color:sumCt>maxCtEdit?"#f87171":"#64748b"}}>Exits total: {sumCt} of {maxCtEdit} ct{sumCt>maxCtEdit?" · more than you hold (earlier tiers capped)":sumCt<maxCtEdit?(" · last "+(maxCtEdit-sumCt)+" ct rides a trailing stop"):" · no runner left to trail"}</span>
+                  :<span style={{fontSize:11,fontWeight:600,color:sumRemove>100?"#f87171":"#64748b"}}>Exits total: {sumRemove}%{sumRemove>100?" · exceeds 100% (earlier tiers capped)":sumRemove<100?(" · last "+(100-sumRemove)+"% rides a trailing stop"):" · no runner left to trail"}</span>
+                )}
               </div>
               {/* CHANGED: Suggested tier-1 % from the user's own exit history (attainment curve). */}
               {(function(){
