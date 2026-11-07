@@ -949,17 +949,66 @@ function loadScaleOutTiers(settings){
           .map(function(x){return {gainPct:parseFloat(x.gainPct),removePct:parseFloat(x.removePct)};});
 }
 // Returns one suggestion per tier: {gainPct, removePct, price|null, contracts|null}.
+// CHANGED: Once the plan has scaled out of at least this much of the position, the rest is treated
+// as the RUNNER and held on a trailing stop until triggered, rather than being exited at another
+// fixed % tier. This is the default behaviour: no more tiers are suggested past this point.
+var SCALE_OUT_TRAIL_AT_PCT=80;
+// Total share of the position the configured tiers exit at fixed targets (ignores the runner).
+function scaleOutPlannedPct(tiers){
+  return (tiers||[]).reduce(function(a,t){var r=parseFloat(t&&t.removePct);return a+(r>0?r:0);},0);
+}
+// CHANGED: In contracts sizing mode the position is a whole number of contracts, so a tier's % only
+// means something if it maps to at least one contract — a 25% tier on a 3-contract position is
+// 0.75 and rounds away to nothing. This reports the contracts currently allowed (scaling-tier cap,
+// halved when half-size is committed for the month) so tier suggestions can be quantized to it.
+// Returns 0 when not in contracts mode, which leaves the percentage-based path untouched.
+function allowedContracts(settings){
+  try{
+    if((settings&&settings.sizingMode)!=="contracts")return 0;
+    var n=parseFloat(settings.positionMax)||0;
+    if(!(n>0))n=parseFloat(settings.positionMaxContracts)||0;
+    if(!(n>0))return 0;
+    if(isMonthHalfsizeActive())n=Math.floor(n/2);
+    n=Math.round(n);
+    return n>0?n:0;
+  }catch(e){return 0;}
+}
+// The most contracts the fixed tiers may take, leaving a runner to trail. Honours the 80% rule but
+// always reserves at least one contract for the runner once there are 2+ to work with — on a small
+// position those two goals conflict, and keeping a runner is the one that matters.
+function maxTierContracts(n){
+  if(!(n>0))return 0;
+  if(n<2)return n;
+  return Math.min(n-1,Math.round((SCALE_OUT_TRAIL_AT_PCT/100)*n));
+}
+// Share-weighted average % gain across the fixed tiers — "what the plan averages when it fills".
+// The runner is deliberately excluded: its exit is wherever the trailing stop triggers, which is
+// unknown in advance, so folding it in would invent a number.
+function scaleOutAvgGainPct(tiers){
+  var wsum=0,w=0;
+  (tiers||[]).forEach(function(t){
+    var g=parseFloat(t&&t.gainPct),r=parseFloat(t&&t.removePct);
+    if(!(g>0)||!(r>0))return;
+    wsum+=g*r;w+=r;
+  });
+  return w>0?(wsum/w):null;
+}
 function computeScaleOutSuggestions(tiers,avgEntry,totalContracts,direction){
   tiers=tiers||[];
   var sign=(direction==="SHORT"||direction==="SELL")?-1:1;
   var haveEntry=!isNaN(avgEntry)&&avgEntry>0;
   var tc=parseFloat(totalContracts)||0;
-  // Whole-contract allocation, last tier takes the remainder (always sums to full position).
+  // CHANGED: Each tier now takes ITS OWN configured share; the leftover is the RUNNER, held on a
+  // trailing stop (see SCALE_OUT_TRAIL_AT_PCT). Previously the last tier absorbed the remainder so
+  // the plan always summed to 100% — which left nothing to trail. The last tier still absorbs
+  // rounding crumbs when the plan is configured to exit the whole position (sum >= 100%).
   var alloc=[];
+  var plannedPct=scaleOutPlannedPct(tiers);
+  var fullExit=plannedPct>=100;
   if(tc>0&&tiers.length>0){
     var used=0;
     for(var i=0;i<tiers.length;i++){
-      if(i===tiers.length-1){alloc.push(Math.max(0,tc-used));}
+      if(fullExit&&i===tiers.length-1){alloc.push(Math.max(0,tc-used));}
       else{var c=Math.round(tc*(tiers[i].removePct/100));if(c>tc-used)c=tc-used;if(c<0)c=0;alloc.push(c);used+=c;}
     }
   }
@@ -1064,7 +1113,7 @@ function medianOf(arr){
 // THOSE got to — so each suggestion is strictly above the previous tier and reflects how often
 // trades actually keep running. Size comes from the median non-first exit share, clamped to the
 // position still unallocated. Returns null-ish states the UI explains rather than guessing.
-function suggestNextTier(stats,tiers){
+function suggestNextTier(stats,tiers,maxContracts){
   var valid=(tiers||[]).map(function(t){return {g:parseFloat(t&&t.gainPct),r:parseFloat(t&&t.removePct)};})
                        .filter(function(t){return t.g>0;});
   var prevGain=0;
@@ -1073,7 +1122,22 @@ function suggestNextTier(stats,tiers){
   valid.forEach(function(t){if(t.r>0)used+=t.r;});
   var remaining=Math.max(0,100-used);
   var nextIndex=valid.length; // 0-based index of the tier we're suggesting
-  if(remaining<=0)return {state:"complete",nextIndex:nextIndex};
+  // CHANGED: Contracts mode — work in whole contracts so every tier maps to at least one, and the
+  // ladder stops while a contract is still free to run on the trail.
+  var N=parseFloat(maxContracts)||0;
+  var step=N>0?(100/N):0;
+  var usedC=N>0?Math.round(used/step):0;
+  var maxTierC=N>0?maxTierContracts(N):0;
+  // CHANGED: The plan is COMPLETE once it scales out of SCALE_OUT_TRAIL_AT_PCT or more — or, in
+  // contracts mode, once the tiers hold every contract that isn't reserved for the runner.
+  // Whatever is left rides a trailing stop until triggered, so no further tier is suggested.
+  var doneByPct=used>=SCALE_OUT_TRAIL_AT_PCT;
+  var doneByContracts=N>0&&usedC>=maxTierC;
+  if(doneByPct||doneByContracts){
+    return {state:"complete",nextIndex:nextIndex,plannedPct:Math.min(100,used),
+            trailPct:remaining,avgGain:scaleOutAvgGainPct(tiers),
+            maxContracts:N,plannedContracts:usedC,runnerContracts:N>0?Math.max(0,N-usedC):0};
+  }
   var pool=(stats.gains||[]).filter(function(g){return g>prevGain;});
   if(pool.length<5)return {state:"thin",nextIndex:nextIndex,prevGain:prevGain,poolCount:pool.length,remaining:remaining};
   var g=attainmentAtShare(pool,0.6);
@@ -1086,9 +1150,25 @@ function suggestNextTier(stats,tiers){
     :(stats.medSubsequentShare!=null?stats.medSubsequentShare:remaining/2);
   var size=Math.round(base/5)*5;
   if(size<5)size=5;
-  if(size>remaining)size=remaining;
+  // CHANGED: Cap the suggestion so the ladder lands ON the trail threshold rather than overshooting
+  // it — that leaves the intended runner (100 - SCALE_OUT_TRAIL_AT_PCT at minimum) to trail out.
+  var cap=Math.min(remaining,Math.max(0,SCALE_OUT_TRAIL_AT_PCT-used));
+  if(cap>0&&size>cap)size=cap;
+  else if(size>remaining)size=remaining;
+  // CHANGED: In contracts mode, snap the size to a whole number of contracts (never below one) and
+  // cap it at the contracts still free after reserving the runner. Without this, suggestions like
+  // 25% of a 3-contract position round to 0 contracts and the tier does nothing.
+  var sizeContracts=null;
+  if(N>0){
+    sizeContracts=Math.max(1,Math.round(size/step));
+    var availC=Math.max(1,maxTierC-usedC);
+    if(sizeContracts>availC)sizeContracts=availC;
+    size=Math.round(sizeContracts*step*10)/10;
+  }
   return {state:"ok",nextIndex:nextIndex,prevGain:prevGain,poolCount:pool.length,remaining:remaining,
-          gain:gRounded,size:size,pool:pool,sizeFromHistory:(nextIndex===0?stats.medFirstShare!=null:stats.medSubsequentShare!=null)};
+          gain:gRounded,size:size,pool:pool,sizeFromHistory:(nextIndex===0?stats.medFirstShare!=null:stats.medSubsequentShare!=null),
+          maxContracts:N,sizeContracts:sizeContracts,
+          runnerContracts:N>0?Math.max(0,N-usedC-(sizeContracts||0)):0};
 }
 // Grade metadata — order + colors. C exists for legacy trades but is off by default.
 var ALL_GRADES=["A","B","C"];
@@ -3807,7 +3887,17 @@ function TradeForm(props){
   var remaining=totalEntryC>0?totalEntryC-totalExitC:null;
   // CHANGED: Scale-out suggestions — ghost placeholders in the exit slots (slot i ↔ tier i). Needs an
   // entry price for a suggested exit price, and total contracts for suggested quantities.
-  var scaleOutSuggestions=computeScaleOutSuggestions(loadScaleOutTiers(settings),avgEntry,totalEntryC,trade.direction);
+  var _scaleTiers=loadScaleOutTiers(settings);
+  var scaleOutSuggestions=computeScaleOutSuggestions(_scaleTiers,avgEntry,totalEntryC,trade.direction);
+  // CHANGED: The RUNNER — whatever the fixed tiers don't take. Held on a trailing stop until it
+  // triggers, so it gets no suggested price, only a contract count.
+  var _plannedPct=scaleOutPlannedPct(_scaleTiers);
+  var runnerPct=Math.max(0,100-_plannedPct);
+  var runnerContracts=(function(){
+    if(!(totalEntryC>0)||_scaleTiers.length===0)return 0;
+    var taken=scaleOutSuggestions.reduce(function(a,s){return a+(s.contracts||0);},0);
+    return Math.max(0,totalEntryC-taken);
+  })();
   var dollarPnl=parseFloat(trade.pnl)||0,pctPnlVal=parseFloat(trade.pctPnl)||0;
   var showPnL=trade.pnl!==""&&exits.some(function(ex){return ex.contracts&&ex.price;});
   // CHANGED: Use the session-/lock-scaled cap from props (matches the banner shown above) so the
@@ -4153,10 +4243,12 @@ function TradeForm(props){
               var tiers=loadScaleOutTiers(settings);
               if(tiers.length===0)return null;
               var txt=scaleOutSuggestions.map(function(s){return "+"+s.gainPct+"%"+(s.contracts!=null?"→"+s.contracts:" ("+s.removePct+"%)");}).join(" · ");
+              // CHANGED: Surface the runner — the share no tier takes, held on a trailing stop.
+              var trailTxt=runnerPct>0?("  ·  runner "+(runnerContracts>0?runnerContracts:(runnerPct+"%"))+" → trail"):"";
               return (
                 <div style={{fontSize:10,color:"#64748b",marginBottom:fldHeader,lineHeight:1.5}}>
                   <span style={{color:"#475569",textTransform:"uppercase",letterSpacing:0.5,fontWeight:700,marginRight:6}}>Scale-out plan</span>
-                  {txt}{exits.length<tiers.length?"  ·  add exit slots to fill":""}
+                  {txt}<span style={{color:"#fbbf24"}}>{trailTxt}</span>{exits.length<tiers.length?"  ·  add exit slots to fill":""}
                 </div>
               );
             })()}
@@ -4169,6 +4261,12 @@ function TradeForm(props){
               var sugPricePh=(sug&&sug.price!=null)?sug.price.toFixed(2):undefined;
               var sugQtyPh=(sug&&sug.contracts!=null)?String(sug.contracts):undefined;
               var showSug=!!(sug&&(sug.price!=null||sug.contracts!=null)&&!ex.price&&!ex.contracts);
+              // CHANGED: The slot right after the last tier is the RUNNER. It exits on a trailing
+              // stop, so it gets a quantity but deliberately NO suggested price.
+              var isRunnerSlot=!sug&&runnerContracts>0&&i===scaleOutSuggestions.length;
+              if(isRunnerSlot)sugQtyPh=String(runnerContracts);
+              var showRunner=isRunnerSlot&&!ex.price&&!ex.contracts;
+              function applyRunner(){st(function(prev){var ne=prev.exits.map(function(x,xi){return xi===i?Object.assign({},x,{contracts:String(runnerContracts)}):x;});return Object.assign({},prev,doRecalc(prev.entries||[],ne,prev.assetClass,prev.instrument,prev.direction));});}
               function applySug(){st(function(prev){var ne=prev.exits.map(function(x,xi){return xi===i?Object.assign({},x,{price:sug.price!=null?sug.price.toFixed(2):x.price,contracts:sug.contracts!=null?String(sug.contracts):x.contracts}):x;});return Object.assign({},prev,doRecalc(prev.entries||[],ne,prev.assetClass,prev.instrument,prev.direction));});}
               return (
                 <div key={ex.id} style={{marginBottom:rowGap+2}}>
@@ -4184,6 +4282,14 @@ function TradeForm(props){
                       {sug.price!=null&&<span>{"$"+sug.price.toFixed(2)}</span>}
                       {sug.contracts!=null&&<span style={{color:"#64748b"}}>× {sug.contracts}</span>}
                       <span style={{color:"#475569",textTransform:"uppercase",letterSpacing:0.5,fontSize:9}}>tap to use</span>
+                    </button>
+                  )}
+                  {showRunner&&(
+                    <button onClick={applyRunner} title="Runner — trail this out, no fixed target" style={{marginTop:4,padding:"3px 9px",background:"#1c1509",border:"1px dashed #78716c",borderRadius:5,color:"#fbbf24",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:6}}>
+                      <span>Runner</span>
+                      <span style={{color:"#a8a29e"}}>× {runnerContracts}</span>
+                      <span style={{color:"#78716c"}}>trail until triggered</span>
+                      <span style={{color:"#57534e",textTransform:"uppercase",letterSpacing:0.5,fontSize:9}}>tap to use</span>
                     </button>
                   )}
                   {/* CHANGED: Per-leg time row — read-only display + Edit toggle. */}
@@ -10538,7 +10644,7 @@ function SettingsTab(props){
               })}
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:8,gap:10,flexWrap:"wrap"}}>
                 <button onClick={addTier} style={{padding:"5px 10px",background:"#4f46e5",border:"none",borderRadius:4,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ Add tier</button>
-                {tiers.length>0&&<span style={{fontSize:11,fontWeight:600,color:sumRemove>100?"#f87171":"#64748b"}}>Exits total: {sumRemove}%{sumRemove>100?" · exceeds 100% (earlier tiers capped)":sumRemove<100?" · last tier absorbs the rest":""}</span>}
+                {tiers.length>0&&<span style={{fontSize:11,fontWeight:600,color:sumRemove>100?"#f87171":"#64748b"}}>Exits total: {sumRemove}%{sumRemove>100?" · exceeds 100% (earlier tiers capped)":sumRemove<100?(" · last "+(100-sumRemove)+"% rides a trailing stop"):" · no runner left to trail"}</span>}
               </div>
               {/* CHANGED: Suggested tier-1 % from the user's own exit history (attainment curve). */}
               {(function(){
@@ -10554,7 +10660,8 @@ function SettingsTab(props){
                 // CHANGED: Suggest the NEXT tier, not just tier 1. Re-evaluates every render, so as
                 // soon as tier N is set (by the button OR typed by hand) this rolls to tier N+1.
                 function fmtG(v){return v==null?"—":(v<10?v.toFixed(1):String(Math.round(v)));}
-                var nx=suggestNextTier(stx,tiers);
+                var maxC=allowedContracts(settings);
+                var nx=suggestNextTier(stx,tiers,maxC);
                 var tierNo=nx.nextIndex+1;
                 var panelBox={marginTop:12,padding:"9px 11px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8};
                 var hdr={fontSize:11,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700,marginBottom:6};
@@ -10562,7 +10669,26 @@ function SettingsTab(props){
                   return (
                     <div style={panelBox}>
                       <div style={hdr}>Plan complete</div>
-                      <div style={{fontSize:11,color:"#64748b",lineHeight:1.5}}>Your tiers already allocate 100% of the position. Lower an exit % or remove a tier to get another suggestion.</div>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>
+                        <div style={{flex:"1 1 96px",padding:"5px 7px",background:"#0f2a1c",border:"1px solid #166534",borderRadius:6,textAlign:"center"}}>
+                          <div style={{fontSize:9,color:"#64748b",letterSpacing:0.5,textTransform:"uppercase",fontWeight:700}}>Avg gain / plan</div>
+                          <div style={{fontSize:15,fontWeight:700,color:"#4ade80",fontVariantNumeric:"tabular-nums"}}>{nx.avgGain!=null?("+"+fmtG(nx.avgGain)+"%"):"—"}</div>
+                        </div>
+                        <div style={{flex:"1 1 96px",padding:"5px 7px",border:"1px solid #1e293b",borderRadius:6,textAlign:"center"}}>
+                          <div style={{fontSize:9,color:"#64748b",letterSpacing:0.5,textTransform:"uppercase",fontWeight:700}}>Scaled out</div>
+                          <div style={{fontSize:15,fontWeight:700,color:"#cbd5e1",fontVariantNumeric:"tabular-nums"}}>{nx.maxContracts>0?(nx.plannedContracts+" ct"):(nx.plannedPct+"%")}</div>
+                        </div>
+                        <div style={{flex:"1 1 96px",padding:"5px 7px",border:"1px solid "+((nx.maxContracts>0?nx.runnerContracts:nx.trailPct)>0?"#78716c":"#1e293b"),borderRadius:6,textAlign:"center"}}>
+                          <div style={{fontSize:9,color:"#64748b",letterSpacing:0.5,textTransform:"uppercase",fontWeight:700}}>Runner · trail</div>
+                          <div style={{fontSize:15,fontWeight:700,color:(nx.maxContracts>0?nx.runnerContracts:nx.trailPct)>0?"#fbbf24":"#475569",fontVariantNumeric:"tabular-nums"}}>{nx.maxContracts>0?(nx.runnerContracts+" ct"):(nx.trailPct+"%")}</div>
+                        </div>
+                      </div>
+                      <div style={{fontSize:10,color:"#475569",lineHeight:1.5}}>
+                        {nx.trailPct>0
+                          ?("Plan exits "+nx.plannedPct+"% at fixed targets, averaging "+(nx.avgGain!=null?("+"+fmtG(nx.avgGain)+"%"):"—")+" weighted by the share taken at each tier. The last "+nx.trailPct+"% rides a trailing stop until it triggers — its exit isn't fixed, so it's excluded from the average.")
+                          :("Plan exits the full position at fixed targets, averaging "+(nx.avgGain!=null?("+"+fmtG(nx.avgGain)+"%"):"—")+" weighted by the share taken at each tier. No runner is left to trail — drop a tier's exit % to free one up.")}
+                        {" "}Lower an exit % or remove a tier to get another suggestion.
+                      </div>
                     </div>
                   );
                 }
@@ -10606,7 +10732,7 @@ function SettingsTab(props){
                       })}
                     </div>
                     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
-                      <span style={{fontSize:11,color:"#94a3b8"}}>Tier {tierNo}: <span style={{color:"#4ade80",fontWeight:700}}>+{nx.gain}%</span> · exit <span style={{color:"#4ade80",fontWeight:700}}>{nx.size}%</span> of position</span>
+                      <span style={{fontSize:11,color:"#94a3b8"}}>Tier {tierNo}: <span style={{color:"#4ade80",fontWeight:700}}>+{nx.gain}%</span> · exit <span style={{color:"#4ade80",fontWeight:700}}>{nx.size}%</span>{nx.sizeContracts?<span> (<span style={{color:"#4ade80",fontWeight:700}}>{nx.sizeContracts} ct</span> of {nx.maxContracts})</span>:" of position"}</span>
                       <button onClick={applyNextTier} style={{padding:"5px 10px",background:"#166534",border:"none",borderRadius:4,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Use as Tier {tierNo}</button>
                     </div>
                     <div style={{fontSize:10,color:"#475569",marginTop:7,lineHeight:1.5}}>
@@ -10614,6 +10740,7 @@ function SettingsTab(props){
                         ?("Based on the "+nx.poolCount+" exit"+(nx.poolCount===1?"":"s")+" that ran past your tier "+nx.nextIndex+" (+"+fmtG(nx.prevGain)+"%), out of "+stx.count+" profitable exits total. ")
                         :("Based on "+stx.count+" profitable exit"+(stx.count===1?"":"s")+" across "+stx.greenTrades+" green trade"+(stx.greenTrades===1?"":"s")+". ")}
                       Each exit leg counts separately. Exits record where you actually sold — not how far the trade could have run — so treat this as "where winners commonly got to." Exit size is the median {nx.nextIndex===0?"first":"follow-up"}-exit share{nx.sizeFromHistory?"":" (no history yet — using half of what's left)"}, capped at the {nx.remaining}% still unallocated.
+                      {nx.maxContracts>0?(" Contracts mode: sized in whole contracts of the "+nx.maxContracts+" currently allowed, keeping "+(nx.runnerContracts>0?(nx.runnerContracts+" ct"):"none")+" free to run on the trail."):""}
                     </div>
                   </div>
                 );
