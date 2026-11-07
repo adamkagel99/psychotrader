@@ -975,6 +975,55 @@ function computeScaleOutSuggestions(tiers,avgEntry,totalContracts,direction){
     };
   });
 }
+// CHANGED: Scale-out suggestion derived from the user's own history. Builds an ATTAINMENT CURVE over
+// every profitable exit leg of trades that went green: "share S of exits were taken at >= G% gain",
+// where G is the (1-S) quantile of the gain distribution. Sample = each exit leg counted separately
+// (so a trade with several partials weighs more), restricted to trades that reached any positive
+// gain. NOTE: exits record where the user actually SOLD, not the true max favorable excursion, so
+// this reads "where winners commonly got to", never "how far they could have run".
+function computeExitGainStats(){
+  var gains=[],greenTrades=0,totalTrades=0;
+  try{
+    loadJournalRows().forEach(function(row){
+      var trades=(row&&row.trades)?row.trades:[];
+      trades.forEach(function(t){
+        if(!t||t.status==="open")return;
+        var entries=t.entries||[],exits=t.exits||[];
+        if(!entries.length||!exits.length)return;
+        var tc=0,cost=0;
+        entries.forEach(function(en){var c=parseFloat(en.contracts),p=parseFloat(en.price);if(!isNaN(c)&&!isNaN(p)){tc+=c;cost+=c*p;}});
+        if(!(tc>0))return;
+        var avg=cost/tc;
+        if(!(avg>0))return;
+        totalTrades++;
+        var sign=(t.direction==="SHORT"||t.direction==="SELL")?-1:1;
+        var legs=[];
+        exits.forEach(function(ex){
+          var p=parseFloat(ex.price);
+          if(isNaN(p))return;
+          legs.push(sign*((p-avg)/avg)*100);
+        });
+        if(!legs.length)return;
+        // "Went green" = the trade reached any positive gain on at least one exit.
+        var went=false;
+        for(var i=0;i<legs.length;i++){if(legs[i]>0){went=true;break;}}
+        if(!went)return;
+        greenTrades++;
+        legs.forEach(function(g){if(g>0)gains.push(g);});
+      });
+    });
+  }catch(e){}
+  gains.sort(function(a,b){return a-b;});
+  // G such that `share` of exits reached >= G  →  the (1-share) quantile, linearly interpolated.
+  function atShare(share){
+    if(gains.length===0)return null;
+    var idx=(1-share)*(gains.length-1);
+    var lo=Math.floor(idx),hi=Math.ceil(idx);
+    if(lo===hi)return gains[lo];
+    return gains[lo]+(gains[hi]-gains[lo])*(idx-lo);
+  }
+  return {count:gains.length,greenTrades:greenTrades,totalTrades:totalTrades,atShare:atShare};
+}
 // Grade metadata — order + colors. C exists for legacy trades but is off by default.
 var ALL_GRADES=["A","B","C"];
 var GRADE_COLORS={A:"#22c55e",B:"#f59e0b",C:"#ef4444"};
@@ -10425,6 +10474,51 @@ function SettingsTab(props){
                 <button onClick={addTier} style={{padding:"5px 10px",background:"#4f46e5",border:"none",borderRadius:4,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ Add tier</button>
                 {tiers.length>0&&<span style={{fontSize:11,fontWeight:600,color:sumRemove>100?"#f87171":"#64748b"}}>Exits total: {sumRemove}%{sumRemove>100?" · exceeds 100% (earlier tiers capped)":sumRemove<100?" · last tier absorbs the rest":""}</span>}
               </div>
+              {/* CHANGED: Suggested tier-1 % from the user's own exit history (attainment curve). */}
+              {(function(){
+                var stx=computeExitGainStats();
+                if(stx.count<5){
+                  return (
+                    <div style={{marginTop:12,padding:"9px 11px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8,fontSize:11,color:"#64748b",lineHeight:1.5}}>
+                      <span style={{color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Suggested from history</span>
+                      <div style={{marginTop:4}}>Not enough exit history yet — {stx.count} profitable exit{stx.count===1?"":"s"} logged. A suggestion appears once you have at least 5.</div>
+                    </div>
+                  );
+                }
+                var shares=[0.5,0.6,0.7,0.8];
+                function fmtG(v){return v==null?"—":(v<10?v.toFixed(1):String(Math.round(v)));}
+                var suggested=stx.atShare(0.6);
+                var sugRounded=suggested!=null?(suggested>=20?Math.round(suggested/5)*5:Math.round(suggested)):null;
+                function useAsTier1(){
+                  if(sugRounded==null)return;
+                  var next=tiers.slice();
+                  if(next.length===0)next=[{gainPct:String(sugRounded),removePct:"50"}];
+                  else next[0]=Object.assign({},next[0],{gainPct:String(sugRounded)});
+                  persist(next);
+                }
+                return (
+                  <div style={{marginTop:12,padding:"9px 11px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8}}>
+                    <div style={{fontSize:11,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700,marginBottom:6}}>Suggested from history</div>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>
+                      {shares.map(function(sh){
+                        var v=stx.atShare(sh);
+                        var isPick=sh===0.6;
+                        return (
+                          <div key={sh} style={{flex:"1 1 78px",padding:"5px 7px",background:isPick?"#0f2a1c":"transparent",border:"1px solid "+(isPick?"#166534":"#1e293b"),borderRadius:6,textAlign:"center"}}>
+                            <div style={{fontSize:9,color:"#64748b",letterSpacing:0.5,textTransform:"uppercase",fontWeight:700}}>{Math.round(sh*100)}% of exits</div>
+                            <div style={{fontSize:14,fontWeight:700,color:isPick?"#4ade80":"#cbd5e1",fontVariantNumeric:"tabular-nums"}}>≥ +{fmtG(v)}%</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+                      <span style={{fontSize:11,color:"#94a3b8"}}>Tier 1 starting point: <span style={{color:"#4ade80",fontWeight:700}}>+{sugRounded}%</span></span>
+                      <button onClick={useAsTier1} style={{padding:"5px 10px",background:"#166534",border:"none",borderRadius:4,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Use as Tier 1</button>
+                    </div>
+                    <div style={{fontSize:10,color:"#475569",marginTop:7,lineHeight:1.5}}>Based on {stx.count} profitable exit{stx.count===1?"":"s"} across {stx.greenTrades} green trade{stx.greenTrades===1?"":"s"}. Each exit leg counts separately. Exits record where you actually sold — not how far the trade could have run — so treat this as "where winners commonly got to."</div>
+                  </div>
+                );
+              })()}
             </div>
           );
         })()}
