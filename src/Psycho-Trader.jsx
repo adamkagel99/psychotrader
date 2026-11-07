@@ -935,7 +935,46 @@ function getFocusStates(settings){
   });
   return out;
 }
-function defaultSettings(){return {accountSize:0,positionMin:0,positionMax:0,riskMin:0,riskMax:0,gainMultiplier:5,timezone:"America/Los_Angeles",sessions:defaultSessionsForTz("America/Los_Angeles"),tradingWindows:[{start:60,end:1020}],slippagePct:20,positionMaxPct:7.5,positionMaxDollar:500,positionMaxContracts:1,riskPerContract:25,contractCost:60,riskMaxPct:33,riskMaxDollar:165,sizingMode:"pct",hideDollarPnL:false,hideAmounts:false,enabledAssetClasses:defaultEnabledAssetClasses(),assetClassSettings:defaultAssetClassSettings(),defaultAssetClass:"options",defaultInstruments:{},focusStates:defaultFocusStates(),enabledGrades:["A","B"]};}
+function defaultSettings(){return {accountSize:0,positionMin:0,positionMax:0,riskMin:0,riskMax:0,gainMultiplier:5,timezone:"America/Los_Angeles",sessions:defaultSessionsForTz("America/Los_Angeles"),tradingWindows:[{start:60,end:1020}],slippagePct:20,positionMaxPct:7.5,positionMaxDollar:500,positionMaxContracts:1,riskPerContract:25,contractCost:60,riskMaxPct:33,riskMaxDollar:165,sizingMode:"pct",hideDollarPnL:false,hideAmounts:false,enabledAssetClasses:defaultEnabledAssetClasses(),assetClassSettings:defaultAssetClassSettings(),defaultAssetClass:"options",defaultInstruments:{},focusStates:defaultFocusStates(),enabledGrades:["A","B"],scaleOutTiers:[]};}
+// CHANGED: Scale-out plan — user-defined "% gain exits": at +gainPct price gain from entry, exit
+// removePct of the position. Shown as ghost-placeholder suggestions in the New Trade form's exit
+// slots (slot i ↔ tier i). Global (one list for all trades). Suggested exit PRICE moves in the
+// trade's profitable direction (same sign convention as P&L: SHORT/SELL move down, else up, so
+// bought options — CALL and PUT — suggest a premium gain above entry). Contracts use whole numbers
+// with the LAST tier taking the remainder so the suggestions always sum to the full position.
+function loadScaleOutTiers(settings){
+  var t=settings&&settings.scaleOutTiers;
+  if(!Array.isArray(t))return [];
+  return t.filter(function(x){return x&&(parseFloat(x.gainPct)>0)&&(parseFloat(x.removePct)>0);})
+          .map(function(x){return {gainPct:parseFloat(x.gainPct),removePct:parseFloat(x.removePct)};});
+}
+// Returns one suggestion per tier: {gainPct, removePct, price|null, contracts|null}.
+function computeScaleOutSuggestions(tiers,avgEntry,totalContracts,direction){
+  tiers=tiers||[];
+  var sign=(direction==="SHORT"||direction==="SELL")?-1:1;
+  var haveEntry=!isNaN(avgEntry)&&avgEntry>0;
+  var tc=parseFloat(totalContracts)||0;
+  // Whole-contract allocation, last tier takes the remainder (always sums to full position).
+  var alloc=[];
+  if(tc>0&&tiers.length>0){
+    var used=0;
+    for(var i=0;i<tiers.length;i++){
+      if(i===tiers.length-1){alloc.push(Math.max(0,tc-used));}
+      else{var c=Math.round(tc*(tiers[i].removePct/100));if(c>tc-used)c=tc-used;if(c<0)c=0;alloc.push(c);used+=c;}
+    }
+  }
+  return tiers.map(function(t,i){
+    var pr=haveEntry?(avgEntry*(1+sign*(t.gainPct/100))):null;
+    // A short can't gain beyond a 100% price drop — clamp impossible (≤0) prices to no suggestion.
+    if(pr!=null&&pr<=0)pr=null;
+    return {
+      gainPct:t.gainPct,
+      removePct:t.removePct,
+      price:pr,
+      contracts:(tc>0&&alloc[i]!=null)?alloc[i]:null
+    };
+  });
+}
 // Grade metadata — order + colors. C exists for legacy trades but is off by default.
 var ALL_GRADES=["A","B","C"];
 var GRADE_COLORS={A:"#22c55e",B:"#f59e0b",C:"#ef4444"};
@@ -3651,6 +3690,9 @@ function TradeForm(props){
   if(totalEntryC>0)avgEntry=totalCost/totalEntryC;
   var totalExitC=exits.reduce(function(s,ex){return s+(parseFloat(ex.contracts)||0);},0);
   var remaining=totalEntryC>0?totalEntryC-totalExitC:null;
+  // CHANGED: Scale-out suggestions — ghost placeholders in the exit slots (slot i ↔ tier i). Needs an
+  // entry price for a suggested exit price, and total contracts for suggested quantities.
+  var scaleOutSuggestions=computeScaleOutSuggestions(loadScaleOutTiers(settings),avgEntry,totalEntryC,trade.direction);
   var dollarPnl=parseFloat(trade.pnl)||0,pctPnlVal=parseFloat(trade.pctPnl)||0;
   var showPnL=trade.pnl!==""&&exits.some(function(ex){return ex.contracts&&ex.price;});
   // CHANGED: Use the session-/lock-scaled cap from props (matches the banner shown above) so the
@@ -3990,17 +4032,45 @@ function TradeForm(props){
               <label style={Object.assign({},lblCompact,{marginBottom:0,color:"#86efac"})}>Exit Legs</label>
               <button onClick={function(){st(function(prev){var ne=(prev.exits||[]).concat([mkExit()]);return Object.assign({},prev,doRecalc(prev.entries||[],ne,prev.assetClass,prev.instrument,prev.direction));});}} style={{padding:density>=2?"4px 12px":"5px 14px",background:"#166534",border:"none",borderRadius:6,color:"#fff",fontSize:density>=2?12:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Add Exit</button>
             </div>
+            {/* CHANGED: Read-only scale-out plan hint so all tiers are discoverable even before the
+                matching exit slots exist (slot i fills tier i via the ghost suggestion). */}
+            {(function(){
+              var tiers=loadScaleOutTiers(settings);
+              if(tiers.length===0)return null;
+              var txt=scaleOutSuggestions.map(function(s){return "+"+s.gainPct+"%"+(s.contracts!=null?"→"+s.contracts:" ("+s.removePct+"%)");}).join(" · ");
+              return (
+                <div style={{fontSize:10,color:"#64748b",marginBottom:fldHeader,lineHeight:1.5}}>
+                  <span style={{color:"#475569",textTransform:"uppercase",letterSpacing:0.5,fontWeight:700,marginRight:6}}>Scale-out plan</span>
+                  {txt}{exits.length<tiers.length?"  ·  add exit slots to fill":""}
+                </div>
+              );
+            })()}
             {exits.length===0&&<div style={{fontSize:13,color:"#475569",padding:"4px 0"}}>No exits yet</div>}
             {exits.map(function(ex,i){
               var legKey="Exit-"+i;
               var isEditingTime=editingLegTime===legKey;
+              // CHANGED: Scale-out suggestion for this slot (tier i). Ghost placeholders + tap-to-fill.
+              var sug=scaleOutSuggestions[i]||null;
+              var sugPricePh=(sug&&sug.price!=null)?sug.price.toFixed(2):undefined;
+              var sugQtyPh=(sug&&sug.contracts!=null)?String(sug.contracts):undefined;
+              var showSug=!!(sug&&(sug.price!=null||sug.contracts!=null)&&!ex.price&&!ex.contracts);
+              function applySug(){st(function(prev){var ne=prev.exits.map(function(x,xi){return xi===i?Object.assign({},x,{price:sug.price!=null?sug.price.toFixed(2):x.price,contracts:sug.contracts!=null?String(sug.contracts):x.contracts}):x;});return Object.assign({},prev,doRecalc(prev.entries||[],ne,prev.assetClass,prev.instrument,prev.direction));});}
               return (
                 <div key={ex.id} style={{marginBottom:rowGap+2}}>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:rowGap,alignItems:"end"}}>
-                    <div><label style={lblCompact}>{priceLabel} #{i+1}</label><input type="text" value={ex.price||""} onChange={function(e){var val=e.target.value;st(function(prev){var ne=prev.exits.map(function(x,xi){return xi===i?Object.assign({},x,{price:val}):x;});return Object.assign({},prev,doRecalc(prev.entries||[],ne,prev.assetClass,prev.instrument,prev.direction));});}} style={compactFld}/></div>
-                    <div><label style={lblCompact}>{qtyLabel} #{i+1}</label><input type="text" value={ex.contracts||""} onChange={function(e){var val=e.target.value;st(function(prev){var ne=prev.exits.map(function(x,xi){return xi===i?Object.assign({},x,{contracts:val}):x;});return Object.assign({},prev,doRecalc(prev.entries||[],ne,prev.assetClass,prev.instrument,prev.direction));});}} style={compactFld}/></div>
+                    <div><label style={lblCompact}>{priceLabel} #{i+1}</label><input type="text" value={ex.price||""} placeholder={sugPricePh} onChange={function(e){var val=e.target.value;st(function(prev){var ne=prev.exits.map(function(x,xi){return xi===i?Object.assign({},x,{price:val}):x;});return Object.assign({},prev,doRecalc(prev.entries||[],ne,prev.assetClass,prev.instrument,prev.direction));});}} style={compactFld}/></div>
+                    <div><label style={lblCompact}>{qtyLabel} #{i+1}</label><input type="text" value={ex.contracts||""} placeholder={sugQtyPh} onChange={function(e){var val=e.target.value;st(function(prev){var ne=prev.exits.map(function(x,xi){return xi===i?Object.assign({},x,{contracts:val}):x;});return Object.assign({},prev,doRecalc(prev.entries||[],ne,prev.assetClass,prev.instrument,prev.direction));});}} style={compactFld}/></div>
                     <button onClick={function(){st(function(prev){var ne=prev.exits.filter(function(_,xi){return xi!==i;});return Object.assign({},prev,doRecalc(prev.entries||[],ne,prev.assetClass,prev.instrument,prev.direction));});}} style={{padding:density>=2?"6px 9px":"8px 10px",background:"#7f1d1d44",border:"1px solid #7f1d1d",borderRadius:6,color:"#fca5a5",fontSize:13,cursor:"pointer",fontFamily:"inherit",marginBottom:1}}>X</button>
                   </div>
+                  {showSug&&(
+                    <button onClick={applySug} title="Use scale-out suggestion" style={{marginTop:4,padding:"3px 9px",background:"#0f2a1c",border:"1px dashed #166534",borderRadius:5,color:"#86efac",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:6}}>
+                      <span style={{color:"#4ade80"}}>+{sug.gainPct}%</span>
+                      <span style={{color:"#64748b"}}>exit</span>
+                      {sug.price!=null&&<span>{"$"+sug.price.toFixed(2)}</span>}
+                      {sug.contracts!=null&&<span style={{color:"#64748b"}}>× {sug.contracts}</span>}
+                      <span style={{color:"#475569",textTransform:"uppercase",letterSpacing:0.5,fontSize:9}}>tap to use</span>
+                    </button>
+                  )}
                   {/* CHANGED: Per-leg time row — read-only display + Edit toggle. */}
                   <div style={{display:"flex",alignItems:"center",gap:6,marginTop:4,paddingLeft:2,fontSize:11}}>
                     <span style={{color:"#64748b",letterSpacing:0.5}}>Time:</span>
@@ -10320,6 +10390,46 @@ function SettingsTab(props){
         <div style={{fontSize:11,color:"#64748b",marginTop:-4,marginBottom:8,lineHeight:1.5,paddingLeft:2}}>"Oversized entry" is applied automatically to any trade whose position size exceeds your position max (set when the trade was logged), so it isn't listed here.</div>
       </SettingsSection>
 
+      {/* CHANGED: Scale-Out Plan — user-defined % gain exits surfaced as ghost suggestions in the
+          New Trade form's exit slots. See computeScaleOutSuggestions. */}
+      <SettingsSection title="Scale-Out Plan (% gain exits)">
+        <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>At each % gain from your entry, exit a % of the position. These show as greyed suggestions in the New Trade form's exit slots (slot 1 = tier 1, slot 2 = tier 2…) once you've entered an entry price and size — tap to accept. Suggested exit price moves in the trade's profit direction; contracts are whole numbers with the last tier taking the remainder so they sum to the full position.</div>
+        {(function(){
+          var tiers=Array.isArray(settings.scaleOutTiers)?settings.scaleOutTiers:[];
+          function persist(next){setSettings(function(s){return Object.assign({},s,{scaleOutTiers:next});});}
+          function updateTier(i,patch){persist(tiers.map(function(t,xi){return xi===i?Object.assign({},t,patch):t;}));}
+          function addTier(){persist(tiers.concat([{gainPct:"",removePct:""}]));}
+          function removeTier(i){persist(tiers.filter(function(_,xi){return xi!==i;}));}
+          var sumRemove=tiers.reduce(function(a,t){return a+(parseFloat(t.removePct)||0);},0);
+          return (
+            <div>
+              {tiers.length>0&&(
+                <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr auto",gap:6,marginBottom:6,alignItems:"center"}}>
+                  <span style={{fontSize:10,color:"#64748b",fontWeight:700,textAlign:"center"}}>#</span>
+                  <span style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Gain %</span>
+                  <span style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Exit % of position</span>
+                  <span/>
+                </div>
+              )}
+              {tiers.map(function(t,i){
+                return (
+                  <div key={i} style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr auto",gap:6,marginBottom:6,alignItems:"center"}}>
+                    <span style={{fontSize:12,color:"#64748b",fontWeight:700,textAlign:"center"}}>{i+1}</span>
+                    <input type="number" step="1" min="0" value={t.gainPct!=null?t.gainPct:""} placeholder="50" onChange={function(e){updateTier(i,{gainPct:e.target.value});}} style={Object.assign({},fld,{padding:"5px 8px",fontSize:12,colorScheme:"dark",color:"#22c55e",fontWeight:600})}/>
+                    <input type="number" step="1" min="0" max="100" value={t.removePct!=null?t.removePct:""} placeholder="50" onChange={function(e){updateTier(i,{removePct:e.target.value});}} style={Object.assign({},fld,{padding:"5px 8px",fontSize:12,colorScheme:"dark",color:"#e2e8f0",fontWeight:600})}/>
+                    <button onClick={function(){removeTier(i);}} aria-label="Delete tier" style={{padding:"4px 9px",background:"#7f1d1d33",border:"1px solid #7f1d1d",borderRadius:4,color:"#fca5a5",fontSize:13,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>
+                  </div>
+                );
+              })}
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:8,gap:10,flexWrap:"wrap"}}>
+                <button onClick={addTier} style={{padding:"5px 10px",background:"#4f46e5",border:"none",borderRadius:4,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ Add tier</button>
+                {tiers.length>0&&<span style={{fontSize:11,fontWeight:600,color:sumRemove>100?"#f87171":"#64748b"}}>Exits total: {sumRemove}%{sumRemove>100?" · exceeds 100% (earlier tiers capped)":sumRemove<100?" · last tier absorbs the rest":""}</span>}
+              </div>
+            </div>
+          );
+        })()}
+      </SettingsSection>
+
       <SettingsSection title="Economic Events" forceOpen={props.focusSection==="economicEvents"}>
         <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Import the week's economic calendar as JSON. Stale weeks auto-clear.</div>
         <input ref={fileInputRef} type="file" accept=".json,application/json" style={{display:"none"}} onChange={function(e){var f=e.target.files&&e.target.files[0];if(!f)return;var r=new FileReader();r.onload=function(ev){importEventsFromText(ev.target.result);};r.readAsText(f);e.target.value="";}}/>
@@ -10370,28 +10480,7 @@ function SettingsTab(props){
           </div>
         </div>
       )}
-      {props.onSignOut&&(
-        <SettingsSection title="AI Coach">
-          {/* CHANGED: API-key field. The deployed app calls Anthropic directly from the browser,
-             so it needs the user's own key. Stored in localStorage; the key is sent as
-             x-api-key plus the dangerous-direct-browser-access header. */}
-          {(function(){
-            var [k,setK]=useState(function(){try{return localStorage.getItem("tf-anthropic-key")||"";}catch(e){return "";}});
-            var [show,setShow]=useState(false);
-            var [saved,setSaved]=useState(false);
-            return (
-              <div>
-                <div style={{fontSize:12,color:"#94a3b8",lineHeight:1.55,marginBottom:10}}>Paste your Anthropic API key to enable the AI Coach in Performance. Stored only in your browser. Get a key at <span style={{color:"#a5b4fc"}}>console.anthropic.com</span>.</div>
-                <div style={{display:"flex",gap:6}}>
-                  <input type={show?"text":"password"} value={k} onChange={function(e){setK(e.target.value);setSaved(false);}} placeholder="sk-ant-..." style={{flex:1,padding:"10px 12px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:8,color:"#e2e8f0",fontSize:13,fontFamily:"inherit",fontVariantNumeric:"tabular-nums"}}/>
-                  <button onClick={function(){setShow(function(v){return !v;});}} style={{padding:"0 12px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:8,color:"#94a3b8",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>{show?"Hide":"Show"}</button>
-                  <button onClick={function(){try{if(k.trim())localStorage.setItem("tf-anthropic-key",k.trim());else localStorage.removeItem("tf-anthropic-key");setSaved(true);setTimeout(function(){setSaved(false);},1500);}catch(e){}}} style={{padding:"0 14px",background:saved?"#166534":"#4f46e5",border:"none",borderRadius:8,color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{saved?"✓ Saved":"Save"}</button>
-                </div>
-              </div>
-            );
-          })()}
-        </SettingsSection>
-      )}
+      {/* CHANGED: AI Coach removed per user request (the Performance panel was already unwired). */}
       {props.onSignOut&&(
         <div style={{marginTop:24,paddingTop:18,borderTop:"1px solid #1e293b",display:"flex",justifyContent:"center"}}>
           <button onClick={props.onSignOut} style={{padding:"10px 22px",background:"#1c0a0a",border:"1px solid #ef4444",borderRadius:8,color:"#fca5a5",fontSize:13,fontWeight:700,letterSpacing:0.3,cursor:"pointer",fontFamily:"inherit"}}>Sign out</button>
