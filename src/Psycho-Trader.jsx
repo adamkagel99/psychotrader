@@ -2011,16 +2011,24 @@ function clearAllowanceSince(){try{localStorage.removeItem("tf-allowance-since")
 // when a PnL GOAL is reached, for whichever periods the user ticks, and suggests allowance% of THAT
 // PERIOD'S profit. Acknowledgement is keyed to the specific period instance (this week, this month)
 // so it appears once per period and returns on the next one rather than every day after the hit.
-function getAllowanceTriggers(){
-  var def={daily:false,weekly:true,monthly:true};
+// Exactly ONE period triggers the nudge. Migrates from the earlier multi-select by taking the
+// longest period that was ticked, so an existing setup doesn't silently start nagging more often.
+var ALLOWANCE_PERIODS=["daily","weekly","monthly"];
+function getAllowanceTriggerPeriod(){
   try{
+    var v=localStorage.getItem("tf-allowance-trigger-period");
+    if(v&&ALLOWANCE_PERIODS.indexOf(v)>=0)return v;
     var raw=localStorage.getItem("tf-allowance-triggers");
-    if(!raw)return def;
-    var p=JSON.parse(raw)||{};
-    return {daily:!!p.daily,weekly:!!p.weekly,monthly:!!p.monthly};
-  }catch(e){return def;}
+    if(raw){
+      var p=JSON.parse(raw)||{};
+      if(p.monthly)return "monthly";
+      if(p.weekly)return "weekly";
+      if(p.daily)return "daily";
+    }
+  }catch(e){}
+  return "monthly";
 }
-function setAllowanceTriggers(t){try{localStorage.setItem("tf-allowance-triggers",JSON.stringify(t));}catch(e){}}
+function setAllowanceTriggerPeriod(p){try{localStorage.setItem("tf-allowance-trigger-period",p);}catch(e){}}
 function loadAllowanceNudgeAck(){try{return JSON.parse(localStorage.getItem("tf-allowance-nudge-ack")||"{}")||{};}catch(e){return {};}}
 function isAllowanceNudgeAcked(key){var a=loadAllowanceNudgeAck();return !!a[key];}
 function ackAllowanceNudge(key){try{var a=loadAllowanceNudgeAck();a[key]=true;localStorage.setItem("tf-allowance-nudge-ack",JSON.stringify(a));}catch(e){}}
@@ -2049,7 +2057,7 @@ function getAllowanceGoalNudge(livePnL){
     if(!getAllowanceEnabled())return null;
     var pct=getWithdrawalAllowancePct();
     if(!(pct>0))return null;
-    var trig=getAllowanceTriggers();
+    var period=getAllowanceTriggerPeriod();
     var goals=JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};
     var settings=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};
     var tg=resolveGoalTargets(goals,settings);
@@ -2062,7 +2070,7 @@ function getAllowanceGoalNudge(livePnL){
     ];
     for(var i=0;i<defs.length;i++){
       var x=defs[i];
-      if(!trig[x.id])continue;
+      if(x.id!==period)continue;
       if(!(x.target>0))continue;
       if(!(x.value>=x.target))continue;
       if(isAllowanceNudgeAcked(x.key))continue;
@@ -9866,7 +9874,7 @@ function SettingsTab(props){
   // CHANGED: Inline editable allowance % — typing updates localStorage immediately so the
   // displayed allowance recomputes on the next render.
   var [allowancePctInput,setAllowancePctInput]=useState(function(){return String(getWithdrawalAllowancePct());});
-  // CHANGED: On/off toggle state for the withdrawal-allowance suggestion (green-streak nudge, goals).
+  // CHANGED: On/off toggle state for the withdrawal-allowance suggestion (goal-reached nudge).
   var [allowanceEnabledState,setAllowanceEnabledState]=useState(function(){return getAllowanceEnabled();});
   var [instruments,setInstruments]=useState(loadInstruments());
   var [newInst,setNewInst]=useState({symbol:"",name:"",classId:"options"});
@@ -10077,13 +10085,13 @@ function SettingsTab(props){
                 );})()}
               </div>
               {/* CHANGED: Half-size trading toggle moved to Position Sizing Parameters section. */}
-              {/* CHANGED: Withdrawal allowance — on/off toggle + the % of profit suggested for payout.
-                  Drives the green-streak "pay yourself" nudge and the Total Withdrawn goal. */}
+              {/* CHANGED: Withdrawal allowance — on/off toggle, the % of profit suggested for payout,
+                  and which PnL goals fire the "pay yourself" nudge (was a green-streak trigger). */}
               <div style={{marginBottom:12,padding:"10px 12px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
                   <div style={{minWidth:0}}>
                     <div style={{fontSize:12,color:"#e2e8f0",fontWeight:700}}>Withdrawal allowance</div>
-                    <div style={{fontSize:11,color:"#64748b",marginTop:2,lineHeight:1.4}}>Suggest paying yourself a % of profit (green-streak nudge).</div>
+                    <div style={{fontSize:11,color:"#64748b",marginTop:2,lineHeight:1.4}}>Suggest paying yourself a % of profit when a PnL goal is reached.</div>
                   </div>
                   <button onClick={function(){var nv=!allowanceEnabledState;setAllowanceEnabled(nv);setAllowanceEnabledState(nv);if(props.bumpReloadKey)props.bumpReloadKey();}} aria-label="Toggle withdrawal allowance suggestions" style={{flexShrink:0,width:44,height:24,borderRadius:12,border:"1px solid "+(allowanceEnabledState?"#4338ca":"#334155"),background:allowanceEnabledState?"#4338ca":"#1e293b",position:"relative",cursor:"pointer",padding:0}}>
                     <span style={{position:"absolute",top:2,left:allowanceEnabledState?22:2,width:18,height:18,borderRadius:"50%",background:"#fff",transition:"left 0.15s"}}/>
@@ -10099,21 +10107,18 @@ function SettingsTab(props){
                 {/* CHANGED: Which PnL goals fire the pay-yourself nudge. Replaces the old green-streak
                     trigger — the banner now appears when a goal for a ticked period is reached. */}
                 {allowanceEnabledState&&(function(){
-                  var trig=getAllowanceTriggers();
-                  function toggle(id){var n=Object.assign({},trig);n[id]=!n[id];setAllowanceTriggers(n);if(props.bumpReloadKey)props.bumpReloadKey();}
+                  var period=getAllowanceTriggerPeriod();
+                  var noun=period==="daily"?"day":period==="weekly"?"week":"month";
                   return (
-                    <div style={{marginTop:10}}>
-                      <div style={{fontSize:11,color:"#94a3b8",fontWeight:600,marginBottom:6}}>Suggest a withdrawal when this goal is reached</div>
-                      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                        {[{id:"daily",label:"Daily goal"},{id:"weekly",label:"Weekly goal"},{id:"monthly",label:"Monthly goal"}].map(function(o){
-                          var on=!!trig[o.id];
-                          return (
-                            <button key={o.id} onClick={function(){toggle(o.id);}} style={{padding:"5px 11px",borderRadius:6,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",
-                              background:on?"#064e3b":"transparent",border:"1px solid "+(on?"#10b981":"#334155"),color:on?"#a7f3d0":"#64748b"}}>{on?"✓ ":""}{o.label}</button>
-                          );
-                        })}
-                      </div>
-                      <div style={{fontSize:10,color:"#475569",marginTop:6,lineHeight:1.5}}>Suggests {getWithdrawalAllowancePctRaw()}% of that period's profit. Shown once per period — dismissing it returns the next week or month, not the next day. A period with no goal set never fires.</div>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginTop:10,flexWrap:"wrap"}}>
+                      <label style={{fontSize:11,color:"#94a3b8",fontWeight:600,whiteSpace:"nowrap"}}>Trigger on</label>
+                      <select value={period} onChange={function(e){setAllowanceTriggerPeriod(e.target.value);if(props.bumpReloadKey)props.bumpReloadKey();}} style={Object.assign({},fld,{width:150,padding:"6px 9px",fontSize:13,colorScheme:"dark"})}>
+                        <option value="daily">Daily goal</option>
+                        <option value="weekly">Weekly goal</option>
+                        <option value="monthly">Monthly goal</option>
+                      </select>
+                      <span style={{fontSize:12,color:"#64748b"}}>reached</span>
+                      <div style={{fontSize:10,color:"#475569",marginTop:2,lineHeight:1.5,flexBasis:"100%"}}>Suggests {getWithdrawalAllowancePctRaw()}% of that {noun}'s profit, once per {noun} — dismissing it returns the next {noun}, not the next day. Never fires if no {period} goal is set.</div>
                     </div>
                   );
                 })()}
