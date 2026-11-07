@@ -3900,15 +3900,20 @@ function TradeForm(props){
   // CHANGED: Scale-out suggestions — ghost placeholders in the exit slots (slot i ↔ tier i). Needs an
   // entry price for a suggested exit price, and total contracts for suggested quantities.
   var _scaleTiers=loadScaleOutTiers(settings);
-  var scaleOutSuggestions=computeScaleOutSuggestions(_scaleTiers,avgEntry,totalEntryC,trade.direction);
+  // CHANGED: Before any entry size is typed, fall back to the contracts currently ALLOWED so the
+  // plan still previews in contracts instead of degrading to raw percentages. Once entries exist,
+  // the real position wins and every number recomputes against it.
+  var planBaseC=totalEntryC>0?totalEntryC:allowedContracts(settings);
+  var scaleOutSuggestions=computeScaleOutSuggestions(_scaleTiers,avgEntry,planBaseC,trade.direction);
   // CHANGED: The RUNNER — whatever the fixed tiers don't take. Held on a trailing stop until it
-  // triggers, so it gets no suggested price, only a contract count.
+  // triggers, so it gets no suggested price, only a contract count. Percent is rounded because
+  // 100 - 66.7 - 16.7 lands on 16.599999999999994 in binary floating point.
   var _plannedPct=scaleOutPlannedPct(_scaleTiers);
-  var runnerPct=Math.max(0,100-_plannedPct);
+  var runnerPct=Math.round(Math.max(0,100-_plannedPct)*10)/10;
   var runnerContracts=(function(){
-    if(!(totalEntryC>0)||_scaleTiers.length===0)return 0;
+    if(!(planBaseC>0)||_scaleTiers.length===0)return 0;
     var taken=scaleOutSuggestions.reduce(function(a,s){return a+(s.contracts||0);},0);
-    return Math.max(0,totalEntryC-taken);
+    return Math.max(0,planBaseC-taken);
   })();
   var dollarPnl=parseFloat(trade.pnl)||0,pctPnlVal=parseFloat(trade.pctPnl)||0;
   var showPnL=trade.pnl!==""&&exits.some(function(ex){return ex.contracts&&ex.price;});
@@ -4254,9 +4259,20 @@ function TradeForm(props){
             {(function(){
               var tiers=loadScaleOutTiers(settings);
               if(tiers.length===0)return null;
-              var txt=scaleOutSuggestions.map(function(s){return "+"+s.gainPct+"%"+(s.contracts!=null?"→"+s.contracts:" ("+s.removePct+"%)");}).join(" · ");
-              // CHANGED: Surface the runner — the share no tier takes, held on a trailing stop.
-              var trailTxt=runnerPct>0?("  ·  runner "+(runnerContracts>0?runnerContracts:(runnerPct+"%"))+" → trail"):"";
+              // CHANGED: Show CONTRACTS, falling back to a rounded percent only when no position
+              // size is known at all. Percentages here are rounded — removePct values like 66.7 and
+              // 16.7 subtract to long binary-float tails (…99999994) that leaked into the readout.
+              function pct1(v){var n=parseFloat(v);return isNaN(n)?"":String(Math.round(n*10)/10);}
+              var txt=scaleOutSuggestions.map(function(s){
+                return "+"+s.gainPct+"% → "+(s.contracts!=null?(s.contracts+" ct"):(pct1(s.removePct)+"%"));
+              }).join(" · ");
+              // CHANGED: Surface the runner — whatever no tier takes, held on a trailing stop.
+              // When the position size is KNOWN, a zero runner means there genuinely isn't one — say
+              // so rather than falling back to a percentage, which read as "runner 16.6%" on a
+              // 3-contract position whose tiers had already taken all three.
+              var trailTxt=planBaseC>0
+                ?(runnerContracts>0?("  ·  runner "+runnerContracts+" ct → trail"):"  ·  no runner left to trail")
+                :(runnerPct>0?("  ·  runner "+pct1(runnerPct)+"% → trail"):"");
               return (
                 <div style={{fontSize:10,color:"#64748b",marginBottom:fldHeader,lineHeight:1.5}}>
                   <span style={{color:"#475569",textTransform:"uppercase",letterSpacing:0.5,fontWeight:700,marginRight:6}}>Scale-out plan</span>
