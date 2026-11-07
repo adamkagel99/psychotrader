@@ -965,7 +965,21 @@ function scaleOutPlannedPct(tiers){
 function allowedContracts(settings){
   try{
     if((settings&&settings.sizingMode)!=="contracts")return 0;
-    var n=parseFloat(settings.positionMax)||0;
+    // CHANGED: Derive the cap from the LIVE scaling tier, the same way the trade form's
+    // displayPosMax does. Reading settings.positionMax returned a stale snapshot that did not move
+    // when the balance crossed a new level, so the scale-out plan kept sizing tiers against the old
+    // contract count (e.g. still 6 after the account had unlocked 10).
+    var n=0;
+    try{
+      var bal=computeAccountBalance(0);
+      var tier=getCurrentTier(bal);
+      var caps=calcPosSizes(tier,{useDirect:true,sizingMode:settings.sizingMode,slippagePct:settings.slippagePct,
+        positionMaxPct:settings.positionMaxPct,riskMaxPct:settings.riskMaxPct,positionMaxDollar:settings.positionMaxDollar,
+        positionMaxContracts:settings.positionMaxContracts,riskPerContract:settings.riskPerContract,riskMaxDollar:settings.riskMaxDollar});
+      n=parseFloat(caps&&caps.positionMax)||0;
+    }catch(e){}
+    // Fall back to the stored snapshot only if the live calculation is unavailable.
+    if(!(n>0))n=parseFloat(settings.positionMax)||0;
     if(!(n>0))n=parseFloat(settings.positionMaxContracts)||0;
     if(!(n>0))return 0;
     if(isMonthHalfsizeActive())n=Math.floor(n/2);
