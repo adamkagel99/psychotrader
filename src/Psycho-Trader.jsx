@@ -10165,6 +10165,185 @@ function SettingsTab(props){
         })()}
       </SettingsSection>
 
+      {/* CHANGED: Scale-Out Plan — user-defined % gain exits surfaced as ghost suggestions in the
+          New Trade form's exit slots. See computeScaleOutSuggestions. */}
+      <SettingsSection title="Scale-Out Plan (% gain exits)">
+        <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>At each % gain from your entry, exit part of the position. These show as greyed suggestions in the New Trade form's exit slots (slot 1 = tier 1, slot 2 = tier 2…) once you've entered an entry price and size — tap to accept. Suggested exit price moves in the trade's profit direction. Whatever the tiers don't take is the runner, held on a trailing stop until it triggers.</div>
+        {(function(){
+          var tiers=Array.isArray(settings.scaleOutTiers)?settings.scaleOutTiers:[];
+          function persist(next){setSettings(function(s){return Object.assign({},s,{scaleOutTiers:next});});}
+          function updateTier(i,patch){persist(tiers.map(function(t,xi){return xi===i?Object.assign({},t,patch):t;}));}
+          function addTier(){persist(tiers.concat([{gainPct:"",removePct:""}]));}
+          function removeTier(i){persist(tiers.filter(function(_,xi){return xi!==i;}));}
+          var sumRemove=tiers.reduce(function(a,t){return a+(parseFloat(t.removePct)||0);},0);
+          // CHANGED: In contracts mode the size column is edited as a CONTRACT COUNT, not a percent —
+          // "4 of 6" beats typing 66.7. removePct stays the single stored field so percentage mode
+          // and changing position sizes keep working; contracts are just the editing surface,
+          // converted on the way in and derived on the way out.
+          var maxCtEdit=allowedContracts(settings);
+          var ctStep=maxCtEdit>0?(100/maxCtEdit):0;
+          function pctToCt(p){var v=parseFloat(p);return (maxCtEdit>0&&!isNaN(v))?Math.round(v/ctStep):null;}
+          function ctToPct(c){var v=parseFloat(c);if(isNaN(v))return "";if(v<0)v=0;if(v>maxCtEdit)v=maxCtEdit;return String(Math.round(v*ctStep*10)/10);}
+          var sumCt=maxCtEdit>0?tiers.reduce(function(a,t){var c=pctToCt(t.removePct);return a+(c||0);},0):0;
+          return (
+            <div>
+              {tiers.length>0&&(
+                <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr auto",gap:6,marginBottom:6,alignItems:"center"}}>
+                  <span style={{fontSize:10,color:"#64748b",fontWeight:700,textAlign:"center"}}>#</span>
+                  <span style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Gain %</span>
+                  <span style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{maxCtEdit>0?("Exit contracts (of "+maxCtEdit+")"):"Exit % of position"}</span>
+                  <span/>
+                </div>
+              )}
+              {tiers.map(function(t,i){
+                return (
+                  <div key={i} style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr auto",gap:6,marginBottom:6,alignItems:"center"}}>
+                    <span style={{fontSize:12,color:"#64748b",fontWeight:700,textAlign:"center"}}>{i+1}</span>
+                    <input type="number" step="1" min="0" value={t.gainPct!=null?t.gainPct:""} placeholder="50" onChange={function(e){updateTier(i,{gainPct:e.target.value});}} style={Object.assign({},fld,{padding:"5px 8px",fontSize:12,colorScheme:"dark",color:"#22c55e",fontWeight:600})}/>
+                    {maxCtEdit>0?(
+                      <div style={{position:"relative",display:"flex",alignItems:"center"}}>
+                        <input type="number" step="1" min="0" max={maxCtEdit} value={(function(){var c=pctToCt(t.removePct);return c==null?"":String(c);})()} placeholder={String(Math.max(1,Math.round(maxCtEdit/2)))} onChange={function(e){updateTier(i,{removePct:ctToPct(e.target.value)});}} style={Object.assign({},fld,{padding:"5px 8px",paddingRight:52,fontSize:12,colorScheme:"dark",color:"#e2e8f0",fontWeight:600,width:"100%"})}/>
+                        <span style={{position:"absolute",right:9,fontSize:10,color:"#475569",pointerEvents:"none",fontVariantNumeric:"tabular-nums"}}>{t.removePct?(Math.round(parseFloat(t.removePct)*10)/10+"%"):""}</span>
+                      </div>
+                    ):(
+                      <input type="number" step="1" min="0" max="100" value={t.removePct!=null?t.removePct:""} placeholder="50" onChange={function(e){updateTier(i,{removePct:e.target.value});}} style={Object.assign({},fld,{padding:"5px 8px",fontSize:12,colorScheme:"dark",color:"#e2e8f0",fontWeight:600})}/>
+                    )}
+                    <button onClick={function(){removeTier(i);}} aria-label="Delete tier" style={{padding:"4px 9px",background:"#7f1d1d33",border:"1px solid #7f1d1d",borderRadius:4,color:"#fca5a5",fontSize:13,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>
+                  </div>
+                );
+              })}
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:8,gap:10,flexWrap:"wrap"}}>
+                <button onClick={addTier} style={{padding:"5px 10px",background:"#4f46e5",border:"none",borderRadius:4,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ Add tier</button>
+                {tiers.length>0&&(maxCtEdit>0
+                  ?<span style={{fontSize:11,fontWeight:600,color:sumCt>maxCtEdit?"#f87171":"#64748b"}}>Exits total: {sumCt} of {maxCtEdit} ct{sumCt>maxCtEdit?" · more than you hold (earlier tiers capped)":sumCt<maxCtEdit?(" · last "+(maxCtEdit-sumCt)+" ct rides a trailing stop"):" · no runner left to trail"}</span>
+                  :<span style={{fontSize:11,fontWeight:600,color:sumRemove>100?"#f87171":"#64748b"}}>Exits total: {sumRemove}%{sumRemove>100?" · exceeds 100% (earlier tiers capped)":sumRemove<100?(" · last "+(100-sumRemove)+"% rides a trailing stop"):" · no runner left to trail"}</span>
+                )}
+              </div>
+              {/* CHANGED: Suggested tier-1 % from the user's own exit history (attainment curve). */}
+              {(function(){
+                var stx=computeExitGainStats();
+                if(stx.count<5){
+                  return (
+                    <div style={{marginTop:12,padding:"9px 11px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8,fontSize:11,color:"#64748b",lineHeight:1.5}}>
+                      <span style={{color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Suggested from history</span>
+                      <div style={{marginTop:4}}>Not enough exit history yet — {stx.count} profitable exit{stx.count===1?"":"s"} logged. A suggestion appears once you have at least 5.</div>
+                    </div>
+                  );
+                }
+                // CHANGED: Suggest the NEXT tier, not just tier 1. Re-evaluates every render, so as
+                // soon as tier N is set (by the button OR typed by hand) this rolls to tier N+1.
+                function fmtG(v){return v==null?"—":(v<10?v.toFixed(1):String(Math.round(v)));}
+                var maxC=allowedContracts(settings);
+                var nx=suggestNextTier(stx,tiers,maxC);
+                var tierNo=nx.nextIndex+1;
+                var panelBox={marginTop:12,padding:"9px 11px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8};
+                var hdr={fontSize:11,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700,marginBottom:6};
+                if(nx.state==="complete"){
+                  return (
+                    <div style={panelBox}>
+                      <div style={hdr}>Plan complete</div>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>
+                        <div style={{flex:"1 1 96px",padding:"5px 7px",background:"#0f2a1c",border:"1px solid #166534",borderRadius:6,textAlign:"center"}}>
+                          <div style={{fontSize:9,color:"#64748b",letterSpacing:0.5,textTransform:"uppercase",fontWeight:700}}>Avg gain / plan</div>
+                          <div style={{fontSize:15,fontWeight:700,color:"#4ade80",fontVariantNumeric:"tabular-nums"}}>{nx.avgGain!=null?("+"+fmtG(nx.avgGain)+"%"):"—"}</div>
+                        </div>
+                        <div style={{flex:"1 1 96px",padding:"5px 7px",border:"1px solid #1e293b",borderRadius:6,textAlign:"center"}}>
+                          <div style={{fontSize:9,color:"#64748b",letterSpacing:0.5,textTransform:"uppercase",fontWeight:700}}>Scaled out</div>
+                          <div style={{fontSize:15,fontWeight:700,color:"#cbd5e1",fontVariantNumeric:"tabular-nums"}}>{nx.maxContracts>0?(nx.plannedContracts+" ct"):(nx.plannedPct+"%")}</div>
+                        </div>
+                        <div style={{flex:"1 1 96px",padding:"5px 7px",border:"1px solid "+((nx.maxContracts>0?nx.runnerContracts:nx.trailPct)>0?"#78716c":"#1e293b"),borderRadius:6,textAlign:"center"}}>
+                          <div style={{fontSize:9,color:"#64748b",letterSpacing:0.5,textTransform:"uppercase",fontWeight:700}}>Runner · trail</div>
+                          <div style={{fontSize:15,fontWeight:700,color:(nx.maxContracts>0?nx.runnerContracts:nx.trailPct)>0?"#fbbf24":"#475569",fontVariantNumeric:"tabular-nums"}}>{nx.maxContracts>0?(nx.runnerContracts+" ct"):(nx.trailPct+"%")}</div>
+                        </div>
+                      </div>
+                      {/* CHANGED: Reality check — the plan's weighted average vs what winners have
+                          actually realized (one contract-weighted data point per winning trade).
+                          A plan averaging well above history mostly won't fill at its deep tiers. */}
+                      {stx.avgTradeRealized!=null&&(function(){
+                        var plan=nx.avgGain,hist=stx.avgTradeRealized;
+                        var over=plan!=null&&hist>0&&plan>hist*1.15;
+                        return (
+                          <div style={{marginBottom:7,padding:"6px 8px",borderRadius:6,background:over?"#1c150933":"#0f172a44",border:"1px solid "+(over?"#78716c":"#1e293b")}}>
+                            <div style={{fontSize:10,color:"#94a3b8",lineHeight:1.5}}>
+                              <span style={{fontWeight:700,color:over?"#fbbf24":"#64748b"}}>{over?"⚠ Reality check":"Reality check"}</span>
+                              {" — your winners actually realize "}
+                              <span style={{color:"#cbd5e1",fontWeight:700}}>+{fmtG(hist)}%</span>
+                              {" on average (median +"+fmtG(stx.medTradeRealized)+"%, "+stx.realizedCount+" winning trades, contract-weighted). "}
+                              {plan!=null?(over
+                                ?("This plan averages +"+fmtG(plan)+"%, about "+Math.round((plan/hist-1)*100)+"% above that — the deeper tiers will often go unfilled.")
+                                :("This plan averages +"+fmtG(plan)+"%, in line with that.")):""}
+                            </div>
+                          </div>
+                        );
+                      })()}
+                      <div style={{fontSize:10,color:"#475569",lineHeight:1.5}}>
+                        {nx.trailPct>0
+                          ?("Plan exits "+nx.plannedPct+"% at fixed targets, averaging "+(nx.avgGain!=null?("+"+fmtG(nx.avgGain)+"%"):"—")+" weighted by the share taken at each tier. The last "+nx.trailPct+"% rides a trailing stop until it triggers — its exit isn't fixed, so it's excluded from the average.")
+                          :("Plan exits the full position at fixed targets, averaging "+(nx.avgGain!=null?("+"+fmtG(nx.avgGain)+"%"):"—")+" weighted by the share taken at each tier. No runner is left to trail — drop a tier's exit % to free one up.")}
+                        {" "}Lower an exit % or remove a tier to get another suggestion.
+                      </div>
+                    </div>
+                  );
+                }
+                if(nx.state==="thin"){
+                  return (
+                    <div style={panelBox}>
+                      <div style={hdr}>Suggested tier {tierNo}</div>
+                      <div style={{fontSize:11,color:"#64748b",lineHeight:1.5}}>{nx.prevGain>0
+                        ?("Only "+nx.poolCount+" exit"+(nx.poolCount===1?"":"s")+" in your history ran past +"+fmtG(nx.prevGain)+"%. That's too thin to suggest a tier "+tierNo+" — and it's a signal the ladder may already be deep enough.")
+                        :("Not enough exit history yet — "+nx.poolCount+" profitable exit"+(nx.poolCount===1?"":"s")+" logged. A suggestion appears once you have at least 5.")}</div>
+                    </div>
+                  );
+                }
+                // Attainment tiles over the conditional pool (exits that ran past the last tier).
+                var shares=[0.5,0.6,0.7,0.8];
+                function applyNextTier(){
+                  var next=tiers.slice();
+                  var i=nx.nextIndex;
+                  if(i>=next.length)next.push({gainPct:String(nx.gain),removePct:String(nx.size)});
+                  else{
+                    var cur=next[i]||{};
+                    var curSize=parseFloat(cur.removePct);
+                    var keepSize=!isNaN(curSize)&&curSize>0;
+                    next[i]=Object.assign({},cur,{gainPct:String(nx.gain),removePct:keepSize?cur.removePct:String(nx.size)});
+                  }
+                  persist(next);
+                }
+                return (
+                  <div style={panelBox}>
+                    <div style={hdr}>Suggested tier {tierNo}</div>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>
+                      {shares.map(function(sh){
+                        var v=attainmentAtShare(nx.pool,sh);
+                        var isPick=sh===0.6;
+                        return (
+                          <div key={sh} style={{flex:"1 1 78px",padding:"5px 7px",background:isPick?"#0f2a1c":"transparent",border:"1px solid "+(isPick?"#166534":"#1e293b"),borderRadius:6,textAlign:"center"}}>
+                            <div style={{fontSize:9,color:"#64748b",letterSpacing:0.5,textTransform:"uppercase",fontWeight:700}}>{Math.round(sh*100)}% of exits</div>
+                            <div style={{fontSize:14,fontWeight:700,color:isPick?"#4ade80":"#cbd5e1",fontVariantNumeric:"tabular-nums"}}>≥ +{fmtG(v)}%</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+                      <span style={{fontSize:11,color:"#94a3b8"}}>Tier {tierNo}: <span style={{color:"#4ade80",fontWeight:700}}>+{nx.gain}%</span> · exit <span style={{color:"#4ade80",fontWeight:700}}>{nx.size}%</span>{nx.sizeContracts?<span> (<span style={{color:"#4ade80",fontWeight:700}}>{nx.sizeContracts} ct</span> of {nx.maxContracts})</span>:" of position"}</span>
+                      <button onClick={applyNextTier} style={{padding:"5px 10px",background:"#166534",border:"none",borderRadius:4,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Use as Tier {tierNo}</button>
+                    </div>
+                    <div style={{fontSize:10,color:"#475569",marginTop:7,lineHeight:1.5}}>
+                      {nx.prevGain>0
+                        ?("Based on the "+nx.poolCount+" exit"+(nx.poolCount===1?"":"s")+" that ran past your tier "+nx.nextIndex+" (+"+fmtG(nx.prevGain)+"%), out of "+stx.count+" profitable exits total. ")
+                        :("Based on "+stx.count+" profitable exit"+(stx.count===1?"":"s")+" across "+stx.greenTrades+" green trade"+(stx.greenTrades===1?"":"s")+". ")}
+                      Each exit leg counts separately. Exits record where you actually sold — not how far the trade could have run — so treat this as "where winners commonly got to." Exit size is the median {nx.nextIndex===0?"first":"follow-up"}-exit share{nx.sizeFromHistory?"":" (no history yet — using half of what's left)"}, capped at the {nx.remaining}% still unallocated.
+                      {nx.maxContracts>0?(" Contracts mode: sized in whole contracts of the "+nx.maxContracts+" currently allowed, keeping "+(nx.runnerContracts>0?(nx.runnerContracts+" ct"):"none")+" free to run on the trail."):""}
+                      {stx.avgTradeRealized!=null?(" For scale: your winners realize +"+fmtG(stx.avgTradeRealized)+"% on average (contract-weighted, "+stx.realizedCount+" trades) — tiers far above that will rarely fill."):""}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          );
+        })()}
+      </SettingsSection>
+
       <SettingsSection title="Setup Grade Criteria">
         <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Turn each grade on or off, then pick a setup and define its checklist for each grade. In the trade form these appear once both a setup and a grade are selected. Setups are managed under Trade Form Options.</div>
         {/* Per-grade enable toggles */}
@@ -10637,185 +10816,6 @@ function SettingsTab(props){
         })()}
         <div style={{fontSize:11,color:"#64748b",marginTop:-4,marginBottom:8,lineHeight:1.5,paddingLeft:2}}>"Max risk exceeded" is applied automatically to any losing trade whose loss exceeds your risk max % (scaled by session size), so it isn't listed here.</div>
         <div style={{fontSize:11,color:"#64748b",marginTop:-4,marginBottom:8,lineHeight:1.5,paddingLeft:2}}>"Oversized entry" is applied automatically to any trade whose position size exceeds your position max (set when the trade was logged), so it isn't listed here.</div>
-      </SettingsSection>
-
-      {/* CHANGED: Scale-Out Plan — user-defined % gain exits surfaced as ghost suggestions in the
-          New Trade form's exit slots. See computeScaleOutSuggestions. */}
-      <SettingsSection title="Scale-Out Plan (% gain exits)">
-        <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>At each % gain from your entry, exit part of the position. These show as greyed suggestions in the New Trade form's exit slots (slot 1 = tier 1, slot 2 = tier 2…) once you've entered an entry price and size — tap to accept. Suggested exit price moves in the trade's profit direction. Whatever the tiers don't take is the runner, held on a trailing stop until it triggers.</div>
-        {(function(){
-          var tiers=Array.isArray(settings.scaleOutTiers)?settings.scaleOutTiers:[];
-          function persist(next){setSettings(function(s){return Object.assign({},s,{scaleOutTiers:next});});}
-          function updateTier(i,patch){persist(tiers.map(function(t,xi){return xi===i?Object.assign({},t,patch):t;}));}
-          function addTier(){persist(tiers.concat([{gainPct:"",removePct:""}]));}
-          function removeTier(i){persist(tiers.filter(function(_,xi){return xi!==i;}));}
-          var sumRemove=tiers.reduce(function(a,t){return a+(parseFloat(t.removePct)||0);},0);
-          // CHANGED: In contracts mode the size column is edited as a CONTRACT COUNT, not a percent —
-          // "4 of 6" beats typing 66.7. removePct stays the single stored field so percentage mode
-          // and changing position sizes keep working; contracts are just the editing surface,
-          // converted on the way in and derived on the way out.
-          var maxCtEdit=allowedContracts(settings);
-          var ctStep=maxCtEdit>0?(100/maxCtEdit):0;
-          function pctToCt(p){var v=parseFloat(p);return (maxCtEdit>0&&!isNaN(v))?Math.round(v/ctStep):null;}
-          function ctToPct(c){var v=parseFloat(c);if(isNaN(v))return "";if(v<0)v=0;if(v>maxCtEdit)v=maxCtEdit;return String(Math.round(v*ctStep*10)/10);}
-          var sumCt=maxCtEdit>0?tiers.reduce(function(a,t){var c=pctToCt(t.removePct);return a+(c||0);},0):0;
-          return (
-            <div>
-              {tiers.length>0&&(
-                <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr auto",gap:6,marginBottom:6,alignItems:"center"}}>
-                  <span style={{fontSize:10,color:"#64748b",fontWeight:700,textAlign:"center"}}>#</span>
-                  <span style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Gain %</span>
-                  <span style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{maxCtEdit>0?("Exit contracts (of "+maxCtEdit+")"):"Exit % of position"}</span>
-                  <span/>
-                </div>
-              )}
-              {tiers.map(function(t,i){
-                return (
-                  <div key={i} style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr auto",gap:6,marginBottom:6,alignItems:"center"}}>
-                    <span style={{fontSize:12,color:"#64748b",fontWeight:700,textAlign:"center"}}>{i+1}</span>
-                    <input type="number" step="1" min="0" value={t.gainPct!=null?t.gainPct:""} placeholder="50" onChange={function(e){updateTier(i,{gainPct:e.target.value});}} style={Object.assign({},fld,{padding:"5px 8px",fontSize:12,colorScheme:"dark",color:"#22c55e",fontWeight:600})}/>
-                    {maxCtEdit>0?(
-                      <div style={{position:"relative",display:"flex",alignItems:"center"}}>
-                        <input type="number" step="1" min="0" max={maxCtEdit} value={(function(){var c=pctToCt(t.removePct);return c==null?"":String(c);})()} placeholder={String(Math.max(1,Math.round(maxCtEdit/2)))} onChange={function(e){updateTier(i,{removePct:ctToPct(e.target.value)});}} style={Object.assign({},fld,{padding:"5px 8px",paddingRight:52,fontSize:12,colorScheme:"dark",color:"#e2e8f0",fontWeight:600,width:"100%"})}/>
-                        <span style={{position:"absolute",right:9,fontSize:10,color:"#475569",pointerEvents:"none",fontVariantNumeric:"tabular-nums"}}>{t.removePct?(Math.round(parseFloat(t.removePct)*10)/10+"%"):""}</span>
-                      </div>
-                    ):(
-                      <input type="number" step="1" min="0" max="100" value={t.removePct!=null?t.removePct:""} placeholder="50" onChange={function(e){updateTier(i,{removePct:e.target.value});}} style={Object.assign({},fld,{padding:"5px 8px",fontSize:12,colorScheme:"dark",color:"#e2e8f0",fontWeight:600})}/>
-                    )}
-                    <button onClick={function(){removeTier(i);}} aria-label="Delete tier" style={{padding:"4px 9px",background:"#7f1d1d33",border:"1px solid #7f1d1d",borderRadius:4,color:"#fca5a5",fontSize:13,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>
-                  </div>
-                );
-              })}
-              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:8,gap:10,flexWrap:"wrap"}}>
-                <button onClick={addTier} style={{padding:"5px 10px",background:"#4f46e5",border:"none",borderRadius:4,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ Add tier</button>
-                {tiers.length>0&&(maxCtEdit>0
-                  ?<span style={{fontSize:11,fontWeight:600,color:sumCt>maxCtEdit?"#f87171":"#64748b"}}>Exits total: {sumCt} of {maxCtEdit} ct{sumCt>maxCtEdit?" · more than you hold (earlier tiers capped)":sumCt<maxCtEdit?(" · last "+(maxCtEdit-sumCt)+" ct rides a trailing stop"):" · no runner left to trail"}</span>
-                  :<span style={{fontSize:11,fontWeight:600,color:sumRemove>100?"#f87171":"#64748b"}}>Exits total: {sumRemove}%{sumRemove>100?" · exceeds 100% (earlier tiers capped)":sumRemove<100?(" · last "+(100-sumRemove)+"% rides a trailing stop"):" · no runner left to trail"}</span>
-                )}
-              </div>
-              {/* CHANGED: Suggested tier-1 % from the user's own exit history (attainment curve). */}
-              {(function(){
-                var stx=computeExitGainStats();
-                if(stx.count<5){
-                  return (
-                    <div style={{marginTop:12,padding:"9px 11px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8,fontSize:11,color:"#64748b",lineHeight:1.5}}>
-                      <span style={{color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Suggested from history</span>
-                      <div style={{marginTop:4}}>Not enough exit history yet — {stx.count} profitable exit{stx.count===1?"":"s"} logged. A suggestion appears once you have at least 5.</div>
-                    </div>
-                  );
-                }
-                // CHANGED: Suggest the NEXT tier, not just tier 1. Re-evaluates every render, so as
-                // soon as tier N is set (by the button OR typed by hand) this rolls to tier N+1.
-                function fmtG(v){return v==null?"—":(v<10?v.toFixed(1):String(Math.round(v)));}
-                var maxC=allowedContracts(settings);
-                var nx=suggestNextTier(stx,tiers,maxC);
-                var tierNo=nx.nextIndex+1;
-                var panelBox={marginTop:12,padding:"9px 11px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8};
-                var hdr={fontSize:11,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700,marginBottom:6};
-                if(nx.state==="complete"){
-                  return (
-                    <div style={panelBox}>
-                      <div style={hdr}>Plan complete</div>
-                      <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>
-                        <div style={{flex:"1 1 96px",padding:"5px 7px",background:"#0f2a1c",border:"1px solid #166534",borderRadius:6,textAlign:"center"}}>
-                          <div style={{fontSize:9,color:"#64748b",letterSpacing:0.5,textTransform:"uppercase",fontWeight:700}}>Avg gain / plan</div>
-                          <div style={{fontSize:15,fontWeight:700,color:"#4ade80",fontVariantNumeric:"tabular-nums"}}>{nx.avgGain!=null?("+"+fmtG(nx.avgGain)+"%"):"—"}</div>
-                        </div>
-                        <div style={{flex:"1 1 96px",padding:"5px 7px",border:"1px solid #1e293b",borderRadius:6,textAlign:"center"}}>
-                          <div style={{fontSize:9,color:"#64748b",letterSpacing:0.5,textTransform:"uppercase",fontWeight:700}}>Scaled out</div>
-                          <div style={{fontSize:15,fontWeight:700,color:"#cbd5e1",fontVariantNumeric:"tabular-nums"}}>{nx.maxContracts>0?(nx.plannedContracts+" ct"):(nx.plannedPct+"%")}</div>
-                        </div>
-                        <div style={{flex:"1 1 96px",padding:"5px 7px",border:"1px solid "+((nx.maxContracts>0?nx.runnerContracts:nx.trailPct)>0?"#78716c":"#1e293b"),borderRadius:6,textAlign:"center"}}>
-                          <div style={{fontSize:9,color:"#64748b",letterSpacing:0.5,textTransform:"uppercase",fontWeight:700}}>Runner · trail</div>
-                          <div style={{fontSize:15,fontWeight:700,color:(nx.maxContracts>0?nx.runnerContracts:nx.trailPct)>0?"#fbbf24":"#475569",fontVariantNumeric:"tabular-nums"}}>{nx.maxContracts>0?(nx.runnerContracts+" ct"):(nx.trailPct+"%")}</div>
-                        </div>
-                      </div>
-                      {/* CHANGED: Reality check — the plan's weighted average vs what winners have
-                          actually realized (one contract-weighted data point per winning trade).
-                          A plan averaging well above history mostly won't fill at its deep tiers. */}
-                      {stx.avgTradeRealized!=null&&(function(){
-                        var plan=nx.avgGain,hist=stx.avgTradeRealized;
-                        var over=plan!=null&&hist>0&&plan>hist*1.15;
-                        return (
-                          <div style={{marginBottom:7,padding:"6px 8px",borderRadius:6,background:over?"#1c150933":"#0f172a44",border:"1px solid "+(over?"#78716c":"#1e293b")}}>
-                            <div style={{fontSize:10,color:"#94a3b8",lineHeight:1.5}}>
-                              <span style={{fontWeight:700,color:over?"#fbbf24":"#64748b"}}>{over?"⚠ Reality check":"Reality check"}</span>
-                              {" — your winners actually realize "}
-                              <span style={{color:"#cbd5e1",fontWeight:700}}>+{fmtG(hist)}%</span>
-                              {" on average (median +"+fmtG(stx.medTradeRealized)+"%, "+stx.realizedCount+" winning trades, contract-weighted). "}
-                              {plan!=null?(over
-                                ?("This plan averages +"+fmtG(plan)+"%, about "+Math.round((plan/hist-1)*100)+"% above that — the deeper tiers will often go unfilled.")
-                                :("This plan averages +"+fmtG(plan)+"%, in line with that.")):""}
-                            </div>
-                          </div>
-                        );
-                      })()}
-                      <div style={{fontSize:10,color:"#475569",lineHeight:1.5}}>
-                        {nx.trailPct>0
-                          ?("Plan exits "+nx.plannedPct+"% at fixed targets, averaging "+(nx.avgGain!=null?("+"+fmtG(nx.avgGain)+"%"):"—")+" weighted by the share taken at each tier. The last "+nx.trailPct+"% rides a trailing stop until it triggers — its exit isn't fixed, so it's excluded from the average.")
-                          :("Plan exits the full position at fixed targets, averaging "+(nx.avgGain!=null?("+"+fmtG(nx.avgGain)+"%"):"—")+" weighted by the share taken at each tier. No runner is left to trail — drop a tier's exit % to free one up.")}
-                        {" "}Lower an exit % or remove a tier to get another suggestion.
-                      </div>
-                    </div>
-                  );
-                }
-                if(nx.state==="thin"){
-                  return (
-                    <div style={panelBox}>
-                      <div style={hdr}>Suggested tier {tierNo}</div>
-                      <div style={{fontSize:11,color:"#64748b",lineHeight:1.5}}>{nx.prevGain>0
-                        ?("Only "+nx.poolCount+" exit"+(nx.poolCount===1?"":"s")+" in your history ran past +"+fmtG(nx.prevGain)+"%. That's too thin to suggest a tier "+tierNo+" — and it's a signal the ladder may already be deep enough.")
-                        :("Not enough exit history yet — "+nx.poolCount+" profitable exit"+(nx.poolCount===1?"":"s")+" logged. A suggestion appears once you have at least 5.")}</div>
-                    </div>
-                  );
-                }
-                // Attainment tiles over the conditional pool (exits that ran past the last tier).
-                var shares=[0.5,0.6,0.7,0.8];
-                function applyNextTier(){
-                  var next=tiers.slice();
-                  var i=nx.nextIndex;
-                  if(i>=next.length)next.push({gainPct:String(nx.gain),removePct:String(nx.size)});
-                  else{
-                    var cur=next[i]||{};
-                    var curSize=parseFloat(cur.removePct);
-                    var keepSize=!isNaN(curSize)&&curSize>0;
-                    next[i]=Object.assign({},cur,{gainPct:String(nx.gain),removePct:keepSize?cur.removePct:String(nx.size)});
-                  }
-                  persist(next);
-                }
-                return (
-                  <div style={panelBox}>
-                    <div style={hdr}>Suggested tier {tierNo}</div>
-                    <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>
-                      {shares.map(function(sh){
-                        var v=attainmentAtShare(nx.pool,sh);
-                        var isPick=sh===0.6;
-                        return (
-                          <div key={sh} style={{flex:"1 1 78px",padding:"5px 7px",background:isPick?"#0f2a1c":"transparent",border:"1px solid "+(isPick?"#166534":"#1e293b"),borderRadius:6,textAlign:"center"}}>
-                            <div style={{fontSize:9,color:"#64748b",letterSpacing:0.5,textTransform:"uppercase",fontWeight:700}}>{Math.round(sh*100)}% of exits</div>
-                            <div style={{fontSize:14,fontWeight:700,color:isPick?"#4ade80":"#cbd5e1",fontVariantNumeric:"tabular-nums"}}>≥ +{fmtG(v)}%</div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
-                      <span style={{fontSize:11,color:"#94a3b8"}}>Tier {tierNo}: <span style={{color:"#4ade80",fontWeight:700}}>+{nx.gain}%</span> · exit <span style={{color:"#4ade80",fontWeight:700}}>{nx.size}%</span>{nx.sizeContracts?<span> (<span style={{color:"#4ade80",fontWeight:700}}>{nx.sizeContracts} ct</span> of {nx.maxContracts})</span>:" of position"}</span>
-                      <button onClick={applyNextTier} style={{padding:"5px 10px",background:"#166534",border:"none",borderRadius:4,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Use as Tier {tierNo}</button>
-                    </div>
-                    <div style={{fontSize:10,color:"#475569",marginTop:7,lineHeight:1.5}}>
-                      {nx.prevGain>0
-                        ?("Based on the "+nx.poolCount+" exit"+(nx.poolCount===1?"":"s")+" that ran past your tier "+nx.nextIndex+" (+"+fmtG(nx.prevGain)+"%), out of "+stx.count+" profitable exits total. ")
-                        :("Based on "+stx.count+" profitable exit"+(stx.count===1?"":"s")+" across "+stx.greenTrades+" green trade"+(stx.greenTrades===1?"":"s")+". ")}
-                      Each exit leg counts separately. Exits record where you actually sold — not how far the trade could have run — so treat this as "where winners commonly got to." Exit size is the median {nx.nextIndex===0?"first":"follow-up"}-exit share{nx.sizeFromHistory?"":" (no history yet — using half of what's left)"}, capped at the {nx.remaining}% still unallocated.
-                      {nx.maxContracts>0?(" Contracts mode: sized in whole contracts of the "+nx.maxContracts+" currently allowed, keeping "+(nx.runnerContracts>0?(nx.runnerContracts+" ct"):"none")+" free to run on the trail."):""}
-                      {stx.avgTradeRealized!=null?(" For scale: your winners realize +"+fmtG(stx.avgTradeRealized)+"% on average (contract-weighted, "+stx.realizedCount+" trades) — tiers far above that will rarely fill."):""}
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>
-          );
-        })()}
       </SettingsSection>
 
       <SettingsSection title="Economic Events" forceOpen={props.focusSection==="economicEvents"}>
