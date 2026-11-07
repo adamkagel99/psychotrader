@@ -4288,10 +4288,20 @@ function TradeForm(props){
           </div>
           {/* CHANGED: Exit Plan banner — between entry and exit legs as a reminder before exiting. Shown whenever a session with an exit plan is active. */}
           {(function(){
+            // CHANGED: Resolve the session instead of requiring trade.sessionId. That field is only
+            // stamped when a session is live at the moment the trade is started, so logging a trade
+            // outside session hours (or from a path that doesn't stamp it) left sid null and the
+            // exit plan never appeared. Fall back to the live phase, then — only when it is
+            // unambiguous — to the single enabled session that actually has a plan.
+            var sessions=getSessions(settings);
             var sid=trade.sessionId;
-            if(!sid)return null;
-            var sess=getSessions(settings).find(function(x){return x.id===sid;});
-            var plan=sess&&sess.exitPlan?sess.exitPlan:"";
+            if(!sid){var live=getPhase();if(live&&live!=="closed")sid=live;}
+            var sess=sid?sessions.find(function(x){return x.id===sid;}):null;
+            if(!sess||!sess.exitPlan){
+              var withPlan=sessions.filter(function(x){return x.enabled!==false&&x.exitPlan&&String(x.exitPlan).trim();});
+              if(withPlan.length===1)sess=withPlan[0];
+            }
+            var plan=sess&&sess.exitPlan?String(sess.exitPlan).trim():"";
             if(!plan)return null;
             return (
               <div style={{marginBottom:sectionMb,padding:"8px 10px",background:"#1c1509",border:"1px solid #b45309",borderRadius:6}}>
