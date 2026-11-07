@@ -982,7 +982,7 @@ function computeScaleOutSuggestions(tiers,avgEntry,totalContracts,direction){
 // gain. NOTE: exits record where the user actually SOLD, not the true max favorable excursion, so
 // this reads "where winners commonly got to", never "how far they could have run".
 function computeExitGainStats(){
-  var gains=[],greenTrades=0,totalTrades=0;
+  var gains=[],greenTrades=0,totalTrades=0,firstExitShares=[],subsequentShares=[];
   try{
     loadJournalRows().forEach(function(row){
       var trades=(row&&row.trades)?row.trades:[];
@@ -1010,19 +1010,85 @@ function computeExitGainStats(){
         if(!went)return;
         greenTrades++;
         legs.forEach(function(g){if(g>0)gains.push(g);});
+        // Suggested TIER-1 SIZE: the share of the position taken off on the FIRST exit. Only trades
+        // with 2+ exits count — a single full exit is 100% by definition and would skew this high.
+        if(exits.length>=2){
+          var ordered=exits.slice().sort(function(a,b){
+            var ta=parseFloat(a&&a.time),tb=parseFloat(b&&b.time);
+            if(isNaN(ta)&&isNaN(tb))return 0;
+            if(isNaN(ta))return 1;
+            if(isNaN(tb))return -1;
+            return ta-tb;
+          });
+          var fc=parseFloat(ordered[0]&&ordered[0].contracts);
+          if(!isNaN(fc)&&fc>0){
+            var share=(fc/tc)*100;
+            if(share>0&&share<=100)firstExitShares.push(share);
+          }
+          // Sizing for tiers 2+: the share taken off on each exit AFTER the first.
+          for(var oi=1;oi<ordered.length;oi++){
+            var sc=parseFloat(ordered[oi]&&ordered[oi].contracts);
+            if(!isNaN(sc)&&sc>0){
+              var ss=(sc/tc)*100;
+              if(ss>0&&ss<=100)subsequentShares.push(ss);
+            }
+          }
+        }
       });
     });
   }catch(e){}
   gains.sort(function(a,b){return a-b;});
-  // G such that `share` of exits reached >= G  →  the (1-share) quantile, linearly interpolated.
-  function atShare(share){
-    if(gains.length===0)return null;
-    var idx=(1-share)*(gains.length-1);
-    var lo=Math.floor(idx),hi=Math.ceil(idx);
-    if(lo===hi)return gains[lo];
-    return gains[lo]+(gains[hi]-gains[lo])*(idx-lo);
-  }
-  return {count:gains.length,greenTrades:greenTrades,totalTrades:totalTrades,atShare:atShare};
+  function atShare(share){return attainmentAtShare(gains,share);}
+  return {count:gains.length,greenTrades:greenTrades,totalTrades:totalTrades,atShare:atShare,
+          gains:gains,
+          scaledTrades:firstExitShares.length,
+          medFirstShare:medianOf(firstExitShares),
+          medSubsequentShare:medianOf(subsequentShares)};
+}
+// G such that `share` of the sorted gains reached >= G — the (1-share) quantile, interpolated.
+function attainmentAtShare(sortedGains,share){
+  if(!sortedGains||sortedGains.length===0)return null;
+  var idx=(1-share)*(sortedGains.length-1);
+  var lo=Math.floor(idx),hi=Math.ceil(idx);
+  if(lo===hi)return sortedGains[lo];
+  return sortedGains[lo]+(sortedGains[hi]-sortedGains[lo])*(idx-lo);
+}
+function medianOf(arr){
+  if(!arr||arr.length===0)return null;
+  var a=arr.slice().sort(function(x,y){return x-y;});
+  var m=Math.floor(a.length/2);
+  return (a.length%2===1)?a[m]:(a[m-1]+a[m])/2;
+}
+// CHANGED: Suggest the NEXT tier in the ladder. Given the tiers already configured, looks only at
+// exits that ran PAST the last configured tier's gain (conditional attainment) and asks where 60% of
+// THOSE got to — so each suggestion is strictly above the previous tier and reflects how often
+// trades actually keep running. Size comes from the median non-first exit share, clamped to the
+// position still unallocated. Returns null-ish states the UI explains rather than guessing.
+function suggestNextTier(stats,tiers){
+  var valid=(tiers||[]).map(function(t){return {g:parseFloat(t&&t.gainPct),r:parseFloat(t&&t.removePct)};})
+                       .filter(function(t){return t.g>0;});
+  var prevGain=0;
+  valid.forEach(function(t){if(t.g>prevGain)prevGain=t.g;});
+  var used=0;
+  valid.forEach(function(t){if(t.r>0)used+=t.r;});
+  var remaining=Math.max(0,100-used);
+  var nextIndex=valid.length; // 0-based index of the tier we're suggesting
+  if(remaining<=0)return {state:"complete",nextIndex:nextIndex};
+  var pool=(stats.gains||[]).filter(function(g){return g>prevGain;});
+  if(pool.length<5)return {state:"thin",nextIndex:nextIndex,prevGain:prevGain,poolCount:pool.length,remaining:remaining};
+  var g=attainmentAtShare(pool,0.6);
+  if(g==null)return {state:"thin",nextIndex:nextIndex,prevGain:prevGain,poolCount:pool.length,remaining:remaining};
+  var gRounded=g>=20?Math.round(g/5)*5:Math.round(g);
+  if(gRounded<=prevGain)gRounded=prevGain+(prevGain>=20?5:1); // keep the ladder strictly increasing
+  // Size: history when available, else half what's left; always clamped to the remainder.
+  var base=(nextIndex===0)
+    ?(stats.medFirstShare!=null?stats.medFirstShare:50)
+    :(stats.medSubsequentShare!=null?stats.medSubsequentShare:remaining/2);
+  var size=Math.round(base/5)*5;
+  if(size<5)size=5;
+  if(size>remaining)size=remaining;
+  return {state:"ok",nextIndex:nextIndex,prevGain:prevGain,poolCount:pool.length,remaining:remaining,
+          gain:gRounded,size:size,pool:pool,sizeFromHistory:(nextIndex===0?stats.medFirstShare!=null:stats.medSubsequentShare!=null)};
 }
 // Grade metadata — order + colors. C exists for legacy trades but is off by default.
 var ALL_GRADES=["A","B","C"];
@@ -10485,23 +10551,51 @@ function SettingsTab(props){
                     </div>
                   );
                 }
-                var shares=[0.5,0.6,0.7,0.8];
+                // CHANGED: Suggest the NEXT tier, not just tier 1. Re-evaluates every render, so as
+                // soon as tier N is set (by the button OR typed by hand) this rolls to tier N+1.
                 function fmtG(v){return v==null?"—":(v<10?v.toFixed(1):String(Math.round(v)));}
-                var suggested=stx.atShare(0.6);
-                var sugRounded=suggested!=null?(suggested>=20?Math.round(suggested/5)*5:Math.round(suggested)):null;
-                function useAsTier1(){
-                  if(sugRounded==null)return;
+                var nx=suggestNextTier(stx,tiers);
+                var tierNo=nx.nextIndex+1;
+                var panelBox={marginTop:12,padding:"9px 11px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8};
+                var hdr={fontSize:11,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700,marginBottom:6};
+                if(nx.state==="complete"){
+                  return (
+                    <div style={panelBox}>
+                      <div style={hdr}>Plan complete</div>
+                      <div style={{fontSize:11,color:"#64748b",lineHeight:1.5}}>Your tiers already allocate 100% of the position. Lower an exit % or remove a tier to get another suggestion.</div>
+                    </div>
+                  );
+                }
+                if(nx.state==="thin"){
+                  return (
+                    <div style={panelBox}>
+                      <div style={hdr}>Suggested tier {tierNo}</div>
+                      <div style={{fontSize:11,color:"#64748b",lineHeight:1.5}}>{nx.prevGain>0
+                        ?("Only "+nx.poolCount+" exit"+(nx.poolCount===1?"":"s")+" in your history ran past +"+fmtG(nx.prevGain)+"%. That's too thin to suggest a tier "+tierNo+" — and it's a signal the ladder may already be deep enough.")
+                        :("Not enough exit history yet — "+nx.poolCount+" profitable exit"+(nx.poolCount===1?"":"s")+" logged. A suggestion appears once you have at least 5.")}</div>
+                    </div>
+                  );
+                }
+                // Attainment tiles over the conditional pool (exits that ran past the last tier).
+                var shares=[0.5,0.6,0.7,0.8];
+                function applyNextTier(){
                   var next=tiers.slice();
-                  if(next.length===0)next=[{gainPct:String(sugRounded),removePct:"50"}];
-                  else next[0]=Object.assign({},next[0],{gainPct:String(sugRounded)});
+                  var i=nx.nextIndex;
+                  if(i>=next.length)next.push({gainPct:String(nx.gain),removePct:String(nx.size)});
+                  else{
+                    var cur=next[i]||{};
+                    var curSize=parseFloat(cur.removePct);
+                    var keepSize=!isNaN(curSize)&&curSize>0;
+                    next[i]=Object.assign({},cur,{gainPct:String(nx.gain),removePct:keepSize?cur.removePct:String(nx.size)});
+                  }
                   persist(next);
                 }
                 return (
-                  <div style={{marginTop:12,padding:"9px 11px",background:"#0a0a0f",border:"1px solid #1e293b",borderRadius:8}}>
-                    <div style={{fontSize:11,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700,marginBottom:6}}>Suggested from history</div>
+                  <div style={panelBox}>
+                    <div style={hdr}>Suggested tier {tierNo}</div>
                     <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>
                       {shares.map(function(sh){
-                        var v=stx.atShare(sh);
+                        var v=attainmentAtShare(nx.pool,sh);
                         var isPick=sh===0.6;
                         return (
                           <div key={sh} style={{flex:"1 1 78px",padding:"5px 7px",background:isPick?"#0f2a1c":"transparent",border:"1px solid "+(isPick?"#166534":"#1e293b"),borderRadius:6,textAlign:"center"}}>
@@ -10512,10 +10606,15 @@ function SettingsTab(props){
                       })}
                     </div>
                     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
-                      <span style={{fontSize:11,color:"#94a3b8"}}>Tier 1 starting point: <span style={{color:"#4ade80",fontWeight:700}}>+{sugRounded}%</span></span>
-                      <button onClick={useAsTier1} style={{padding:"5px 10px",background:"#166534",border:"none",borderRadius:4,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Use as Tier 1</button>
+                      <span style={{fontSize:11,color:"#94a3b8"}}>Tier {tierNo}: <span style={{color:"#4ade80",fontWeight:700}}>+{nx.gain}%</span> · exit <span style={{color:"#4ade80",fontWeight:700}}>{nx.size}%</span> of position</span>
+                      <button onClick={applyNextTier} style={{padding:"5px 10px",background:"#166534",border:"none",borderRadius:4,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Use as Tier {tierNo}</button>
                     </div>
-                    <div style={{fontSize:10,color:"#475569",marginTop:7,lineHeight:1.5}}>Based on {stx.count} profitable exit{stx.count===1?"":"s"} across {stx.greenTrades} green trade{stx.greenTrades===1?"":"s"}. Each exit leg counts separately. Exits record where you actually sold — not how far the trade could have run — so treat this as "where winners commonly got to."</div>
+                    <div style={{fontSize:10,color:"#475569",marginTop:7,lineHeight:1.5}}>
+                      {nx.prevGain>0
+                        ?("Based on the "+nx.poolCount+" exit"+(nx.poolCount===1?"":"s")+" that ran past your tier "+nx.nextIndex+" (+"+fmtG(nx.prevGain)+"%), out of "+stx.count+" profitable exits total. ")
+                        :("Based on "+stx.count+" profitable exit"+(stx.count===1?"":"s")+" across "+stx.greenTrades+" green trade"+(stx.greenTrades===1?"":"s")+". ")}
+                      Each exit leg counts separately. Exits record where you actually sold — not how far the trade could have run — so treat this as "where winners commonly got to." Exit size is the median {nx.nextIndex===0?"first":"follow-up"}-exit share{nx.sizeFromHistory?"":" (no history yet — using half of what's left)"}, capped at the {nx.remaining}% still unallocated.
+                    </div>
                   </div>
                 );
               })()}
