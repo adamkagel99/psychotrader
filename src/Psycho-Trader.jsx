@@ -2007,6 +2007,71 @@ function getAllowanceSince(){try{var v=parseFloat(localStorage.getItem("tf-allow
 function setAllowanceSinceNow(){try{localStorage.setItem("tf-allowance-since",String(Date.now()));}catch(e){}}
 function clearAllowanceSince(){try{localStorage.removeItem("tf-allowance-since");}catch(e){}}
 
+// CHANGED: Goal-reached withdrawal nudge. Replaces the green-streak trigger: the banner now fires
+// when a PnL GOAL is reached, for whichever periods the user ticks, and suggests allowance% of THAT
+// PERIOD'S profit. Acknowledgement is keyed to the specific period instance (this week, this month)
+// so it appears once per period and returns on the next one rather than every day after the hit.
+function getAllowanceTriggers(){
+  var def={daily:false,weekly:true,monthly:true};
+  try{
+    var raw=localStorage.getItem("tf-allowance-triggers");
+    if(!raw)return def;
+    var p=JSON.parse(raw)||{};
+    return {daily:!!p.daily,weekly:!!p.weekly,monthly:!!p.monthly};
+  }catch(e){return def;}
+}
+function setAllowanceTriggers(t){try{localStorage.setItem("tf-allowance-triggers",JSON.stringify(t));}catch(e){}}
+function loadAllowanceNudgeAck(){try{return JSON.parse(localStorage.getItem("tf-allowance-nudge-ack")||"{}")||{};}catch(e){return {};}}
+function isAllowanceNudgeAcked(key){var a=loadAllowanceNudgeAck();return !!a[key];}
+function ackAllowanceNudge(key){try{var a=loadAllowanceNudgeAck();a[key]=true;localStorage.setItem("tf-allowance-nudge-ack",JSON.stringify(a));}catch(e){}}
+// Net P&L for today / this week / this month, on the same basis the goal cards use.
+function getPeriodPnLs(livePnL){
+  var out={daily:0,weekly:0,monthly:0};
+  try{
+    var rows=loadJournalRows();
+    var now=getPT(),y=now.getFullYear(),m=now.getMonth(),d=now.getDate(),day=now.getDay();
+    var wkStart=new Date(y,m,d-day),wkEnd=new Date(wkStart);wkEnd.setDate(wkStart.getDate()+6);
+    var moStart=new Date(y,m,1);
+    var todayKey=todayStr();
+    var todayInRows=rows.some(function(e){return e.date===todayKey;});
+    var live=parseFloat(livePnL)||0;
+    out.weekly=rows.filter(function(e){var dd=new Date(e.date);return dd>=wkStart&&dd<=wkEnd;}).reduce(function(s,e){return s+entryNetPnl(e);},0)+(todayInRows?0:live);
+    out.monthly=rows.filter(function(e){return new Date(e.date)>=moStart;}).reduce(function(s,e){return s+entryNetPnl(e);},0)+(todayInRows?0:live);
+    var todayRow=rows.find(function(e){return e.date===todayKey;});
+    out.daily=todayRow?entryNetPnl(todayRow):live;
+  }catch(e){}
+  return out;
+}
+// Returns the nudge to show, or null. Checks the LONGEST period first so hitting the monthly goal
+// doesn't get masked by a daily one; only enabled periods with a real target are considered.
+function getAllowanceGoalNudge(livePnL){
+  try{
+    if(!getAllowanceEnabled())return null;
+    var pct=getWithdrawalAllowancePct();
+    if(!(pct>0))return null;
+    var trig=getAllowanceTriggers();
+    var goals=JSON.parse(localStorage.getItem(GOALS_KEY)||"{}")||{};
+    var settings=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}")||{};
+    var tg=resolveGoalTargets(goals,settings);
+    var pnl=getPeriodPnLs(livePnL);
+    var now=getPT();
+    var defs=[
+      {id:"monthly",label:"Monthly",target:tg.monthly,value:pnl.monthly,key:"monthly:"+now.getFullYear()+"-"+now.getMonth()},
+      {id:"weekly", label:"Weekly", target:tg.weekly, value:pnl.weekly, key:"weekly:"+getWeekStartStr()},
+      {id:"daily",  label:"Daily",  target:tg.daily,  value:pnl.daily,  key:"daily:"+todayStr()}
+    ];
+    for(var i=0;i<defs.length;i++){
+      var x=defs[i];
+      if(!trig[x.id])continue;
+      if(!(x.target>0))continue;
+      if(!(x.value>=x.target))continue;
+      if(isAllowanceNudgeAcked(x.key))continue;
+      return {id:x.id,label:x.label,target:x.target,value:x.value,key:x.key,pct:pct,
+              suggested:Math.max(0,Math.round(x.value*(pct/100)))};
+    }
+  }catch(e){}
+  return null;
+}
 function getMonthlyWithdrawalTarget(){try{var g=JSON.parse(localStorage.getItem(GOALS_KEY)||"{}");return parseFloat(g.monthlyWithdrawals)||0;}catch(e){return 0;}}
 function getLastWithdrawalDate(){
   var ws=loadTransfers().filter(function(t){return String(t.type||"").toLowerCase()==="withdrawal";});
@@ -5521,31 +5586,23 @@ function DashboardTab(props){
          down) so the trader pays themselves before greed compounds positions. Dismissal stores
          the streak length at the time so the banner only returns if the streak grows further. */}
       {(function(){
-        var streak=calculateStreak(true);
-        // CHANGED: Recurring profit-take nudge — fires at every 5th consecutive green day (5, 10,
-        // 15 …). The milestone is the highest multiple of 5 reached; dismissal is keyed to it, so the
-        // banner stays until dismissed and then returns only at the next 5-day mark (not days 6–9).
-        var INTERVAL=5;
-        var milestone=streak>=INTERVAL?Math.floor(streak/INTERVAL)*INTERVAL:0;
-        if(milestone<INTERVAL)return null;
-        if(streakNudgeDismissedAt()>=milestone)return null;
-        // CHANGED: Suggest a withdrawal = allowance% of the NET profit earned since day 1 of this
-        // green streak. Clicking Withdraw prefills that amount. Masked in W/L / $-hidden modes.
-        var _pct=getWithdrawalAllowancePct();
-        var _streakProfit=greenStreakProfit(true);
-        var _suggested=Math.max(0,Math.round(_streakProfit*(_pct/100)));
-        var _showAmt=_suggested>0&&!hideCurrency();
+        // CHANGED: Fires when a PnL GOAL is reached (periods chosen in Settings → Withdrawal
+        // allowance), not after a green streak. Suggests allowance% of that period's profit, and is
+        // acknowledged per period instance so it shows once per week/month rather than every day.
+        var nudge=getAllowanceGoalNudge(totalPnL);
+        if(!nudge)return null;
+        var _showAmt=nudge.suggested>0&&!hideCurrency();
         return (
           <div style={{marginBottom:12,padding:"12px 16px",background:"linear-gradient(135deg,#064e3b,#065f46)",border:"1px solid #10b981",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
             <div style={{minWidth:0}}>
-              <div style={{fontSize:13,fontWeight:800,color:"#fff",display:"flex",alignItems:"center",gap:7}}>💰 {streak}-day green streak — pay yourself</div>
+              <div style={{fontSize:13,fontWeight:800,color:"#fff",display:"flex",alignItems:"center",gap:7}}>💰 {nudge.label} goal reached — pay yourself</div>
               {_showAmt
-                ?<div style={{fontSize:11,color:"#a7f3d0",marginTop:3,lineHeight:1.5}}>Suggested: <span style={{color:"#fff",fontWeight:800}}>${_suggested.toLocaleString()}</span> <span style={{color:"#6ee7b7"}}>({_pct}% of ${Math.round(_streakProfit).toLocaleString()} earned this streak)</span></div>
+                ?<div style={{fontSize:11,color:"#a7f3d0",marginTop:3,lineHeight:1.5}}>Suggested: <span style={{color:"#fff",fontWeight:800}}>${nudge.suggested.toLocaleString()}</span> <span style={{color:"#6ee7b7"}}>({nudge.pct}% of ${Math.round(nudge.value).toLocaleString()} earned this {nudge.id==="daily"?"day":nudge.id==="weekly"?"week":"month"})</span></div>
                 :<div style={{fontSize:11,color:"#a7f3d0",marginTop:3,lineHeight:1.5}}>Lock in some of these gains before greed cranks up size.</div>}
             </div>
             <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0}}>
-              {props.onWithdraw&&<button onClick={function(){props.onWithdraw(_showAmt?String(_suggested):"");}} style={{padding:"6px 12px",background:"#022c22",border:"1px solid #10b981",borderRadius:6,color:"#a7f3d0",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Withdraw{_showAmt?" $"+_suggested.toLocaleString():""} →</button>}
-              <button onClick={function(){dismissStreakNudge(milestone);if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"#0a0a0f44",border:"1px solid #065f46",borderRadius:6,color:"#a7f3d0",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Dismiss</button>
+              {props.onWithdraw&&<button onClick={function(){props.onWithdraw(_showAmt?String(nudge.suggested):"");}} style={{padding:"6px 12px",background:"#022c22",border:"1px solid #10b981",borderRadius:6,color:"#a7f3d0",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Withdraw{_showAmt?" $"+nudge.suggested.toLocaleString():""} →</button>}
+              <button onClick={function(){ackAllowanceNudge(nudge.key);if(props.bumpReloadKey)props.bumpReloadKey();}} style={{padding:"6px 12px",background:"#0a0a0f44",border:"1px solid #065f46",borderRadius:6,color:"#a7f3d0",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Dismiss</button>
             </div>
           </div>
         );
@@ -10039,6 +10096,27 @@ function SettingsTab(props){
                     <span style={{fontSize:12,color:"#64748b"}}>of profit (default 40%)</span>
                   </div>
                 )}
+                {/* CHANGED: Which PnL goals fire the pay-yourself nudge. Replaces the old green-streak
+                    trigger — the banner now appears when a goal for a ticked period is reached. */}
+                {allowanceEnabledState&&(function(){
+                  var trig=getAllowanceTriggers();
+                  function toggle(id){var n=Object.assign({},trig);n[id]=!n[id];setAllowanceTriggers(n);if(props.bumpReloadKey)props.bumpReloadKey();}
+                  return (
+                    <div style={{marginTop:10}}>
+                      <div style={{fontSize:11,color:"#94a3b8",fontWeight:600,marginBottom:6}}>Suggest a withdrawal when this goal is reached</div>
+                      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                        {[{id:"daily",label:"Daily goal"},{id:"weekly",label:"Weekly goal"},{id:"monthly",label:"Monthly goal"}].map(function(o){
+                          var on=!!trig[o.id];
+                          return (
+                            <button key={o.id} onClick={function(){toggle(o.id);}} style={{padding:"5px 11px",borderRadius:6,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",
+                              background:on?"#064e3b":"transparent",border:"1px solid "+(on?"#10b981":"#334155"),color:on?"#a7f3d0":"#64748b"}}>{on?"✓ ":""}{o.label}</button>
+                          );
+                        })}
+                      </div>
+                      <div style={{fontSize:10,color:"#475569",marginTop:6,lineHeight:1.5}}>Suggests {getWithdrawalAllowancePctRaw()}% of that period's profit. Shown once per period — dismissing it returns the next week or month, not the next day. A period with no goal set never fires.</div>
+                    </div>
+                  );
+                })()}
               </div>
             </>
           );
