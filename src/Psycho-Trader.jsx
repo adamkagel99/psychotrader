@@ -935,14 +935,22 @@ function getFocusStates(settings){
   });
   return out;
 }
-function defaultSettings(){return {accountSize:0,positionMin:0,positionMax:0,riskMin:0,riskMax:0,gainMultiplier:5,timezone:"America/Los_Angeles",sessions:defaultSessionsForTz("America/Los_Angeles"),tradingWindows:[{start:60,end:1020}],slippagePct:20,positionMaxPct:7.5,positionMaxDollar:500,positionMaxContracts:1,riskPerContract:25,contractCost:60,riskMaxPct:33,riskMaxDollar:165,sizingMode:"pct",hideDollarPnL:false,hideAmounts:false,enabledAssetClasses:defaultEnabledAssetClasses(),assetClassSettings:defaultAssetClassSettings(),defaultAssetClass:"options",defaultInstruments:{},focusStates:defaultFocusStates(),enabledGrades:["A","B"],scaleOutTiers:[]};}
+function defaultSettings(){return {accountSize:0,positionMin:0,positionMax:0,riskMin:0,riskMax:0,gainMultiplier:5,timezone:"America/Los_Angeles",sessions:defaultSessionsForTz("America/Los_Angeles"),tradingWindows:[{start:60,end:1020}],slippagePct:20,positionMaxPct:7.5,positionMaxDollar:500,positionMaxContracts:1,riskPerContract:25,contractCost:60,riskMaxPct:33,riskMaxDollar:165,sizingMode:"pct",hideDollarPnL:false,hideAmounts:false,enabledAssetClasses:defaultEnabledAssetClasses(),assetClassSettings:defaultAssetClassSettings(),defaultAssetClass:"options",defaultInstruments:{},focusStates:defaultFocusStates(),enabledGrades:["A","B"],scaleOutTiers:[],scaleOutEnabled:false};}
 // CHANGED: Scale-out plan — user-defined "% gain exits": at +gainPct price gain from entry, exit
 // removePct of the position. Shown as ghost-placeholder suggestions in the New Trade form's exit
 // slots (slot i ↔ tier i). Global (one list for all trades). Suggested exit PRICE moves in the
 // trade's profitable direction (same sign convention as P&L: SHORT/SELL move down, else up, so
 // bought options — CALL and PUT — suggest a premium gain above entry). Contracts use whole numbers
 // with the LAST tier taking the remainder so the suggestions always sum to the full position.
+// CHANGED: The scale-out plan is opt-in via a toggle. Treat an unset flag as "on when tiers already
+// exist", so anyone who configured a plan before the toggle existed keeps it without re-enabling.
+function isScaleOutEnabled(settings){
+  if(!settings)return false;
+  if(settings.scaleOutEnabled!=null)return !!settings.scaleOutEnabled;
+  return Array.isArray(settings.scaleOutTiers)&&settings.scaleOutTiers.length>0;
+}
 function loadScaleOutTiers(settings){
+  if(!isScaleOutEnabled(settings))return [];
   var t=settings&&settings.scaleOutTiers;
   if(!Array.isArray(t))return [];
   return t.filter(function(x){return x&&(parseFloat(x.gainPct)>0)&&(parseFloat(x.removePct)>0);})
@@ -1006,6 +1014,35 @@ function scaleOutAvgGainPct(tiers){
     wsum+=g*r;w+=r;
   });
   return w>0?(wsum/w):null;
+}
+// CHANGED: Build a whole ladder in one go by running the tier suggester until it reports complete.
+// Used to auto-fill the plan when the toggle is switched on. When the exit history is too thin to
+// suggest from, falls back to a plainly generic +50%/+100% ladder rather than inventing a number
+// that looks data-derived — `fromHistory` says which happened so the UI can label it honestly.
+function buildAutoScaleOutPlan(settings){
+  var stats=computeExitGainStats();
+  var maxC=allowedContracts(settings);
+  var tiers=[];
+  for(var i=0;i<8;i++){
+    var nx=suggestNextTier(stats,tiers,maxC);
+    if(!nx||nx.state!=="ok")break;
+    tiers.push({gainPct:String(nx.gain),removePct:String(nx.size)});
+  }
+  if(tiers.length>0)return {tiers:tiers,fromHistory:true};
+  // Generic fallback: two tiers, contract-quantized, leaving a runner for the trail.
+  var gen=[];
+  if(maxC>0){
+    var step=100/maxC;
+    var budget=maxTierContracts(maxC);
+    var first=Math.max(1,Math.min(budget,Math.round(maxC*0.5)));
+    gen.push({gainPct:"50",removePct:String(Math.round(first*step*10)/10)});
+    var second=budget-first;
+    if(second>0)gen.push({gainPct:"100",removePct:String(Math.round(second*step*10)/10)});
+  }else{
+    gen.push({gainPct:"50",removePct:"50"});
+    gen.push({gainPct:"100",removePct:"30"});
+  }
+  return {tiers:gen,fromHistory:false};
 }
 function computeScaleOutSuggestions(tiers,avgEntry,totalContracts,direction){
   tiers=tiers||[];
@@ -10183,9 +10220,35 @@ function SettingsTab(props){
           New Trade form's exit slots. See computeScaleOutSuggestions. */}
       <SettingsSection title="Scale-Out Plan (% gain exits)">
         <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>At each % gain from your entry, exit part of the position. These show as greyed suggestions in the New Trade form's exit slots (slot 1 = tier 1, slot 2 = tier 2…) once you've entered an entry price and size — tap to accept. Suggested exit price moves in the trade's profit direction. Whatever the tiers don't take is the runner, held on a trailing stop until it triggers.</div>
+        {/* CHANGED: Master toggle. Switching it on auto-fills the ladder when none is configured. */}
         {(function(){
+          var on=isScaleOutEnabled(settings);
+          function setOn(v){
+            setSettings(function(s){
+              var patch={scaleOutEnabled:v};
+              var cur=Array.isArray(s.scaleOutTiers)?s.scaleOutTiers:[];
+              var hasReal=cur.some(function(t){return parseFloat(t&&t.gainPct)>0;});
+              if(v&&!hasReal){
+                // Build against the settings as they will be once enabled, so loadScaleOutTiers
+                // inside the suggester doesn't see the feature as still off.
+                var built=buildAutoScaleOutPlan(Object.assign({},s,{scaleOutEnabled:true}));
+                patch.scaleOutTiers=built.tiers;
+              }
+              return Object.assign({},s,patch);
+            });
+          }
+          return (
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:on?12:4}}>
+              <ToggleSwitch checked={on} onChange={setOn}/>
+              <span style={{fontSize:13,fontWeight:700,color:on?"#e2e8f0":"#64748b"}}>{on?"Scale-out plan on":"Scale-out plan off"}</span>
+              {!on&&<span style={{fontSize:11,color:"#475569"}}>— turn on to auto-fill a plan from your history</span>}
+            </div>
+          );
+        })()}
+        {isScaleOutEnabled(settings)&&(function(){
           var tiers=Array.isArray(settings.scaleOutTiers)?settings.scaleOutTiers:[];
           function persist(next){setSettings(function(s){return Object.assign({},s,{scaleOutTiers:next});});}
+          function autoFill(){var built=buildAutoScaleOutPlan(settings);persist(built.tiers);}
           function updateTier(i,patch){persist(tiers.map(function(t,xi){return xi===i?Object.assign({},t,patch):t;}));}
           function addTier(){persist(tiers.concat([{gainPct:"",removePct:""}]));}
           function removeTier(i){persist(tiers.filter(function(_,xi){return xi!==i;}));}
@@ -10227,7 +10290,10 @@ function SettingsTab(props){
                 );
               })}
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:8,gap:10,flexWrap:"wrap"}}>
-                <button onClick={addTier} style={{padding:"5px 10px",background:"#4f46e5",border:"none",borderRadius:4,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ Add tier</button>
+                <span style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  <button onClick={addTier} style={{padding:"5px 10px",background:"#4f46e5",border:"none",borderRadius:4,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ Add tier</button>
+                  <button onClick={autoFill} title="Rebuild the whole ladder from your exit history" style={{padding:"5px 10px",background:"none",border:"1px solid #4338ca",borderRadius:4,color:"#a5b4fc",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Auto-fill</button>
+                </span>
                 {tiers.length>0&&(maxCtEdit>0
                   ?<span style={{fontSize:11,fontWeight:600,color:sumCt>maxCtEdit?"#f87171":"#64748b"}}>Exits total: {sumCt} of {maxCtEdit} ct{sumCt>maxCtEdit?" · more than you hold (earlier tiers capped)":sumCt<maxCtEdit?(" · last "+(maxCtEdit-sumCt)+" ct rides a trailing stop"):" · no runner left to trail"}</span>
                   :<span style={{fontSize:11,fontWeight:600,color:sumRemove>100?"#f87171":"#64748b"}}>Exits total: {sumRemove}%{sumRemove>100?" · exceeds 100% (earlier tiers capped)":sumRemove<100?(" · last "+(100-sumRemove)+"% rides a trailing stop"):" · no runner left to trail"}</span>
