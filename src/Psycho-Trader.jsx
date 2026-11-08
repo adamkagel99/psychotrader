@@ -10127,7 +10127,12 @@ function SettingsTab(props){
             <>
               <div style={{marginBottom:8,padding:"10px 12px",background:"#0a0a0f",border:"1px solid #4338ca",borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <span style={{fontSize:11,color:"#a5b4fc",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>Current Balance</span>
-                <span style={{fontSize:20,fontWeight:800,color:balance>=0?"#e2e8f0":"#ef4444",fontVariantNumeric:"tabular-nums",letterSpacing:-0.3}}>${balance.toLocaleString("en-US",{maximumFractionDigits:0})}</span>
+                {/* CHANGED: Current Balance is now masked outside $ mode. Unlike position size and
+                   contract cost (which are deployment costs and stay visible), account balance IS
+                   performance — it is transfers + lifetime P&L, so showing it defeats both hide
+                   modes. Masked with the same convention as money(): AMT_MASK in W/L mode, "$•••"
+                   in hide-dollar mode. */}
+                <span style={{fontSize:20,fontWeight:800,color:balance>=0?"#e2e8f0":"#ef4444",fontVariantNumeric:"tabular-nums",letterSpacing:-0.3}}>{HIDE_AMOUNTS?AMT_MASK:(HIDE_DOLLAR_PNL?((balance<0?"-":"")+"$•••"):("$"+balance.toLocaleString("en-US",{maximumFractionDigits:0})))}</span>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"1fr",gap:8,marginBottom:12}}>
                 {(function(){var net=totalWdr-totalDep;return (
