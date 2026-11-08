@@ -404,14 +404,26 @@ function getBase(a){
 // CHANGED: Risk Max % is now a percentage of Position Max (not the account balance).
 // CHANGED: Also supports fixed-dollar sizing mode (positionMaxDollar, riskMaxDollar).
 // CHANGED: Scaling ladder reworked around contract-based sizing. Each tier maps an account-balance
-// threshold to an even contract count. Designed for ~$60/contract cost with a ~42% average loss
-// (≈$25 effective risk per contract), ramping risk-per-trade from ~2.5% on small accounts down to
-// ~1.5% at scale ("conservatively aggressive"). A tier activates only once balance clears the
-// threshold +10% (see getCurrentTier). This array is the single source of truth: the milestone
-// schedule (getMilestones) and the per-tier contract count (contractsForTier) both derive from it.
+// threshold to an even contract count. A tier activates only once balance clears the threshold +10%
+// (see getCurrentTier). This array is the single source of truth: the milestone schedule
+// (getMilestones) and the per-tier contract count (contractsForTier) both derive from it.
+//
+// CHANGED: corrected the risk profile documented here. The previous comment claimed ~2.5% down to
+// ~1.5% risk-per-trade, assuming ≈$25 effective risk per contract. At the configured
+// riskPerContract of $40 the real curve is ~3.6% down to ~2.3%, measured at each tier's activation
+// balance (threshold x 1.10). That $40 cap is itself defensible — measured mean realized loss is
+// ~$29/contract, p75 ~$38 — but it is NOT $25, so the ladder runs hotter than previously stated.
+// Risk% at activation by tier: 3.6, 3.6, 3.6, 3.6, 3.4, 2.9, 2.6, 2.3.
+//
+// CHANGED: the $5,000 tier threshold moved to $6,000. It was the one re-risking step on an
+// otherwise monotonically de-risking curve: contracts tripled (2 -> 6) while the threshold only
+// 2.5x'd, spiking risk-per-trade to 4.4% and position to 9.8% at activation — the hottest point on
+// the whole ladder, and higher than the $2,000 tier below it. Raising the threshold (rather than
+// cutting the contract count to 5) flattens activation risk back to ~3.6% without reducing size
+// for anyone already past $6,600.
 var SCALING_TIERS=[
   {bal:2000,contracts:2},
-  {bal:5000,contracts:6},
+  {bal:6000,contracts:6},
   {bal:10000,contracts:10},
   {bal:18000,contracts:18},
   {bal:30000,contracts:28},
@@ -4349,7 +4361,8 @@ function TradeForm(props){
               <div style={{display:"grid",gridTemplateColumns:!props.mobile&&trade.stopLoss?"1fr 1fr 1fr 1fr":"1fr 1fr 1fr",gap:rowGap,marginTop:fldHeader}}>
                 <div style={{background:"#1e293b",borderRadius:6,padding:density>=2?"4px 8px":"6px 10px"}}><div style={{fontSize:9,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>{unitLabel}</div><div style={{fontSize:density>=2?12:14,fontWeight:700,color:"#38bdf8",marginTop:1}}>{totalEntryC}</div></div>
                 <div style={{background:"#1e293b",borderRadius:6,padding:density>=2?"4px 8px":"6px 10px"}}><div style={{fontSize:9,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>Avg Entry</div><div style={{fontSize:density>=2?12:14,fontWeight:700,color:"#f59e0b",marginTop:1}}>${avgEntry.toFixed(2)}</div></div>
-                <div style={{background:"#1e293b",border:posExceedsMax?"1px solid #ef4444":"none",borderRadius:6,padding:density>=2?"4px 8px":"6px 10px"}}><div style={{fontSize:9,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>Position</div><div style={{fontSize:density>=2?12:14,fontWeight:700,color:posExceedsMax?"#ef4444":"#94a3b8",marginTop:1}}>{trade.positionSize?(HIDE_DOLLAR_PNL?pctOfAccount(parseFloat(trade.positionSize)):("$"+parseFloat(trade.positionSize).toFixed(2))):"--"}</div></div>
+                <div style={{background:"#1e293b",border:posExceedsMax?"1px solid #ef4444":"none",borderRadius:6,padding:density>=2?"4px 8px":"6px 10px"}}><div style={{fontSize:9,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>Position</div><div style={{fontSize:density>=2?12:14,fontWeight:700,color:posExceedsMax?"#ef4444":"#94a3b8",marginTop:1}}>{/* CHANGED: Position size is cost, not P&L — always in dollars, never masked. */}
+{trade.positionSize?("$"+parseFloat(trade.positionSize).toFixed(2)):"--"}</div></div>
                 {/* CHANGED: Stop Loss MAX now sits inline as a 4th tile on laptop (matches the styling of the others). On mobile it falls back to the dedicated banner below. */}
                 {!props.mobile&&trade.stopLoss&&(
                   <div style={{background:"#2a0f0f",border:"1px solid #7f1d1d",borderRadius:6,padding:density>=2?"4px 8px":"6px 10px"}}><div style={{fontSize:9,color:"#fca5a5",letterSpacing:1,textTransform:"uppercase",opacity:0.85}}>Stop Loss MAX</div><div style={{fontSize:density>=2?12:14,fontWeight:700,color:"#fca5a5",marginTop:1}}>${parseFloat(trade.stopLoss).toFixed(2)}</div></div>
@@ -9081,6 +9094,32 @@ function PerformanceTab(props){
     (t.entries||[]).forEach(function(e){var c=parseFloat(e&&e.contracts),p=parseFloat(e&&e.price);if(!isNaN(c)&&c>0&&!isNaN(p)){_acpCost+=c*p;_acpQty+=c;}});
   });
   var avgContractPrice=_acpQty>0?_acpCost/_acpQty:0;
+  // CHANGED: Stop-held rate. The entire scaling ladder (SCALING_TIERS) computes risk-per-trade as
+  // contracts x riskPerContract, which silently assumes the stop actually holds at that per-contract
+  // figure. It frequently does not: measured across the full journal, realized loss per contract has
+  // a median of ~$23 but a p90 of ~$62 and a max of ~$108, so roughly a quarter of losers blow
+  // through the configured cap and the ladder's risk math understates true exposure on those trades.
+  // This metric surfaces the breach rate directly: of losing trades in the selected range where
+  // contracts are known, the share whose realized loss per contract stayed at or under
+  // settings.riskPerContract. A ratio, so it shows in every display mode.
+  var stopStats=(function(){
+    var cap=parseFloat(settings&&settings.riskPerContract);
+    if(!(cap>0))return null;
+    var n=0,held=0,worst=0,sum=0;
+    losses.forEach(function(t){
+      var c=0;
+      (t.entries||[]).forEach(function(e){var q=parseFloat(e&&e.contracts);if(!isNaN(q)&&q>0)c+=q;});
+      if(!(c>0)){var d=parseFloat(t.contracts);if(!isNaN(d)&&d>0)c=d;}
+      if(!(c>0))return;
+      var per=Math.abs(tradeNetPnl(t))/c;
+      if(!isFinite(per))return;
+      n++;sum+=per;
+      if(per<=cap)held++;
+      if(per>worst)worst=per;
+    });
+    if(!n)return null;
+    return {n:n,held:held,pct:100*held/n,cap:cap,avg:sum/n,worst:worst};
+  })();
   // CHANGED: Max losing streak — longest run of consecutive losing trades (chronological, by date
   // then time) in the selected range. A count, so it's shown in every display mode.
   var maxLossStreak=(function(){
@@ -9248,12 +9287,7 @@ function PerformanceTab(props){
                   return ma-mb;
                 });
                 function computeTradePos(slice){var t=slice[0]&&slice[0].trades&&slice[0].trades[0];if(!t)return null;var p=parseFloat(t.positionSize);return (!isNaN(p)&&p>0)?p:null;}
-                function computeTradePosPct(slice){
-                  var p=computeTradePos(slice);if(p==null)return null;
-                  var bal=0;try{bal=getAccountBalanceAtDate(slice[0].date);}catch(e){}
-                  return bal>0?(p/bal*100):null;
-                }
-                if(HIDE_DOLLAR_PNL)return <MetricChart entries={perTradeRows} perPoint={true} label="Position Size" color="#a5b4fc" compute={computeTradePosPct} format={fmtPct}/>;
+                // CHANGED: Always plot dollars — position size is cost, not P&L, so it is not hidden.
                 return <MetricChart entries={perTradeRows} perPoint={true} label="Position Size" color="#a5b4fc" compute={computeTradePos} format={function(v){return "$"+Math.round(v).toLocaleString();}}/>;
               }
               // CHANGED: Avg Contract Price chart — per-trade points of each trade's volume-weighted
@@ -9263,7 +9297,26 @@ function PerformanceTab(props){
                 filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(t&&t.status!=="open")acpRows.push({date:r.date,trades:[t]});});});
                 acpRows.sort(function(a,b){var da=new Date(a.date).getTime(),db=new Date(b.date).getTime();if(da!==db)return da-db;var ma=parseTimeToMinsOfDay(a.trades[0].time)||0,mb=parseTimeToMinsOfDay(b.trades[0].time)||0;return ma-mb;});
                 function computeTradeCP(slice){var t=slice[0]&&slice[0].trades&&slice[0].trades[0];if(!t)return null;var cost=0,qty=0;(t.entries||[]).forEach(function(e){var c=parseFloat(e&&e.contracts),p=parseFloat(e&&e.price);if(!isNaN(c)&&c>0&&!isNaN(p)){cost+=c*p;qty+=c;}});return qty>0?cost/qty:null;}
-                return <MetricChart entries={acpRows} perPoint={true} label="Contract Price" color="#a5b4fc" compute={computeTradeCP} format={HIDE_AMOUNTS?maskFmt:function(v){return "$"+v.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});}}/>;
+                {/* CHANGED: Always plot dollars — entry cost, not P&L. */}
+                return <MetricChart entries={acpRows} perPoint={true} label="Contract Price" color="#a5b4fc" compute={computeTradeCP} format={function(v){return "$"+v.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});}}/>;
+              }
+              // CHANGED: Stop Held chart — realized loss per contract for each LOSING trade in
+              // chronological order, so breaches of the configured riskPerContract cap are visible as
+              // spikes rather than just a single aggregate percentage. Losers only; winners have no
+              // stop outcome to measure. A per-contract dollar figure (a cost), so never masked.
+              if(selectedMetric==="stopHeld"){
+                var shRows=[];
+                filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(t&&t.status!=="open"&&tradeNetPnl(t)<0)shRows.push({date:r.date,trades:[t]});});});
+                shRows.sort(function(a,b){var da=new Date(a.date).getTime(),db=new Date(b.date).getTime();if(da!==db)return da-db;var ma=parseTimeToMinsOfDay(a.trades[0].time)||0,mb=parseTimeToMinsOfDay(b.trades[0].time)||0;return ma-mb;});
+                function computeLossPerCt(slice){
+                  var t=slice[0]&&slice[0].trades&&slice[0].trades[0];if(!t)return null;
+                  var c=0;(t.entries||[]).forEach(function(e){var q=parseFloat(e&&e.contracts);if(!isNaN(q)&&q>0)c+=q;});
+                  if(!(c>0)){var d=parseFloat(t.contracts);if(!isNaN(d)&&d>0)c=d;}
+                  if(!(c>0))return null;
+                  var per=Math.abs(tradeNetPnl(t))/c;
+                  return isFinite(per)?per:null;
+                }
+                return <MetricChart entries={shRows} perPoint={true} label="Loss / Contract" color="#ef4444" compute={computeLossPerCt} format={function(v){return "$"+v.toFixed(2);}}/>;
               }
               // CHANGED: Max Loss Streak chart — per-trade points of the running consecutive-loss count
               // (resets to 0 on any non-losing trade). The tile shows the peak; the chart shows where
@@ -9304,25 +9357,24 @@ function PerformanceTab(props){
                 <StatTile label="Loss Rate" active={selectedMetric==="lossRate"} onClick={function(){setSelectedMetric("lossRate");}} value={(100-winRate-breakevenRate)+"%"} color="#ef4444" sub={losses.length+" losses"}/>
                 {/* CHANGED: Order — WR / LR / Avg Pos Size in row 2; Avg Win / Avg Loss / Expectancy
                    in row 3. Reads as: rates first, then per-trade outcomes. */}
-                {/* CHANGED: Avg Pos Size shows % of current account balance when Hide-$ is on
-                   (avgPosSize / currentAccount × 100) — gives a meaningful unit without exposing
-                   the dollar figure. */}
-                <StatTile label="Avg Pos Size" active={selectedMetric==="avgPosSize"} onClick={function(){setSelectedMetric("avgPosSize");}} value={(function(){
-                  if(HIDE_AMOUNTS)return AMT_MASK;
-                  if(!HIDE_DOLLAR_PNL)return "$"+avgPosSize.toFixed(0);
-                  var bal=0;try{bal=computeAccountBalance(0);}catch(e){}
-                  if(bal<=0||avgPosSize<=0)return "—";
-                  return (avgPosSize/bal*100).toFixed(2)+"%";
-                })()} color="#94a3b8" sub={posSizes.length+" trades"}/>
+                {/* CHANGED: Avg Pos Size is COST, not P&L — it's what you deployed, not what you made,
+                   so it stays visible in every display mode. Hiding it removed a number needed to
+                   size the next trade while revealing nothing about performance. */}
+                <StatTile label="Avg Pos Size" active={selectedMetric==="avgPosSize"} onClick={function(){setSelectedMetric("avgPosSize");}} value={avgPosSize>0?("$"+avgPosSize.toFixed(0)):"—"} color="#94a3b8" sub={posSizes.length+" trades"}/>
                 <StatTile label="Avg Win" active={selectedMetric==="avgWin"} onClick={function(){setSelectedMetric("avgWin");}} value={HIDE_AMOUNTS?AMT_MASK:avgWinPct()} color="#22c55e" sub={hideCurrency()?"":("+$"+avgWin.toFixed(0))}/>
                 <StatTile label="Avg Loss" active={selectedMetric==="avgLoss"} onClick={function(){setSelectedMetric("avgLoss");}} value={HIDE_AMOUNTS?AMT_MASK:avgLossPct()} color="#ef4444" sub={hideCurrency()?"":("-$"+Math.abs(avgLoss).toFixed(0))}/>
                 <StatTile label="Expectancy" active={selectedMetric==="expectancy"} onClick={function(){setSelectedMetric("expectancy");}} value={HIDE_AMOUNTS?AMT_MASK:expPct()} color={expValue>=0?"#22c55e":"#ef4444"} sub={hideCurrency()?"":((expValue>=0?"+":"-")+"$"+Math.abs(expValue).toFixed(2))}/>
-                {/* CHANGED: Avg contract price over the selected range — volume-weighted mean entry
-                   price per contract. Click to chart price per trade. Masked in W/L mode. */}
-                <StatTile label="Avg Contract Price" active={selectedMetric==="avgContractPrice"} onClick={function(){setSelectedMetric("avgContractPrice");}} value={HIDE_AMOUNTS?AMT_MASK:(avgContractPrice>0?("$"+avgContractPrice.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})):"—")} color="#94a3b8" sub={_acpQty>0?(Math.round(_acpQty)+" contracts"):""}/>
+                {/* CHANGED: Avg contract price is an entry cost, not P&L — never masked, same reasoning
+                   as Avg Pos Size. Volume-weighted mean entry price per contract. */}
+                <StatTile label="Avg Contract Price" active={selectedMetric==="avgContractPrice"} onClick={function(){setSelectedMetric("avgContractPrice");}} value={avgContractPrice>0?("$"+avgContractPrice.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})):"—"} color="#94a3b8" sub={_acpQty>0?(Math.round(_acpQty)+" contracts"):""}/>
                 {/* CHANGED: Max losing streak over the selected range — longest consecutive run of
                    losing trades. Click to chart the running loss streak. A count, shown in all modes. */}
                 <StatTile label="Max Loss Streak" active={selectedMetric==="maxLossStreak"} onClick={function(){setSelectedMetric("maxLossStreak");}} value={maxLossStreak} color={maxLossStreak>0?"#ef4444":"#94a3b8"} sub={maxLossStreak===1?"1 trade":(maxLossStreak+" trades")}/>
+                {/* CHANGED: Stop Held — share of losing trades whose realized loss per contract stayed
+                   within settings.riskPerContract. This is the assumption the whole scaling ladder
+                   rests on, so it belongs on the Overview next to the streak. Amber under 85%, red
+                   under 70%. A ratio, shown in all display modes. */}
+                {stopStats?<StatTile label="Stop Held" active={selectedMetric==="stopHeld"} onClick={function(){setSelectedMetric("stopHeld");}} value={Math.round(stopStats.pct)+"%"} color={stopStats.pct>=85?"#22c55e":(stopStats.pct>=70?"#f59e0b":"#ef4444")} sub={stopStats.held+"/"+stopStats.n+" within $"+Math.round(stopStats.cap)}/>:null}
               </div>
               {/* CHANGED: Chart embedded directly under Overview tiles — clicking a tile swaps the chart. */}
               <div style={{marginTop:14,paddingTop:12,borderTop:"1px solid #1e293b"}}>{renderChart()}</div>
