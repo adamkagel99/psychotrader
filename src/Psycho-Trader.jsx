@@ -415,15 +415,21 @@ function getBase(a){
 // ~$29/contract, p75 ~$38 — but it is NOT $25, so the ladder runs hotter than previously stated.
 // Risk% at activation by tier: 3.6, 3.6, 3.6, 3.6, 3.4, 2.9, 2.6, 2.3.
 //
-// CHANGED: the $5,000 tier threshold moved to $6,000. It was the one re-risking step on an
+// CHANGED: the $5,000 tier's contract count cut from 6 to 5. It was the one re-risking step on an
 // otherwise monotonically de-risking curve: contracts tripled (2 -> 6) while the threshold only
 // 2.5x'd, spiking risk-per-trade to 4.4% and position to 9.8% at activation — the hottest point on
-// the whole ladder, and higher than the $2,000 tier below it. Raising the threshold (rather than
-// cutting the contract count to 5) flattens activation risk back to ~3.6% without reducing size
-// for anyone already past $6,600.
+// the whole ladder, and higher than the $2,000 tier below it. Five contracts puts activation risk at
+// 3.64%, exactly matching the $2,000 and $10,000 tiers, so the curve is now flat-then-declining.
+//
+// CHANGED: this was briefly implemented as a threshold move (5000 -> 6000, keeping 6 contracts) on
+// the theory that it would not reduce anyone's current size. That was wrong: with the +10%
+// activation buffer, a $6,000 threshold does not open until $6,600, so a real balance in the
+// $5,500-$6,600 band fell back to the $2,000 tier and lost 6 contracts for 2. Cutting the contract
+// count instead keeps the $5,500 activation point intact. NOTE for future analysis: account balance
+// is transfers + lifetime P&L, so lifetime P&L ALONE overstates it by the net withdrawn.
 var SCALING_TIERS=[
   {bal:2000,contracts:2},
-  {bal:6000,contracts:6},
+  {bal:5000,contracts:5},
   {bal:10000,contracts:10},
   {bal:18000,contracts:18},
   {bal:30000,contracts:28},
