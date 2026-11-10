@@ -8062,12 +8062,26 @@ function MetricChart(props){
     var v=compute(slice);
     if(v!=null&&!isNaN(v))pts.push({date:sorted[i].date,v:v});
   }
+  // CHANGED: sortByValue turns the chart from a time series into a sorted distribution (an
+  // exceedance curve). Needed for threshold-compliance metrics where the points are independent
+  // draws rather than a sequence — connecting unrelated events with a line invites the reader to
+  // see a trend in the slope, and there isn't one. Sorted, the slope IS meaningful: it shows where
+  // the mass sits and how far the tail runs. The x-axis stops being time, so date-based footer
+  // labels and cross-chart hover sync are both suppressed below.
+  var sortByValue=!!props.sortByValue;
+  if(sortByValue)pts.sort(function(a,b){return a.v-b.v;});
   if(pts.length<1)return <div style={{padding:24,textAlign:"center",fontSize:12,color:"#64748b"}}>{minTrades>0?("Need at least "+minTrades+" trades for a meaningful trend."):"Not enough data to chart."}</div>;
   // CHANGED: Geometry + visuals match EquityCurve — same viewBox, area fill, dashed baseline,
   // footer with first/last/peak labels — so all charts in the Overview block read consistently.
   var W=320,H=80,padX=4,padY=6;
   var minV=Math.min.apply(null,pts.map(function(p){return p.v;}));
   var maxV=Math.max.apply(null,pts.map(function(p){return p.v;}));
+  // CHANGED: refLine draws a labeled horizontal threshold ({value,label,color}). Added because a
+  // compliance metric is unreadable without the line it is measured against — the reader otherwise
+  // has to hold the threshold in their head and compare it to an unlabeled axis. The threshold is
+  // folded into the y-range here so it can never fall outside the plot.
+  var refLine=props.refLine&&isFinite(props.refLine.value)?props.refLine:null;
+  if(refLine){if(refLine.value<minV)minV=refLine.value;if(refLine.value>maxV)maxV=refLine.value;}
   // Anchor baseline to 0 when the data straddles or is near 0 (rates, expectancy). When all values
   // are far from 0 (e.g. cumulative trade count), keep the range tight to maximize resolution.
   var anchorZero=(minV<=0&&maxV>=0)||(minV>=0&&minV<(maxV-minV)*0.25);
@@ -8094,12 +8108,14 @@ function MetricChart(props){
     // CHANGED: Sync broadcasts only when this chart's domain matches DailyPnLBar's full range —
     // i.e. no minTrades filter dropped early days. Otherwise the same screen X represents
     // different dates on the two charts, so cross-chart hover would land wrong.
-    if(minTrades<=0)setSharedDate(pts[idx]&&pts[idx].date||null);
+    // CHANGED: also suppressed when sortByValue — the x-axis is rank, not date, so broadcasting
+    // would highlight an unrelated day on every other chart.
+    if(minTrades<=0&&!sortByValue)setSharedDate(pts[idx]&&pts[idx].date||null);
   }
-  function handleLeave(){setHoverIdx(null);if(minTrades<=0)setSharedDate(null);}
+  function handleLeave(){setHoverIdx(null);if(minTrades<=0&&!sortByValue)setSharedDate(null);}
   // CHANGED: Same gate — only accept inbound shared hover when domains match.
   var effectiveHoverIdx=hoverIdx;
-  if(minTrades<=0&&sharedDate&&hoverIdx==null){
+  if(minTrades<=0&&!sortByValue&&sharedDate&&hoverIdx==null){
     var found=pts.findIndex(function(p){return p.date===sharedDate;});
     if(found>=0)effectiveHoverIdx=found;
   }
@@ -8115,7 +8131,11 @@ function MetricChart(props){
              aware readouts (e.g. Trades chart's trading time scoped to the hovered day). */}
           {props.meta&&<div style={{fontSize:11,color:"#94a3b8",fontWeight:600,fontVariantNumeric:"tabular-nums"}}>{typeof props.meta==="function"?props.meta(display,effectiveHoverIdx!=null):props.meta}</div>}
         </div>
-        <div style={{textAlign:"right"}}>
+        {/* CHANGED: hideChange suppresses the Change readout. It computes last − first, which is
+           only meaningful on a time series. On a sorted distribution that is just (max − min), and
+           on a per-trade chart of independent events it is the difference between two unrelated
+           trades presented as a trend. */}
+        {!props.hideChange&&<div style={{textAlign:"right"}}>
           <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Change</div>
           {/* CHANGED: Removed the manual "+" prefix — fmt() now owns its own sign for $/% formats,
              so prepending here produced "++2.85%". For raw-number formats fmt won't have a sign,
@@ -8123,12 +8143,20 @@ function MetricChart(props){
           {/* CHANGED: Change color can be inverted (loss rate, avg loss — where a rising value is
              BAD). With invertChange, a positive delta colors red and a negative delta green. */}
           <div style={{fontSize:13,fontWeight:700,color:(props.invertChange?delta<=0:delta>=0)?"#22c55e":"#ef4444",marginTop:4,fontVariantNumeric:"tabular-nums"}}>{(function(){var s=fmt(delta);if(/^[+\-]/.test(s))return s;return (delta>=0?"+":"")+s;})()}</div>
-        </div>
+        </div>}
       </div>
       <svg ref={svgRef} viewBox={"0 0 "+W+" "+H} style={{display:"block",width:"100%",height:"100%",flex:1,minHeight:120,touchAction:"none",cursor:"crosshair"}} preserveAspectRatio="none" onMouseMove={handleMove} onMouseLeave={handleLeave} onTouchStart={handleMove} onTouchMove={handleMove} onTouchEnd={handleLeave}>
         {anchorZero&&<line x1={padX} x2={W-padX} y1={yFor(0)} y2={yFor(0)} stroke="#334155" strokeWidth="0.5" strokeDasharray="2,2"/>}
         <path d={areaPath} fill={color+"22"} stroke="none"/>
         <path d={linePath} fill="none" stroke={color} strokeWidth="1.5"/>
+        {/* CHANGED: the threshold line, drawn over the area but under the hover cursor, with its
+           label inset at the left so it reads without a legend. */}
+        {refLine&&(
+          <g>
+            <line x1={padX} x2={W-padX} y1={yFor(refLine.value)} y2={yFor(refLine.value)} stroke={refLine.color||"#f59e0b"} strokeWidth="0.8" strokeDasharray="4,3"/>
+            {refLine.label&&<text x={padX+2} y={yFor(refLine.value)-2.5} fill={refLine.color||"#f59e0b"} fontSize="7" fontWeight="700">{refLine.label}</text>}
+          </g>
+        )}
         {effectiveHoverIdx!=null&&(
           <g>
             <line x1={xFor(effectiveHoverIdx)} x2={xFor(effectiveHoverIdx)} y1={padY} y2={H-padY} stroke="#cbd5e1" strokeWidth="0.6" strokeDasharray="2,2"/>
@@ -8146,10 +8174,14 @@ function MetricChart(props){
           );})()}
         </div>
       ):(
+        /* CHANGED: footer adapts. On a time series it still shows first date / peak / last date.
+           On a sorted distribution the end dates are arbitrary, so it shows low / high / n
+           instead. peakLabel lets a loss metric say "worst" rather than "peak", which on a chart
+           of losses reads as an achievement. */
         <div style={{display:"flex",justifyContent:"space-between",marginTop:6,fontSize:10,color:"#64748b",fontWeight:600}}>
-          <span>{first.date}</span>
-          <span>peak {fmt(peak.v)}</span>
-          <span>{last.date}</span>
+          <span>{sortByValue?("low "+fmt(pts[0].v)):first.date}</span>
+          <span>{(props.peakLabel||"peak")+" "+fmt(peak.v)}</span>
+          <span>{sortByValue?(pts.length+" trades"):last.date}</span>
         </div>
       )}
       {/* CHANGED: Inline note explaining why the line doesn't start at the range's left edge on
@@ -9111,20 +9143,27 @@ function PerformanceTab(props){
   var stopStats=(function(){
     var cap=parseFloat(settings&&settings.riskPerContract);
     if(!(cap>0))return null;
-    var n=0,held=0,worst=0,sum=0;
+    var n=0,held=0,worst=0,sum=0,skipped=0,breachSum=0;
     losses.forEach(function(t){
       var c=0;
       (t.entries||[]).forEach(function(e){var q=parseFloat(e&&e.contracts);if(!isNaN(q)&&q>0)c+=q;});
       if(!(c>0)){var d=parseFloat(t.contracts);if(!isNaN(d)&&d>0)c=d;}
-      if(!(c>0))return;
+      // CHANGED: count the losers we cannot measure instead of dropping them silently. Without
+      // this the denominator shrinks invisibly and the rate looks more precise than it is.
+      if(!(c>0)){skipped++;return;}
       var per=Math.abs(tradeNetPnl(t))/c;
-      if(!isFinite(per))return;
+      if(!isFinite(per)){skipped++;return;}
       n++;sum+=per;
-      if(per<=cap)held++;
+      if(per<=cap)held++;else breachSum+=per;
       if(per>worst)worst=per;
     });
     if(!n)return null;
-    return {n:n,held:held,pct:100*held/n,cap:cap,avg:sum/n,worst:worst};
+    var nb=n-held;
+    // CHANGED: avgBreach and worst exist because the headline rate is severity-blind — a $41 miss
+    // and a $108 miss are the same event to it. Surfaced in the tile subtitle so the tile cannot
+    // read "77%, mostly fine" while hiding a 2.7x overshoot.
+    return {n:n,held:held,breaches:nb,pct:100*held/n,cap:cap,avg:sum/n,worst:worst,
+            avgBreach:nb>0?breachSum/nb:0,worstX:cap>0?worst/cap:0,skipped:skipped};
   })();
   // CHANGED: Max losing streak — longest run of consecutive losing trades (chronological, by date
   // then time) in the selected range. A count, so it's shown in every display mode.
@@ -9306,10 +9345,18 @@ function PerformanceTab(props){
                 {/* CHANGED: Always plot dollars — entry cost, not P&L. */}
                 return <MetricChart entries={acpRows} perPoint={true} label="Contract Price" color="#a5b4fc" compute={computeTradeCP} format={function(v){return "$"+v.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});}}/>;
               }
-              // CHANGED: Stop Held chart — realized loss per contract for each LOSING trade in
-              // chronological order, so breaches of the configured riskPerContract cap are visible as
-              // spikes rather than just a single aggregate percentage. Losers only; winners have no
-              // stop outcome to measure. A per-contract dollar figure (a cost), so never masked.
+              // CHANGED: Within-Risk-Cap chart — realized loss per contract for every losing trade,
+              // sorted ascending into an exceedance curve with the configured riskPerContract cap
+              // drawn across it. The x-position where the curve crosses the cap line IS the tile's
+              // percentage, so tile and chart now state the same fact, and the height of the tail
+              // past the line shows breach severity, which the tile's single percentage cannot.
+              // Losers only; winners have no stop outcome to measure. A per-contract dollar figure
+              // (a cost), so never masked.
+              // CHANGED: this replaced a chronological line chart that was actively misleading. It
+              // drew no cap line, spent 63% of its vertical space on four outliers while cramming
+              // 77% of the data into the bottom third, labeled the maximum "peak", and — worst —
+              // reported (last − first) as "Change" in green, so a run ending on a large
+              // per-contract loss was presented as improvement.
               if(selectedMetric==="stopHeld"){
                 var shRows=[];
                 filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(t&&t.status!=="open"&&tradeNetPnl(t)<0)shRows.push({date:r.date,trades:[t]});});});
@@ -9322,7 +9369,8 @@ function PerformanceTab(props){
                   var per=Math.abs(tradeNetPnl(t))/c;
                   return isFinite(per)?per:null;
                 }
-                return <MetricChart entries={shRows} perPoint={true} label="Loss / Contract" color="#ef4444" compute={computeLossPerCt} format={function(v){return "$"+v.toFixed(2);}}/>;
+                var shCap=parseFloat(settings&&settings.riskPerContract);
+                return <MetricChart entries={shRows} perPoint={true} sortByValue={true} hideChange={true} peakLabel="worst" label="Loss / Contract" color="#ef4444" compute={computeLossPerCt} format={function(v){return "$"+v.toFixed(2);}} refLine={shCap>0?{value:shCap,label:"cap $"+Math.round(shCap),color:"#f59e0b"}:null} meta={stopStats?(Math.round(stopStats.pct)+"% within cap"+(stopStats.skipped>0?(" · "+stopStats.skipped+" excl."):"")):null}/>;
               }
               // CHANGED: Max Loss Streak chart — per-trade points of the running consecutive-loss count
               // (resets to 0 on any non-losing trade). The tile shows the peak; the chart shows where
@@ -9376,11 +9424,17 @@ function PerformanceTab(props){
                 {/* CHANGED: Max losing streak over the selected range — longest consecutive run of
                    losing trades. Click to chart the running loss streak. A count, shown in all modes. */}
                 <StatTile label="Max Loss Streak" active={selectedMetric==="maxLossStreak"} onClick={function(){setSelectedMetric("maxLossStreak");}} value={maxLossStreak} color={maxLossStreak>0?"#ef4444":"#94a3b8"} sub={maxLossStreak===1?"1 trade":(maxLossStreak+" trades")}/>
-                {/* CHANGED: Stop Held — share of losing trades whose realized loss per contract stayed
-                   within settings.riskPerContract. This is the assumption the whole scaling ladder
-                   rests on, so it belongs on the Overview next to the streak. Amber under 85%, red
-                   under 70%. A ratio, shown in all display modes. */}
-                {stopStats?<StatTile label="Stop Held" active={selectedMetric==="stopHeld"} onClick={function(){setSelectedMetric("stopHeld");}} value={Math.round(stopStats.pct)+"%"} color={stopStats.pct>=85?"#22c55e":(stopStats.pct>=70?"#f59e0b":"#ef4444")} sub={stopStats.held+"/"+stopStats.n+" within $"+Math.round(stopStats.cap)}/>:null}
+                {/* CHANGED: Within Risk Cap — share of losing trades whose realized loss per contract
+                   stayed within settings.riskPerContract. This is the assumption the whole scaling
+                   ladder rests on, so it belongs on the Overview next to the streak. Amber under
+                   85%, red under 70%. A ratio, shown in all display modes.
+                   CHANGED: renamed from "Stop Held". That name asserted a cause the data cannot
+                   support — a loss exceeds the per-contract cap from slippage, from a stop widened
+                   by hand, from a stop never placed at that level, or from averaging down shifting
+                   the per-contract math. The metric only knows the cap was exceeded, not why.
+                   CHANGED: subtitle now carries the worst breach as a multiple of the cap, since
+                   the headline percentage treats a $41 miss and a $108 miss identically. */}
+                {stopStats?<StatTile label="Within Risk Cap" active={selectedMetric==="stopHeld"} onClick={function(){setSelectedMetric("stopHeld");}} value={Math.round(stopStats.pct)+"%"} color={stopStats.pct>=85?"#22c55e":(stopStats.pct>=70?"#f59e0b":"#ef4444")} sub={stopStats.held+"/"+stopStats.n+" ≤ $"+Math.round(stopStats.cap)+(stopStats.worstX>1?(" · worst "+stopStats.worstX.toFixed(1)+"×"):"")}/>:null}
               </div>
               {/* CHANGED: Chart embedded directly under Overview tiles — clicking a tile swaps the chart. */}
               <div style={{marginTop:14,paddingTop:12,borderTop:"1px solid #1e293b"}}>{renderChart()}</div>
