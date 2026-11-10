@@ -87,6 +87,9 @@ const SKIP_KEYS = new Set([
   "tf-aicoach-result",
   "tf-aicoach-question",
   "tf-progress-collapsed",
+  // CHANGED: per-device chart preference, like tf-view-mode. Syncing it would let a toggle flipped
+  // on a laptop silently change what the phone shows on its next pull.
+  "tf-riskcap-view",
   "tf-stats-range",
   // CHANGED: Behavioral-nudge UI state — per-device session flags, not cross-device data.
   // Syncing them creates race conditions where a cloud reconcile wipes the local toggle before

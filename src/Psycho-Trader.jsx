@@ -1244,6 +1244,27 @@ function hideCurrency(){return HIDE_DOLLAR_PNL||HIDE_AMOUNTS;}
 // tf-settings blob, so a resync — or the full page reload a resync triggers — could pull an older
 // "showing $" copy and unhide amounts the user had deliberately hidden. Storing it per-device fixes
 // that: a sync never resurrects a stale view mode. "usd" = show $, "pct" = % / R, "wl" = win/loss only.
+// CHANGED: Risk-cap chart view — "usd" measures realized loss per contract in dollars against
+// settings.riskPerContract (a SIZING question: did I stay inside my per-contract risk budget?),
+// "pct" measures loss as a percentage of what the contracts cost, against settings.riskMaxPct
+// (a STOP question: did I honour my stop?). Both are real and they disagree sharply whenever
+// contract prices vary — a fixed dollar loss is a far bigger percentage on a cheap contract than
+// an expensive one, so the dollar view alone flatters a book of mixed-price contracts.
+// Stored per-device and kept out of cloud sync, like tf-view-mode: a chart preference set on a
+// laptop should not change what a phone shows.
+var RISKCAP_VIEW_KEY="tf-riskcap-view";
+function loadRiskCapView(){try{var v=localStorage.getItem(RISKCAP_VIEW_KEY);if(v==="usd"||v==="pct")return v;}catch(e){}return "usd";}
+function saveRiskCapView(v){try{localStorage.setItem(RISKCAP_VIEW_KEY,v);}catch(e){}}
+// The measured value and the cap it is judged against, for one trade, in the active view.
+function riskCapValueOf(t,view){
+  if(view==="pct"){var p=parseFloat(t&&t.pctPnl);return (isNaN(p)||p>=0)?null:Math.abs(p);}
+  var c=tradeTotalContracts(t);if(!(c>0))return null;
+  var v=Math.abs(tradeNetPnl(t))/c;return isFinite(v)?v:null;
+}
+function riskCapCapOf(settings,view){
+  if(view==="pct")return parseFloat(settings&&settings.riskMaxPct)||0;
+  return parseFloat(settings&&settings.riskPerContract)||0;
+}
 var VIEW_MODE_KEY="tf-view-mode";
 function hideFromMode(m){
   if(m==="pct")return {hideDollarPnL:true,hideAmounts:false};
@@ -7517,33 +7538,60 @@ function RiskCapHistogram(props){
   var [hoverI,setHoverI]=useState(null);
   var barsRef=React.useRef(null);
   var rows=props.rows||[],cap=parseFloat(props.cap)||0;
+  var view=props.view==="pct"?"pct":"usd";
+  var isPct=view==="pct";
   var vals=[],skipped=0;
   rows.forEach(function(r){
     (r.trades||[]).forEach(function(t){
       if(!t||t.status==="open")return;
       var pnl=(isNaN(parseFloat(t.pnl))?NaN:tradeNetPnl(t));
       if(isNaN(pnl)||pnl>=0)return;
-      var c=tradeTotalContracts(t);
-      if(!(c>0)){skipped++;return;}
-      var per=Math.abs(pnl)/c;
-      if(!isFinite(per)){skipped++;return;}
-      vals.push(per);
+      var v=riskCapValueOf(t,view);
+      if(v==null){skipped++;return;}
+      vals.push(v);
     });
   });
   if(cap<=0||vals.length<3)return null;
-  var mults=[0,0.25,0.5,0.75,1,1.25,1.5,2,Infinity];
+  // CHANGED: bins were quarters-of-cap, which produced arbitrary-looking edges whenever the cap was
+  // not a round number (a $45 cap gave 11.25 / 22.5 / 33.75, rendered as "11–23", "23–34"), and —
+  // worse — they were NOT equal width: the 1.5x-2x bin spanned twice the range of its neighbours and
+  // the top bin was unbounded, so bar heights were not comparable and the histogram misrepresented
+  // density. Now every bin is the same round width, chosen from standard "nice" numbers.
+  var topV=Math.max.apply(null,vals);
+  // CHANGED: bin geometry is derived from the DATA only, never from the cap. It used to pad the
+  // span to cap*1.25 and prefer a width dividing the cap, which meant editing riskPerContract
+  // rebinned the chart and changed its shape — so the before/after of a settings change was not
+  // comparable, for a reason unrelated to trading. The cap only has to stay on-screen; it is drawn
+  // at its exact fractional position regardless of where the bin edges fall.
+  var span=Math.max(topV,cap);
+  // Target bin count follows the square-root rule, clamped to what stays legible at this width.
+  var target=Math.max(5,Math.min(9,Math.round(Math.sqrt(vals.length))));
+  var binW=(function(){
+    var cands=[0.5,1,2,2.5,5,10,15,20,25,50,100,200,250,500,1000],best=null,bestScore=1e9;
+    for(var i=0;i<cands.length;i++){
+      var w=cands[i],nb=Math.ceil(span/w);
+      if(nb<5||nb>10)continue;
+      var score=Math.abs(nb-target);
+      if(score<bestScore){bestScore=score;best=w;}
+    }
+    return best||(span/target);
+  })();
+  var nBins=Math.max(1,Math.ceil(span/binW));
+  var rangeTop=nBins*binW;
+  var fmtEdge=function(x){return binW<1?x.toFixed(1):String(Math.round(x));};
   var counts=[],sums=[],labels=[];
-  for(var b=0;b<mults.length-1;b++){
+  for(var b=0;b<nBins;b++){
     counts.push(0);sums.push(0);
-    labels.push(mults[b+1]===Infinity?("≥"+Math.round(cap*2)):(Math.round(cap*mults[b])+"–"+Math.round(cap*mults[b+1])));
+    labels.push(fmtEdge(b*binW)+"–"+fmtEdge((b+1)*binW));
   }
   vals.forEach(function(v){
-    for(var i=0;i<counts.length;i++){
-      var lo=cap*mults[i],hi=mults[i+1]===Infinity?Infinity:cap*mults[i+1];
-      if(v>=lo&&v<hi){counts[i]++;sums[i]+=v;break;}
-    }
+    var i=Math.min(nBins-1,Math.floor(v/binW));
+    counts[i]++;sums[i]+=v;
   });
   var maxCount=Math.max.apply(null,counts);
+  // Exact fractional position of the cap across the plot, so the divider is correct whether or not
+  // the chosen width happens to divide the cap.
+  var capFrac=Math.max(0,Math.min(1,cap/rangeTop));
   var held=vals.filter(function(v){return v<=cap;}).length;
   var pct=100*held/vals.length;
   var breaches=vals.length-held;
@@ -7558,53 +7606,70 @@ function RiskCapHistogram(props){
   // gap between the two is itself the signal that a few outliers are carrying the average.
   var sortedVals=vals.slice().sort(function(a,b){return a-b;});
   var medAll=sortedVals.length%2?sortedVals[(sortedVals.length-1)/2]:(sortedVals[sortedVals.length/2-1]+sortedVals[sortedVals.length/2])/2;
-  var capBin=4; // index of the first bin at/above the cap, given the mults above
   function moveBars(e){
     if(!barsRef.current)return;
     var rect=barsRef.current.getBoundingClientRect();
     var clientX=e.touches?e.touches[0].clientX:e.clientX;
     var ratio=Math.max(0,Math.min(0.9999,(clientX-rect.left)/rect.width));
-    setHoverI(Math.floor(ratio*counts.length));
+    setHoverI(Math.min(counts.length-1,Math.floor(ratio*counts.length)));
   }
   function leaveBars(){setHoverI(null);}
-  var money=function(v){return "$"+v.toFixed(2);};
+  // CHANGED: one formatter for both views so every readout follows the toggle.
+  var money=function(v){return isPct?(v.toFixed(1)+"%"):("$"+v.toFixed(2));};
+  var capLbl=isPct?(Math.round(cap)+"%"):("$"+Math.round(cap));
   var hoverAvg=hoverI!=null&&counts[hoverI]>0?(sums[hoverI]/counts[hoverI]):null;
   return (
     <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid #1e293b",borderRadius:10,display:"flex",flexDirection:"column",boxSizing:"border-box"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10,gap:8}}>
         <div>
-          <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{hoverI!=null?("$"+labels[hoverI]+" / contract"):"Loss per Contract"}</div>
+          <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{hoverI!=null?(labels[hoverI]+(isPct?"% of cost":" $ / contract")):(isPct?"Loss as % of Cost":"Loss per Contract")}</div>
           {hoverI!=null?(
-            <div style={{fontSize:20,fontWeight:700,color:hoverI>=capBin?"#ef4444":"#22c55e",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{counts[hoverI]}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:4}}>{counts[hoverI]===1?"trade":"trades"}{counts[hoverI]>0?(" · avg "+money(hoverAvg)):""}</span></div>
+            <div style={{fontSize:20,fontWeight:700,color:(hoverI+1)*binW<=cap?"#22c55e":(hoverI*binW>=cap?"#ef4444":"#f59e0b"),marginTop:2,fontVariantNumeric:"tabular-nums"}}>{counts[hoverI]}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:4}}>{counts[hoverI]===1?"trade":"trades"}{counts[hoverI]>0?(" · avg "+money(hoverAvg)):""}</span></div>
           ):(
-            <div style={{fontSize:20,fontWeight:700,color:pct>=85?"#22c55e":(pct>=70?"#f59e0b":"#ef4444"),marginTop:2,fontVariantNumeric:"tabular-nums"}}>{Math.round(pct)+"%"}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:4}}>within ${Math.round(cap)} cap</span></div>
+            <div style={{fontSize:20,fontWeight:700,color:pct>=85?"#22c55e":(pct>=70?"#f59e0b":"#ef4444"),marginTop:2,fontVariantNumeric:"tabular-nums"}}>{Math.round(pct)+"%"}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:4}}>within {capLbl} cap</span></div>
           )}
         </div>
         <div style={{textAlign:"right",fontSize:10,color:"#94a3b8",lineHeight:1.55}}>
+          {/* CHANGED: $ / % toggle. The two views answer different questions and disagree whenever
+             contract prices vary, so neither can stand in for the other. */}
+          <div style={{display:"flex",justifyContent:"flex-end",gap:2,marginBottom:4}}>
+            {[["usd","$"],["pct","%"]].map(function(o){
+              var on=view===o[0];
+              return <button key={o[0]} onClick={function(){if(props.onView)props.onView(o[0]);}} style={{padding:"2px 9px",fontSize:10,fontWeight:700,borderRadius:999,cursor:"pointer",border:"1px solid "+(on?"#6366f1":"#1e293b"),background:on?"#6366f122":"transparent",color:on?"#a5b4fc":"#64748b"}}>{o[1]}</button>;
+            })}
+          </div>
           <div>Avg / median: <span style={{color:avgAll<=cap?"#86efac":"#fca5a5",fontWeight:700}}>{money(avgAll)}</span><span style={{color:"#64748b"}}> / {money(medAll)}</span><span style={{color:avgAll<=cap?"#86efac":"#fca5a5",fontWeight:600,marginLeft:4}}>({(avgAll/cap).toFixed(1)}×)</span></div>
           <div>Breaches: <span style={{color:"#fca5a5",fontWeight:700}}>{breaches}</span> of {vals.length}{skipped>0?<span style={{color:"#64748b"}}> · {skipped} excl.</span>:null}</div>
           <div>Avg breach: <span style={{color:"#fca5a5",fontWeight:700}}>{breaches>0?money(avgBreach):"—"}</span>{breaches>0?<span style={{color:"#fca5a5",fontWeight:600,marginLeft:4}}>({(avgBreach/cap).toFixed(1)}×)</span>:null}</div>
           <div>Worst: <span style={{color:"#fca5a5",fontWeight:700}}>{money(worst)}</span><span style={{color:"#fca5a5",fontWeight:600,marginLeft:4}}>({(worst/cap).toFixed(1)}×)</span></div>
         </div>
       </div>
-      <div ref={barsRef} onMouseMove={moveBars} onMouseLeave={leaveBars} onTouchStart={moveBars} onTouchMove={moveBars} onTouchEnd={leaveBars} style={{display:"flex",alignItems:"flex-end",gap:3,height:120,marginBottom:6,cursor:"crosshair",touchAction:"none"}}>
+      {/* CHANGED: no flex gap on this row. With a gap, a bin boundary is not at i/nBins of the
+         row's width, so the cap line could not be placed accurately. Bars are inset instead, and
+         the cap is an absolutely-positioned overlay at its exact fractional position — correct even
+         when the bin width does not divide the cap. */}
+      <div ref={barsRef} onMouseMove={moveBars} onMouseLeave={leaveBars} onTouchStart={moveBars} onTouchMove={moveBars} onTouchEnd={leaveBars} style={{display:"flex",alignItems:"flex-end",height:120,marginBottom:6,cursor:"crosshair",touchAction:"none",position:"relative"}}>
         {counts.map(function(c,i){
           var h=maxCount>0?(c/maxCount)*100:0;
-          var over=i>=capBin;
-          var color=over?"#ef4444":"#22c55e";
+          var lo=i*binW,hi=(i+1)*binW;
+          // A bin wholly inside the cap is green, wholly past it red, and one the cap cuts through
+          // amber — rather than silently rounding it to one side.
+          var color=hi<=cap?"#22c55e":(lo>=cap?"#ef4444":"#f59e0b");
           var isHover=hoverI===i;
           return (
-            <div key={i} style={Object.assign({flex:1,display:"flex",flexDirection:"column",justifyContent:"flex-end",height:"100%",position:"relative"},i===capBin?{borderLeft:"1px dashed #f59e0b",marginLeft:2,paddingLeft:2}:{})}>
-              {i===capBin?<div style={{position:"absolute",top:-2,left:3,fontSize:7,color:"#f59e0b",fontWeight:700,whiteSpace:"nowrap"}}>cap</div>:null}
-              <div style={{height:Math.max(c>0?3:0,h)+"%",background:color,opacity:isHover?1:(c>0?0.72:0.22),borderRadius:"3px 3px 0 0",transition:"opacity .12s"}}/>
+            <div key={i} style={{flex:1,position:"relative",height:"100%"}}>
+              <div style={{position:"absolute",left:1.5,right:1.5,bottom:0,height:Math.max(c>0?3:0,h)+"%",background:color,opacity:isHover?1:(c>0?0.72:0.22),borderRadius:"3px 3px 0 0",transition:"opacity .12s"}}/>
             </div>
           );
         })}
+        <div style={{position:"absolute",top:0,bottom:0,left:(capFrac*100)+"%",width:0,borderLeft:"1px dashed #f59e0b",pointerEvents:"none"}}/>
+        <div style={{position:"absolute",top:-2,left:"calc("+(capFrac*100)+"% + 3px)",fontSize:7,color:"#f59e0b",fontWeight:700,whiteSpace:"nowrap",pointerEvents:"none"}}>cap {capLbl}</div>
       </div>
-      <div style={{display:"flex",gap:3,fontSize:8,color:"#64748b",fontWeight:600}}>
-        {labels.map(function(l,i){return <div key={i} style={{flex:1,textAlign:"center",whiteSpace:"nowrap"}}>{l}</div>;})}
+      {/* Every other label is dropped past 7 bins so they never collide. */}
+      <div style={{display:"flex",fontSize:8,color:"#64748b",fontWeight:600}}>
+        {labels.map(function(l,i){return <div key={i} style={{flex:1,textAlign:"center",whiteSpace:"nowrap",overflow:"hidden"}}>{(labels.length>7&&i%2===1)?"":l}</div>;})}
       </div>
-      <div style={{marginTop:6,fontSize:9,color:"#475569",textAlign:"center"}}>realized loss per contract ($) · losing trades only</div>
+      <div style={{marginTop:6,fontSize:9,color:"#475569",textAlign:"center"}}>{isPct?"realized loss as % of contract cost · losing trades only":"realized loss per contract ($) · losing trades only"}</div>
     </div>
   );
 }
@@ -8002,6 +8067,9 @@ function PerformanceTab(props){
   var [discFilter,setDiscFilter]=useState(function(){try{return localStorage.getItem("tf-stats-disc-filter")||"all";}catch(e){return "all";}});
   // CHANGED: Selected metric for the combined Overview / chart block. Default = totalPnl (equity curve).
   var [selectedMetric,setSelectedMetric]=useState("totalPnl");
+  // CHANGED: the risk-cap view is held here, not inside RiskCapHistogram, so the Overview tile and
+  // the chart can never disagree about which question they are answering.
+  var [riskCapView,setRiskCapView]=useState(loadRiskCapView());
   // CHANGED: Custom mode tracks whether the Custom pill's date inputs are revealed. The actual
   // `range` value stays on the previously-selected preset until the user picks at least one
   // date — so the displayed data doesn't change the moment Custom is tapped.
@@ -8165,18 +8233,14 @@ function PerformanceTab(props){
   // contracts are known, the share whose realized loss per contract stayed at or under
   // settings.riskPerContract. A ratio, so it shows in every display mode.
   var stopStats=(function(){
-    var cap=parseFloat(settings&&settings.riskPerContract);
+    var cap=riskCapCapOf(settings,riskCapView);
     if(!(cap>0))return null;
     var n=0,held=0,worst=0;
+    // Losers the active view cannot measure are skipped; RiskCapHistogram reports how many it
+    // excluded, so the omission is visible there rather than silently shrinking this denominator.
     losses.forEach(function(t){
-      var c=0;
-      (t.entries||[]).forEach(function(e){var q=parseFloat(e&&e.contracts);if(!isNaN(q)&&q>0)c+=q;});
-      if(!(c>0)){var d=parseFloat(t.contracts);if(!isNaN(d)&&d>0)c=d;}
-      // Losers with no contract count cannot be measured; RiskCapHistogram reports how many it
-      // excluded, so the omission is visible there rather than silently shrinking this denominator.
-      if(!(c>0))return;
-      var per=Math.abs(tradeNetPnl(t))/c;
-      if(!isFinite(per))return;
+      var per=riskCapValueOf(t,riskCapView);
+      if(per==null)return;
       n++;
       if(per<=cap)held++;
       if(per>worst)worst=per;
@@ -8385,7 +8449,7 @@ function PerformanceTab(props){
               // diagonal for every possible dataset and showed nothing about the distribution's
               // shape. The histogram shows breach frequency and breach severity together.
               if(selectedMetric==="stopHeld"){
-                return <RiskCapHistogram rows={filtered} cap={parseFloat(settings&&settings.riskPerContract)||0}/>;
+                return <RiskCapHistogram rows={filtered} view={riskCapView} cap={riskCapCapOf(settings,riskCapView)} onView={function(v){setRiskCapView(v);saveRiskCapView(v);}}/>;
               }
               // CHANGED: Max Loss Streak chart — per-trade points of the running consecutive-loss count
               // (resets to 0 on any non-losing trade). The tile shows the peak; the chart shows where
@@ -8449,7 +8513,7 @@ function PerformanceTab(props){
                    the per-contract math. The metric only knows the cap was exceeded, not why.
                    CHANGED: subtitle now carries the worst breach as a multiple of the cap, since
                    the headline percentage treats a $41 miss and a $108 miss identically. */}
-                {stopStats?<StatTile label="Within Risk Cap" active={selectedMetric==="stopHeld"} onClick={function(){setSelectedMetric("stopHeld");}} value={Math.round(stopStats.pct)+"%"} color={stopStats.pct>=85?"#22c55e":(stopStats.pct>=70?"#f59e0b":"#ef4444")} sub={stopStats.held+"/"+stopStats.n+" ≤ $"+Math.round(stopStats.cap)+(stopStats.worstX>1?(" · worst "+stopStats.worstX.toFixed(1)+"×"):"")}/>:null}
+                {stopStats?<StatTile label="Within Risk Cap" active={selectedMetric==="stopHeld"} onClick={function(){setSelectedMetric("stopHeld");}} value={Math.round(stopStats.pct)+"%"} color={stopStats.pct>=85?"#22c55e":(stopStats.pct>=70?"#f59e0b":"#ef4444")} sub={stopStats.held+"/"+stopStats.n+" ≤ "+(riskCapView==="pct"?(Math.round(stopStats.cap)+"%"):("$"+Math.round(stopStats.cap)))+(stopStats.worstX>1?(" · worst "+stopStats.worstX.toFixed(1)+"×"):"")}/>:null}
               </div>
               {/* CHANGED: Chart embedded directly under Overview tiles — clicking a tile swaps the chart. */}
               <div style={{marginTop:14,paddingTop:12,borderTop:"1px solid #1e293b"}}>{renderChart()}</div>
