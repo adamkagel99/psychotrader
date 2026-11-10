@@ -133,8 +133,6 @@ var LEGACY_SESSIONS=[
   {id:"closing",label:"Closing",etStart:940,etEnd:960,color:"#22c55e",defaultEnabled:true,sizeFraction:1,maxTrades:99,notes:""},
   {id:"afterHours",label:"After-Hours",etStart:960,etEnd:1200,color:"#22c55e",defaultEnabled:false,sizeFraction:1,maxTrades:99,notes:""}
 ];
-var SESSIONS=LEGACY_SESSIONS.slice();
-
 function etMinsToTzMins(etMins,tz){var refDate=new Date();var etOffset=getTZOffsetMinutes("America/New_York",refDate);var tzOffset=getTZOffsetMinutes(tz,refDate);var local=etMins+(tzOffset-etOffset);while(local<0)local+=1440;while(local>=1440)local-=1440;return local;}
 function defaultSessionsForTz(tz){
   return LEGACY_SESSIONS.map(function(s){
@@ -161,7 +159,6 @@ function getSessions(settings){
   return defaultSessionsForTz((settings&&settings.timezone)||USER_TIMEZONE||"America/Los_Angeles");
 }
 
-function getCurrentMinutesET(){try{var et=new Date(new Date().toLocaleString("en-US",{timeZone:"America/New_York"}));return et.getHours()*60+et.getMinutes();}catch(e){var n=new Date();return n.getHours()*60+n.getMinutes();}}
 function getCurrentMinutesLocal(){var n=getNow();return n.getHours()*60+n.getMinutes();}
 function fmtMinutes(m){m=((m%1440)+1440)%1440;var h=Math.floor(m/60),mm=m%60;return (h%12||12)+":"+(mm<10?"0"+mm:mm)+" "+(h>=12?"PM":"AM");}
 // CHANGED: Helpers for <input type="time"> which uses 24-hour HH:MM strings.
@@ -170,9 +167,6 @@ function timeStrToMins(s){if(!s||typeof s!=="string")return 0;var p=s.split(":")
 // CHANGED: Helpers for leg timestamps. Each leg stores ms since epoch; the input shows HH:MM (24h).
 function tsToTimeStr(ts){if(!ts)return "";var d=new Date(ts);var h=d.getHours(),mm=d.getMinutes();return (h<10?"0"+h:h)+":"+(mm<10?"0"+mm:mm);}
 function applyTimeStrToTs(ts,s){var base=ts?new Date(ts):new Date();var p=(s||"").split(":");var h=parseInt(p[0])||0,mm=parseInt(p[1])||0;base.setHours(h,mm,0,0);return base.getTime();}
-function getTradingWindows(settings){if(settings&&Array.isArray(settings.tradingWindows)&&settings.tradingWindows.length>0)return settings.tradingWindows;var s=settings&&settings.tradingStartMin!=null?settings.tradingStartMin:60;var e=settings&&settings.tradingEndMin!=null?settings.tradingEndMin:1020;return [{start:s,end:e}];}
-function isWithinTradingWindow(localMins,settings){var ws=getTradingWindows(settings);for(var i=0;i<ws.length;i++){var w=ws[i];if(localMins>=w.start&&localMins<w.end)return true;}return false;}
-
 var CACHED_SESSIONS=[];
 // CHANGED: Parse "h:mm AM/PM" or "HH:mm" (24h) into minutes-of-day. Returns null if unparseable.
 function parseTimeToMinsOfDay(str){
@@ -189,25 +183,6 @@ function parseTimeToMinsOfDay(str){
 // CHANGED: Compute time-in-trade for a single trade in milliseconds. Uses the timestamps stored
 // on each entry/exit leg (already numeric ms). Falls back to openedAt/closedAt or to parsing
 // entryTime/exitTime strings against the trade's date if leg-level timestamps aren't present.
-function tradeDurationMs(t){
-  if(!t||t.status==="open")return 0;
-  var ents=t.entries||[],exs=t.exits||[];
-  var entryT=ents.map(function(e){return Number(e.time);}).filter(function(n){return !isNaN(n)&&n>0;});
-  var exitT=exs.map(function(e){return Number(e.time);}).filter(function(n){return !isNaN(n)&&n>0;});
-  if(entryT.length>0&&exitT.length>0){
-    var first=Math.min.apply(null,entryT);
-    var last=Math.max.apply(null,exitT);
-    if(last>first)return last-first;
-  }
-  // Fallback: openedAt/closedAt numeric timestamps.
-  var op=Number(t.openedAt),cl=Number(t.closedAt);
-  if(!isNaN(op)&&!isNaN(cl)&&cl>op)return cl-op;
-  // Fallback: parse entryTime/exitTime strings against the trade's date.
-  var em=parseTimeToMinsOfDay(t.entryTime||t.time);
-  var xm=parseTimeToMinsOfDay(t.exitTime);
-  if(em!=null&&xm!=null&&xm>em)return (xm-em)*60*1000;
-  return 0;
-}
 // CHANGED: Format a duration in ms as "Hh Mm" / "Mm" / "Ss" — used by the Performance "Time Trading" tile.
 function fmtDurationMs(ms){
   if(!ms||ms<=0)return "0m";
@@ -310,7 +285,6 @@ function getPhaseLabel(phase){
 }
 function todayStr(){return getNow().toLocaleDateString("en-US");}
 function todayDisplay(){return getNow().toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",year:"numeric"});}
-function secToMin(sec){var min=Math.floor(sec/60),fmtMin=min.toString().padStart(2,"0"),s=sec%60,fmtSec=s.toString().padStart(2,"0");return fmtMin+":"+fmtSec;}
 function fmtDuration(ms){var sec=Math.max(0,Math.round(ms/1000));if(sec<60)return sec+"s";var min=Math.floor(sec/60),s=sec%60;if(min<60)return s>0?min+"m "+s+"s":min+"m";var hr=Math.floor(min/60),m=min%60;return m>0?hr+"h "+m+"m":hr+"h";}
 function compressImage(file,maxWidth,quality){
   if(maxWidth==null)maxWidth=1280;if(quality==null)quality=0.7;
@@ -322,8 +296,6 @@ function compressImage(file,maxWidth,quality){
   });
 }
 
-var PHASE_LABELS={preMarket:"Pre-Market",opening:"Opening",midDay:"Mid-Day Lull",afternoon:"Afternoon",closing:"Closing",afterHours:"After-Hours",closed:"Market Closed"};
-var PHASE_COLORS={preMarket:"#6366f1",opening:"#ef4444",midDay:"#f59e0b",afternoon:"#10b981",closing:"#22c55e",afterHours:"#8b5cf6",closed:"#374151"};
 var CANDLE_PATTERNS=["Hammer Bar Break","Inside Bar Break","Bullish Flag","Bearish Flag","Head and Shoulders"];
 var SETUP_TYPES=["Breakout","Fakeout","Trend Cont.","Reversion","VWAP","ORB"];
 // CHANGED: Default indicator list — common technical indicators traders flag on entry.
@@ -367,11 +339,8 @@ function loadOptions(){
 }
 function saveOptions(opts){try{localStorage.setItem(OPTIONS_KEY,JSON.stringify(opts));}catch(e){}}
 function getEmotionSentiment(name,sentiments){var s=(sentiments||{})[name];return s||DEFAULT_EMOTION_SENTIMENTS[name]||"neutral";}
-function isNegEmotion(name,sentiments){return getEmotionSentiment(name,sentiments)==="negative";}
-function isPosEmotion(name,sentiments){return getEmotionSentiment(name,sentiments)==="positive";}
 function getStoredSentiments(){try{var s=localStorage.getItem(OPTIONS_KEY);if(s){var p=JSON.parse(s);return p.emotionSentiments||DEFAULT_EMOTION_SENTIMENTS;}}catch(e){}return DEFAULT_EMOTION_SENTIMENTS;}
 function emotionTagColor(name,sentiments){var s=getEmotionSentiment(name,sentiments||getStoredSentiments());return s==="positive"?"#22c55e":s==="negative"?"#ef4444":"#94a3b8";}
-var NEG_EMOTIONS=["FOMO","Revenge"];
 var REMOVED_EMOTIONS=["Anxious","Overconfident"];
 function filterEmotions(emotions){return (emotions||[]).filter(function(e){return REMOVED_EMOTIONS.indexOf(e)<0;});}
 var MONTH_NAMES=["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -481,11 +450,6 @@ function getCurrentTier(balance){
 // CHANGED: Next milestone strictly above a tier value. Used by contract-based sizing, where the
 // contract count = next-tier $ ÷ 1000 (e.g. tier $1k → next $5k → 5 contracts; $5k → $10k → 10).
 // Falls back to the tier itself at the top of the ladder.
-function nextMilestone(tier){
-  var ms=getMilestones();
-  for(var i=0;i<ms.length;i++){if(ms[i]>tier)return ms[i];}
-  return tier;
-}
 function calcPosSizes(a,pcts){
   // CHANGED: When useDirect=true (milestone preview), use 'a' as the base directly instead of getBase(a).
   var b=(pcts&&pcts.useDirect)?a:getBase(a);
@@ -525,15 +489,9 @@ var DEFAULT_DISCIPLINE_SCORING={violationPenalty:15,negEmotionPenalty:10,posEmot
 var DISCIPLINE_LOCK_KEY="tf-discipline-lock-threshold";
 function loadDisciplineLockThreshold(){try{var s=localStorage.getItem(DISCIPLINE_LOCK_KEY);if(s!=null){var v=parseFloat(s);if(!isNaN(v))return v;}}catch(e){}return 60;}
 function saveDisciplineLockThreshold(v){try{localStorage.setItem(DISCIPLINE_LOCK_KEY,String(v));}catch(e){}}
-var DISCIPLINE_LOCK_ACK_KEY="tf-discipline-lock-ack";
 // CHANGED: Lock is NOT user-removable. Cooldown = one full day served. It auto-clears once 2+
 // calendar days have passed since the trigger day. This naturally lets weekends/holidays serve
 // the cooldown: bad Wed -> locked Thu, free Fri; bad Fri -> the weekend serves it, free Mon.
-function daysBetween(aStr,bStr){
-  var a=new Date(aStr);a.setHours(0,0,0,0);
-  var b=new Date(bStr);b.setHours(0,0,0,0);
-  return Math.round((b.getTime()-a.getTime())/86400000);
-}
 // CHANGED: Automatic discipline-triggered half-size has been REMOVED. Breaking discipline no
 // longer force-halves position/risk. checkDisciplineLock is now a no-op, kept only so the existing
 // sizing callers (position size floor, target halving, R-stop labels, half-size readouts) compile
@@ -713,7 +671,6 @@ function calcDiscipline(trades,riskMaxArg,opts){
   }
   return Math.min(100,Math.max(0,combined));
 }
-function defaultSessionRules(){return {preMarket:{enabled:false,sizeFraction:1,maxTrades:99,notes:""},opening:{enabled:true,sizeFraction:1,maxTrades:99,notes:""},midDay:{enabled:false,sizeFraction:0.5,maxTrades:2,notes:""},afternoon:{enabled:true,sizeFraction:0.5,maxTrades:2,notes:""},closing:{enabled:true,sizeFraction:1,maxTrades:99,notes:""},afterHours:{enabled:false,sizeFraction:1,maxTrades:99,notes:""}};}
 // CHANGED: Each asset class now has its own quantity and price labels for the trade entry/exit leg inputs.
 var ASSET_CLASSES={
   options:{label:"Options",unit:"contracts",unitSingular:"contract",qtyLabel:"Contracts",qtyLabelSingular:"Contract",priceLabel:"Contract Cost",directions:["CALL","PUT"],showStrike:true,showExpiry:true,multiplier:1,positiveColor:"#22c55e",negativeColor:"#ef4444"},
@@ -867,8 +824,6 @@ function loadConditionsItems(){
   }catch(e){}
   return DEFAULT_CONDITIONS_ITEMS.slice();
 }
-function saveConditionsItems(items){try{localStorage.setItem(CONDITIONS_KEY,JSON.stringify(items));}catch(e){}}
-
 // CHANGED: Pre-trade checklist — separate, scoped per asset class. Shown in the trade form.
 // The form is locked except for the Asset Class selector until every item is checked.
 var PRETRADE_KEY="tf-pretrade-checklist";
@@ -908,14 +863,6 @@ function loadPretradeChecklist(){
   return Object.assign({},DEFAULT_PRETRADE_ITEMS);
 }
 function savePretradeChecklist(map){try{localStorage.setItem(PRETRADE_KEY,JSON.stringify(map));}catch(e){}}
-function getPretradeItemsForClass(classId,selectedSetup){
-  var map=loadPretradeChecklist();
-  var items=map[classId]||[];
-  // CHANGED: Filter by setup. Items with no `setup` (or empty) show for all setups.
-  // Items with a `setup` value only show when that setup is selected.
-  if(!selectedSetup)return items.filter(function(it){return !it.setup;});
-  return items.filter(function(it){return !it.setup||it.setup===selectedSetup;});
-}
 function isPreCheckComplete(checklist){
   var items=loadChecklistItems();
   // CHANGED: Conditions items are surfaced in the trade log banner, not gating the checklist.
@@ -929,13 +876,6 @@ function isPreCheckComplete(checklist){
   }
   return true;
 }
-function buildEmptyChecklist(){
-  var items=loadChecklistItems();
-  var out={};
-  items.forEach(function(it){out[it.key]=false;});
-  return out;
-}
-
 // CHANGED: Editable Home "Focus" panel. Three day-states (red/green/neutral), each with a title,
 // bullet items, and an enabled flag for whether the panel shows on that kind of day.
 function defaultFocusStates(){return {
@@ -1328,9 +1268,6 @@ function saveViewMode(m){try{localStorage.setItem(VIEW_MODE_KEY,m);}catch(e){}}
     HIDE_DOLLAR_PNL=!!h.hideDollarPnL||!!h.hideAmounts;
   }catch(e){}
 })();
-function fmtMoney(n){if(HIDE_AMOUNTS)return AMT_MASK;if(HIDE_DOLLAR_PNL)return "$•••";var v=Math.abs(parseFloat(n)||0);return "$"+v.toFixed(2);}
-function fmtSignedMoney(n){var v=parseFloat(n)||0;if(HIDE_AMOUNTS)return wlSign(v);if(HIDE_DOLLAR_PNL)return (v>=0?"+":"−")+"$•••";return (v>=0?"+":"−")+"$"+Math.abs(v).toFixed(2);}
-function $fmt(n,opts){opts=opts||{};if(HIDE_AMOUNTS)return opts.signed?wlSign(n):AMT_MASK;if(HIDE_DOLLAR_PNL)return (opts.signed&&n>=0?"+":opts.signed&&n<0?"−":"")+"$•••";var v=parseFloat(n)||0;var sign=opts.signed?(v>=0?"+":"−"):"";return sign+"$"+Math.abs(v).toFixed(opts.decimals!=null?opts.decimals:2);}
 // CHANGED: When $ is hidden, dollar position/risk amounts are shown as a % of current account balance.
 function pctOfAccount(dollars){
   // CHANGED: W/L mode hides ALL returns, % included — only win/loss shows.
@@ -1348,24 +1285,6 @@ function mkExit(){return {id:Date.now()+Math.random(),contracts:"",price:"",time
 function mkTrade(){return {id:Date.now(),openedAt:Date.now(),closedAt:null,time:fmtTime(getNow()),assetClass:"",instrument:"",direction:"",entries:[{contracts:"",price:"",time:null}],exits:[{contracts:"",price:"",time:null}],stopLoss:"",contracts:"",positionSize:"",pnl:"",pctPnl:"",setup:"",candlePattern:"",timeframe:"",indicators:[],grade:"",emotions:[],violations:[],notes:"",screenshots:[],strike:"",expiry:"",sessionId:null,sizeFraction:1,status:"closed"};}
 // CHANGED: Helpers to merge/read fields on a journal entry by date. Used to persist the
 // discipline-lock note and lock metadata onto the locked day's journal row.
-function updateJournalEntryFields(date,fields){
-  try{
-    var k="journal:"+date.replace(/\//g,"-");
-    var s=localStorage.getItem(k);
-    var entry=s?JSON.parse(s):{date:date,pnl:0,trades:[],wins:0,losses:0,disciplineScore:0,riskMax:0};
-    Object.assign(entry,fields);
-    localStorage.setItem(k,JSON.stringify(entry));
-  }catch(e){}
-}
-function getJournalEntryField(date,field){
-  try{
-    var k="journal:"+date.replace(/\//g,"-");
-    var s=localStorage.getItem(k);
-    if(!s)return null;
-    var entry=JSON.parse(s);
-    return entry?entry[field]:null;
-  }catch(e){return null;}
-}
 // CHANGED: Helper used by every journal-entry writer. On quota error, retries with all trade
 // screenshots stripped so the day's totals still persist (otherwise edits silently fail to save).
 // Returns the entry that was actually written (may be a screenshot-stripped variant) or null on failure.
@@ -1441,7 +1360,6 @@ function buildSessionMap(todayPnL,todayRiskMax,todayTradeCount,todayTrades){
 
 // Gamification system
 var GAMIFICATION_KEY="tf-gamification";
-var WEEKLY_CHALLENGE_KEY="tf-weekly-challenges";
 function loadGamificationData(){try{var s=localStorage.getItem(GAMIFICATION_KEY);if(!s)return {bestStreak:0,lastStreakLevel:0,lastWithdrawalLevel:0,lastRankLevel:0,seenAchievements:[]};return JSON.parse(s);}catch(e){return {bestStreak:0,lastStreakLevel:0,lastWithdrawalLevel:0,lastRankLevel:0,seenAchievements:[]};}}
 function saveGamificationData(data){try{localStorage.setItem(GAMIFICATION_KEY,JSON.stringify(data));}catch(e){}}
 function calculateStreak(includeToday){
@@ -1473,58 +1391,13 @@ function calculateStreak(includeToday){
 }
 // CHANGED: Total NET profit accumulated across the CURRENT green streak — the same consecutive
 // green trading days calculateStreak counts. Used to suggest a withdrawal = allowance% of it.
-function greenStreakProfit(includeToday){
-  var rows=loadJournalRows();var byDate={};rows.forEach(function(r){byDate[r.date]=r;});
-  var sum=0;var checkDate=getPT();checkDate.setHours(0,0,0,0);
-  if(!includeToday)checkDate.setDate(checkDate.getDate()-1);
-  for(var i=0;i<400;i++){
-    var key=checkDate.toLocaleDateString("en-US");var dow=checkDate.getDay();
-    var isWeekend=(dow===0||dow===6);var isHoliday=!!MARKET_HOLIDAYS[key];var row=byDate[key];
-    var hadTrades=row&&((row.trades&&row.trades.length>0)||(row.wins||0)+(row.losses||0)>0);
-    if(isWeekend||isHoliday||!hadTrades){checkDate.setDate(checkDate.getDate()-1);continue;}
-    if(parseFloat(row.pnl)>0){sum+=entryNetPnl(row);checkDate.setDate(checkDate.getDate()-1);}
-    else break;
-  }
-  return sum;
-}
 // CHANGED: CLEAN-DAY STREAK — process-based, NOT profit-based. A day is "clean" when its
 // discipline score (process-only) stays at or above the lock threshold. Per design choice,
 // violations are allowed as long as the score survives the bar. Only trading days count;
 // weekends, holidays, and no-trade days are skipped (they neither extend nor break the streak),
 // mirroring calculateStreak's skip logic so the two feel consistent. A red but disciplined day
 // KEEPS the streak — that's the whole point: we reward staying clean, win or lose.
-function dayIsClean(row){
-  if(!row)return false;
-  var thr=loadDisciplineLockThreshold();
-  var score;
-  if(row.trades&&row.trades.length>0){score=calcDiscipline(row.trades,row.riskMax,{processOnly:true});}
-  else if(row.disciplineScore!=null){score=parseFloat(row.disciplineScore);}
-  else{return false;}
-  return score>=thr;
-}
-function calculateCleanStreak(includeToday){
-  var rows=loadJournalRows();
-  var byDate={};
-  rows.forEach(function(r){byDate[r.date]=r;});
-  var streak=0;
-  var checkDate=getPT();checkDate.setHours(0,0,0,0);
-  if(!includeToday)checkDate.setDate(checkDate.getDate()-1);
-  for(var i=0;i<400;i++){
-    var key=checkDate.toLocaleDateString("en-US");
-    var dow=checkDate.getDay();
-    var isWeekend=(dow===0||dow===6);
-    var isHoliday=!!MARKET_HOLIDAYS[key];
-    var row=byDate[key];
-    var hadTrades=row&&((row.trades&&row.trades.length>0)||(row.wins||0)+(row.losses||0)>0);
-    if(isWeekend||isHoliday||!hadTrades){checkDate.setDate(checkDate.getDate()-1);continue;}
-    if(dayIsClean(row)){streak++;checkDate.setDate(checkDate.getDate()-1);}
-    else{break;} // a trading day below the lock threshold breaks the clean streak
-  }
-  return streak;
-}
 // Personal best is persisted and updated whenever the current streak exceeds it.
-function getCleanStreakBest(){try{var v=parseFloat(localStorage.getItem("tf-clean-streak-best"));return isNaN(v)?0:v;}catch(e){return 0;}}
-function updateCleanStreakBest(current){try{if(current>getCleanStreakBest())localStorage.setItem("tf-clean-streak-best",String(current));}catch(e){}return Math.max(current,getCleanStreakBest());}
 // CHANGED: A-GRADE-DAY STREAK — a trading day counts when EVERY closed trade that day is graded "A".
 // Same skip logic as the other streaks (weekends/holidays/no-trade days are skipped).
 function dayIsAllAGrade(row){
@@ -1554,13 +1427,6 @@ function calculateAGradeStreak(includeToday){
   return streak;
 }
 // Is today's in-progress day still clean / at risk? Used for the "streak at risk" friction cue.
-function todayCleanStatus(todayTrades,todayRiskMax){
-  var closed=(todayTrades||[]).filter(function(t){return t&&t.status!=="open";});
-  if(closed.length===0)return "none"; // no closed trades yet today
-  var thr=loadDisciplineLockThreshold();
-  var score=calcDiscipline(closed,todayRiskMax,{processOnly:true});
-  return score>=thr?"clean":"atrisk";
-}
 // CHANGED: PRE-MARKET COMMITMENT — the trader states a plan before the day (max trades + which
 // setups they'll take). At day's end we score adherence against their OWN stated plan, which
 // lands harder than a generic rule. Returns null if no commitment was made.
@@ -1816,37 +1682,6 @@ function aggregateCommitment(map){
   var aff=null;if(affirmedVals.indexOf(false)>=0)aff=false;else if(affirmedVals.length>0&&affirmedVals.every(function(v){return v===true;}))aff=true;
   return {committed:true,committedAt:isFinite(earliestAt)?earliestAt:Date.now(),maxTrades:anyMax?String(sumMax):"",setups:setupsArr.join(" · "),reviewed:reviewedAll,setupsReviewAffirmed:aff};
 }
-function scoreCommitment(state){
-  var map=getCommitmentsMap(state);
-  var sids=Object.keys(map);
-  var committedSids=sids.filter(function(sid){return map[sid]&&map[sid].committed;});
-  if(committedSids.length===0)return null;
-  var closed=(state.trades||[]).filter(function(t){return t&&t.status!=="open";});
-  var perSession=[];
-  var allKept=[],allBroke=[];
-  var allReviewed=true;
-  var anySetupsText="";
-  var aggMax=0,aggActual=0,anyOver=false;
-  committedSids.forEach(function(sid){
-    var c=map[sid];
-    var st=(sid==="_legacy"||sid==="_day")?closed:closed.filter(function(t){return t.sessionId===sid;});
-    var sessLabel=null;try{var ss=getSessionByID(sid);if(ss)sessLabel=ss.label||ss.id;}catch(e){}
-    if(!sessLabel)sessLabel=(sid==="_legacy"||sid==="_day")?"Day":sid;
-    var maxT=parseInt(c.maxTrades);
-    var hasMax=!isNaN(maxT)&&maxT>0;
-    var over=hasMax&&st.length>maxT;
-    if(hasMax){aggMax+=maxT;if(over)anyOver=true;}
-    aggActual+=st.length;
-    if(over){allBroke.push(sessLabel+": took "+st.length+" vs. committed "+maxT);}
-    else if(hasMax){allKept.push(sessLabel+": stayed within "+maxT+" ("+st.length+" taken)");}
-    if(c.setupsReviewAffirmed===true)allKept.push(sessLabel+": traded only your committed setups");
-    if(c.setupsReviewAffirmed===false)allBroke.push(sessLabel+": deviated from committed setups");
-    if(!c.reviewed)allReviewed=false;
-    if(c.setups)anySetupsText+=(anySetupsText?" · ":"")+sessLabel+": "+c.setups;
-    perSession.push({sessionId:sid,label:sessLabel,maxTrades:hasMax?maxT:null,actualTrades:st.length,overTrades:over,setups:c.setups||"",setupsReviewAffirmed:c.setupsReviewAffirmed,reviewed:c.reviewed===true});
-  });
-  return {committed:true,maxTrades:aggMax>0?aggMax:null,actualTrades:aggActual,overTrades:anyOver,setups:anySetupsText,kept:allKept,broke:allBroke,reviewed:allReviewed,adhered:allBroke.length===0,perSession:perSession};
-}
 function getTotalWithdrawn(){
   return loadTransfers().filter(function(t){return String(t.type||"").toLowerCase()==="withdrawal";}).reduce(function(s,t){return s+Math.abs(parseFloat(t.amount)||0);},0);
 }
@@ -1896,12 +1731,6 @@ function tradingDaysThisMonth(){
   }
   return count||20;
 }
-function tradingWeeksThisMonth(){return Math.max(1,Math.ceil(tradingDaysThisMonth()/5));}
-function defaultDailyFromMonthly(goals,sp){
-  var mp=parseFloat(goals&&goals.monthlyPnL)||0;
-  if(mp>0)return mp/tradingDaysThisMonth();
-  return computeDailyTarget(sp);
-}
 // CHANGED: Trading days in the CURRENT week (Sun–Sat), excluding weekends and market holidays.
 function tradingDaysThisWeek(){
   var n=getNow();var d=new Date(n);d.setHours(0,0,0,0);d.setDate(d.getDate()-d.getDay());
@@ -1914,9 +1743,6 @@ function tradingDaysThisWeek(){
     count++;
   }
   return count||5;
-}
-function defaultWeeklyFromMonthly(goals,sp){
-  return defaultDailyFromMonthly(goals,sp)*tradingDaysThisWeek();
 }
 // CHANGED: Unified goal-target resolver with override precedence: monthly > weekly > daily >
 // auto (from session sizing). Whichever period the user overrides in goal edits becomes the
@@ -1985,15 +1811,10 @@ function loadMonthGoalHistory(){try{return JSON.parse(localStorage.getItem(MONTH
 function recordMonthGoal(monthKey,value){try{if(value==null||!(parseFloat(value)>0))return;var h=loadMonthGoalHistory();if(h[monthKey]!==parseFloat(value)){h[monthKey]=parseFloat(value);localStorage.setItem(MONTH_GOAL_HISTORY_KEY,JSON.stringify(h));}}catch(e){}}
 function getMonthGoalValue(monthKey,fallback){try{var h=loadMonthGoalHistory();return (h[monthKey]!=null)?parseFloat(h[monthKey]):fallback;}catch(e){return fallback;}}
 // Daily target derived from session sizing + gain hard stops. Falls back to 0 if unset.
-function getDailyTarget(){
-  try{var s=localStorage.getItem(SETTINGS_KEY);if(!s)return 0;return computeDailyTarget(JSON.parse(s));}catch(e){return 0;}
-}
 // Withdrawals expressed in "days" — how many daily targets you've pulled out. Used by rank + milestones.
-function getWithdrawnInDays(withdrawn){var dt=getDailyTarget();return dt>0?(withdrawn/dt):0;}
 // CHANGED: Points and ranks removed entirely. Achievements and challenges are tracked only as
 // completion counts now — no point values, no rank tiers.
 // Lifetime challenge completions are tallied across weeks and stored in gamification data.
-function getChallengeCompletions(){var d=loadGamificationData();return d.challengeCompletions||0;}
 // ============================================================================
 // WITHDRAWAL ALLOWANCE — rewritten from scratch.
 //
@@ -2022,9 +1843,6 @@ function setWithdrawalAllowancePct(v){try{localStorage.setItem("tf-allowance-pct
 function getAllowanceEnabled(){try{var v=localStorage.getItem("tf-allowance-enabled");return v===null||v==="1";}catch(e){return true;}}
 function setAllowanceEnabled(on){try{localStorage.setItem("tf-allowance-enabled",on?"1":"0");}catch(e){}}
 function getAllowanceSince(){try{var v=parseFloat(localStorage.getItem("tf-allowance-since"));return isNaN(v)?0:v;}catch(e){return 0;}}
-function setAllowanceSinceNow(){try{localStorage.setItem("tf-allowance-since",String(Date.now()));}catch(e){}}
-function clearAllowanceSince(){try{localStorage.removeItem("tf-allowance-since");}catch(e){}}
-
 // CHANGED: Goal-reached withdrawal nudge. Replaces the green-streak trigger: the banner now fires
 // when a PnL GOAL is reached, for whichever periods the user ticks, and suggests allowance% of THAT
 // PERIOD'S profit. Acknowledgement is keyed to the specific period instance (this week, this month)
@@ -2098,15 +1916,6 @@ function getAllowanceGoalNudge(livePnL){
   }catch(e){}
   return null;
 }
-function getMonthlyWithdrawalTarget(){try{var g=JSON.parse(localStorage.getItem(GOALS_KEY)||"{}");return parseFloat(g.monthlyWithdrawals)||0;}catch(e){return 0;}}
-function getLastWithdrawalDate(){
-  var ws=loadTransfers().filter(function(t){return String(t.type||"").toLowerCase()==="withdrawal";});
-  if(!ws.length)return null;
-  var latest=null;
-  ws.forEach(function(t){var d=new Date(t.date);if(!isNaN(d.getTime())){if(!latest||d>latest)latest=d;}});
-  return latest;
-}
-
 // The single source of truth: undrawn profit ($). liveTodayPnL is optional and only used as a
 // fallback when today's trades aren't individually readable from storage.
 function getUndrawnProfit(liveTodayPnL){
@@ -2158,8 +1967,6 @@ function getUndrawnProfit(liveTodayPnL){
   return pool>0?pool:0;
 }
 // Back-compat alias (older call sites / naming).
-function getProfitSinceLastWithdrawal(liveTodayPnL){return getUndrawnProfit(liveTodayPnL);}
-
 function getWithdrawalAllowance(liveTodayPnL){
   if(!getAllowanceEnabled())return 0;
   var undrawn=getUndrawnProfit(liveTodayPnL);
@@ -2190,7 +1997,6 @@ function dismissHalfSizeNudge(dateStr){try{localStorage.setItem("tf-halfsize-dis
 // CHANGED: Profit-taking nudge. After N consecutive green days, suggest taking a withdrawal.
 // Dismissal stores the streak length at the time of dismissal; banner reappears only if the
 // streak grows beyond that, so we don't nag on the same plateau.
-function getStreakNudgeThreshold(){try{var v=parseFloat(localStorage.getItem("tf-streak-nudge-threshold"));return isNaN(v)||v<=0?3:v;}catch(e){return 3;}}
 // CHANGED: Month-halfsize-remaining mode. When the user hits their monthly P&L goal, they can opt
 // to half-size every trade for the rest of the month to protect the gain. State is per-month
 // (key: YYYY-MM) so it auto-clears at month rollover. Banner dismissal stored separately so the
@@ -2293,34 +2099,9 @@ function dayR(trades,riskMaxSetting){
 // start-of-day risk unit), plus today's live trades when today isn't already saved to journal.
 // `filterFn(dateObj,row)` selects the rows in the period. fallbackRiskMax is used for a day (or the
 // live set) that has no stamped riskMax. Pass live trades (closed) + today's key to fold in today.
-function periodR(rows,filterFn,fallbackRiskMax,liveTrades,todayKey){
-  var sum=0,todaySeen=false;
-  (rows||[]).forEach(function(e){
-    if(!e||!e.date)return;
-    var dd=new Date(e.date);
-    if(!filterFn(dd,e))return;
-    if(e.date===todayKey)todaySeen=true;
-    var rm=(parseFloat(e.riskMax)||0)||fallbackRiskMax;
-    sum+=dayR(e.trades||[],rm);
-  });
-  if(!todaySeen&&liveTrades&&liveTrades.length)sum+=dayR(liveTrades,fallbackRiskMax);
-  return sum;
-}
 // CHANGED: When half-size trading is committed for the rest of the month, daily and weekly P&L
 // targets are halved to match the lower expected output. Monthly target is unchanged — it's
 // the trigger for half-size in the first place and we don't want to retroactively lower it.
-function applyHalfsizeToTarget(target){
-  var n=parseFloat(target)||0;
-  if(isMonthHalfsizeActive())return n/2;
-  // CHANGED: Discipline-lock half-size (triggered when yesterday's score fell below threshold, or
-  // today's has) also halves the daily/weekly targets to match the enforced sizing.
-  try{
-    var trades=[];try{var st=JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}");trades=st.trades||[];}catch(e){}
-    var lk=checkDisciplineLock(trades,null);
-    if(lk&&lk.locked)return n/2;
-  }catch(e){}
-  return n;
-}
 function setMonthHalfsizeActive(on){try{if(on){localStorage.setItem("tf-month-halfsize-active",getCurrentMonthKey());localStorage.removeItem("tf-month-halfsize-manual-off");if(!localStorage.getItem("tf-month-halfsize-since"))localStorage.setItem("tf-month-halfsize-since",String(Date.now()));}else{localStorage.removeItem("tf-month-halfsize-active");localStorage.removeItem("tf-month-halfsize-since");localStorage.setItem("tf-month-halfsize-manual-off",getCurrentMonthKey());}}catch(e){}}
 // CHANGED: Half-size must actually TIGHTEN the oversize check. The cap was derived from the trade's
 // stamped sizeFraction alone, which stays 1 for trades logged while half-size is on — so a trade was
@@ -2484,14 +2265,7 @@ function DailyTargetBanner(props){
     </div>
   );
 }
-function streakNudgeDismissedAt(){try{var v=parseInt(localStorage.getItem("tf-streak-nudge-dismissed-at"),10);return isNaN(v)?0:v;}catch(e){return 0;}}
-function dismissStreakNudge(streakLen){try{localStorage.setItem("tf-streak-nudge-dismissed-at",String(streakLen));}catch(e){}}
-function saveAllowanceTarget(v){try{if(v>0)localStorage.setItem("tf-allowance-target",String(v));else localStorage.removeItem("tf-allowance-target");localStorage.removeItem("tf-allowance-notif-dismissed");}catch(e){}}
-function getAllowanceNotifDismissed(){try{return localStorage.getItem("tf-allowance-notif-dismissed")==="1";}catch(e){return false;}}
-function setAllowanceNotifDismissed(v){try{if(v)localStorage.setItem("tf-allowance-notif-dismissed","1");else localStorage.removeItem("tf-allowance-notif-dismissed");}catch(e){}}
 // Withdrawal milestone in dollars = N daily-targets. Falls back to fixed $ if no target set.
-function getWithdrawalDollarTarget(days){var dt=getDailyTarget();if(dt>0)return dt*days;var fallback={5:500,25:5000,100:25000};return fallback[days]||(days*100);}
-function getWithdrawalThreshold(days){var dt=getDailyTarget();if(dt>0)return "$"+Math.round(dt*days).toLocaleString()+" ("+days+" days)";return null;}
 var ACHIEVEMENTS=[
   {id:"first_win",icon:"🎯",name:"First Blood",desc:"First winning trade",check:function(r){return r.some(function(d){return (d.wins||0)>0;});}},
   {id:"first_withdrawal",icon:"💸",name:"The Take",desc:"First withdrawal",check:function(r,s,w){return w>0;}},
@@ -2531,27 +2305,6 @@ function getEarnedAchievements(rows,streak,withdrawn){
 // desc can be a string or a function (for settings-derived text). Resolve safely.
 function achDesc(a){try{return typeof a.desc==="function"?a.desc():a.desc;}catch(e){return "";}}
 function getWeekStart(){var now=getPT();var s=new Date(now.getFullYear(),now.getMonth(),now.getDate()-now.getDay());s.setHours(0,0,0,0);return s;}
-function getWeekChallenges(rows){
-  var ws=getWeekStart();
-  var weekRows=rows.filter(function(r){return new Date(r.date)>=ws;});
-  var totalWins=weekRows.reduce(function(s,r){return s+(r.wins||0);},0);
-  var totalTrades=weekRows.reduce(function(s,r){return s+(r.wins||0)+(r.losses||0);},0);
-  var wr=totalTrades>=5?(totalWins/totalTrades*100):0;
-  // CHANGED: Green / A-grade challenges are STREAK-based, using the same streak calculators that
-  // drive the Progress card (calculateStreak, calculateAGradeStreak) — consecutive qualifying days.
-  var greenStreak=calculateStreak(true);
-  var aGradeStreak=calculateAGradeStreak(true);
-  // CHANGED: Green-streak and A-grade-streak challenges removed from this list — they now display
-  // as standalone counters at the top of the Progress widget.
-  return [
-    {id:"wr55",icon:"🎯",name:"55%+ win rate (5+ trades)",target:55,current:Math.round(Math.min(55,wr)),done:wr>=55&&totalTrades>=5,suffix:"%"},
-  ];
-}
-function getStreakMultiplier(streak){
-  if(streak>=14)return 3.0;if(streak>=10)return 2.5;if(streak>=7)return 2.0;
-  if(streak>=5)return 1.75;if(streak>=3)return 1.5;if(streak>=2)return 1.25;
-  if(streak>=1)return 1.1;return 1.0;
-}
 function checkNewAchievements(rows,streak,withdrawn){
   var data=loadGamificationData();
   var seen=data.seenAchievements||[];
@@ -2561,29 +2314,9 @@ function checkNewAchievements(rows,streak,withdrawn){
   return newOnes;
 }
 // Tally weekly-challenge completions into a lifetime counter, keyed by week so each completion counts once.
-function syncChallengeCompletions(rows){
-  var data=loadGamificationData();
-  var ws=getWeekStart();
-  var weekKey=(ws.getFullYear())+"-"+(ws.getMonth()+1)+"-"+ws.getDate();
-  var ledger=data.challengeLedger||{};
-  var challenges=getWeekChallenges(rows);
-  var doneIds=challenges.filter(function(c){return c.done;}).map(function(c){return c.id;});
-  var prevForWeek=ledger[weekKey]||[];
-  // Union of previously-recorded and currently-done (challenges never "un-complete" within a week).
-  var union=prevForWeek.slice();
-  doneIds.forEach(function(id){if(union.indexOf(id)<0)union.push(id);});
-  if(union.length!==prevForWeek.length){
-    ledger[weekKey]=union;
-    var total=0;Object.keys(ledger).forEach(function(k){total+=ledger[k].length;});
-    saveGamificationData(Object.assign({},data,{challengeLedger:ledger,challengeCompletions:total}));
-  }
-}
-
 var CS=function(x){return Object.assign({background:"#111118",border:"1px solid #1e293b",borderRadius:10,padding:"14px 16px"},x||{});};
 var fld={width:"100%",padding:"10px 12px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:6,color:"#e2e8f0",fontSize:15,fontFamily:"inherit",boxSizing:"border-box"};
 var lbl={fontSize:12,color:"#64748b",letterSpacing:1,textTransform:"uppercase",marginBottom:4,display:"block"};
-function roFld(x){return Object.assign({},fld,{background:"#1e293b",color:"#94a3b8",display:"flex",alignItems:"center"},x||{});}
-
 function Tag(props){return (<span style={{fontSize:12,padding:"2px 8px",borderRadius:4,background:props.color+"22",color:props.color,fontWeight:600}}>{props.label}</span>);}
 
 // CHANGED: Reusable toggle switch component to replace checkboxes for enable/disable UI.
@@ -2740,76 +2473,6 @@ function getAccountBalanceAtDate(dateStr){
     },0);
     return tBal+pBal;
   }catch(e){return 0;}
-}
-
-function PnLChart(props){
-  var trades=props.trades;
-  var [hoverPnL,setHoverPnL]=useState(null);
-  var [hoverX,setHoverX]=useState(null);
-  var [hoverY,setHoverY]=useState(null);
-  var [hoverTime,setHoverTime]=useState(null);
-  var svgRef=useRef(null);
-  var START=390,END=780,W=460,H=140,PL=40,PR=12,PT=12,PB=28;
-  var chartW=W-PL-PR,chartH=H-PT-PB;
-  function timeToMin(str){if(!str)return null;var m=str.match(/(\d+):(\d+)\s*(AM|PM)/i);if(!m)return null;var h=parseInt(m[1]),mn=parseInt(m[2]),pm=m[3].toUpperCase()==="PM";if(pm&&h!==12)h+=12;if(!pm&&h===12)h=0;return h*60+mn;}
-  function minToTimeStr(mn){var h=Math.floor(mn/60),mi=Math.floor(mn%60),ampm=h>=12?"PM":"AM",h12=h%12||12;return h12+":"+(mi<10?"0"+mi:mi)+" "+ampm;}
-  var points=[{min:START,pnl:0}];var cum=0;
-  if(trades&&trades.length>0){
-    trades.slice().filter(function(t){return timeToMin(t.time)!==null;}).sort(function(a,b){return timeToMin(a.time)-timeToMin(b.time);}).forEach(function(t){var mn=timeToMin(t.time);if(!mn)return;mn=Math.max(START,Math.min(END,mn));cum+=tradeNetPnl(t);points.push({min:mn,pnl:cum});});
-  }
-  points.push({min:END,pnl:cum});
-  var vals=points.map(function(p){return p.pnl;});var minP=Math.min.apply(null,vals),maxP=Math.max.apply(null,vals);
-  var rng=maxP-minP||1,pad=rng*0.15,yMin=minP-pad,yMax=maxP+pad,yRng=yMax-yMin||1;
-  function xPx(mn){return PL+((mn-START)/(END-START))*chartW;}
-  function yPx(v){return PT+(1-((v-yMin)/yRng))*chartH;}
-  var zeroY=yPx(0),showZero=zeroY>=PT&&zeroY<=PT+chartH;
-  var segs=[];
-  for(var si=0;si<points.length-1;si++){
-    var a=points[si],b=points[si+1];
-    if((a.pnl>=0&&b.pnl>=0)||(a.pnl<0&&b.pnl<0)){segs.push({pts:[a,b],pos:a.pnl>=0});}
-    else{var f=a.pnl/(a.pnl-b.pnl),cx={min:a.min+(b.min-a.min)*f,pnl:0};segs.push({pts:[a,cx],pos:a.pnl>=0});segs.push({pts:[cx,b],pos:b.pnl>=0});}
-  }
-  function linePath(pts){return pts.map(function(p,i){return (i===0?"M":"L")+xPx(p.min).toFixed(1)+","+yPx(p.pnl).toFixed(1);}).join(" ");}
-  function fillPath(pts){var by=(showZero?zeroY:yPx(0)).toFixed(1);return linePath(pts)+" L"+xPx(pts[pts.length-1].min).toFixed(1)+","+by+" L"+xPx(pts[0].min).toFixed(1)+","+by+" Z";}
-  function handleMove(clientX){
-    var svg=svgRef.current;if(!svg)return;
-    var rect=svg.getBoundingClientRect();
-    var svgX=(clientX-rect.left)*(W/rect.width),chartX=svgX-PL;
-    if(chartX<0||chartX>chartW){setHoverPnL(null);setHoverX(null);setHoverY(null);setHoverTime(null);return;}
-    var mn=START+(chartX/chartW)*(END-START);
-    var prev=points[0],nxt=points[points.length-1];
-    for(var i=0;i<points.length-1;i++){if(points[i].min<=mn&&points[i+1].min>=mn){prev=points[i];nxt=points[i+1];break;}}
-    var t2=nxt.min===prev.min?1:(mn-prev.min)/(nxt.min-prev.min);
-    var pnl=prev.pnl+(nxt.pnl-prev.pnl)*t2;
-    setHoverPnL(pnl);setHoverX(svgX);setHoverY(yPx(pnl));setHoverTime(minToTimeStr(mn));
-  }
-  if(!trades||trades.length===0)return null;
-  var hc=hoverPnL===null?"#64748b":hoverPnL>=0?"#22c55e":"#ef4444";
-  var xLabels=[{min:390,l:"6:30"},{min:480,l:"8:00"},{min:570,l:"9:30"},{min:660,l:"11:00"},{min:750,l:"12:30"},{min:780,l:"1:00"}];
-  var yTicks=[Math.round(yMin+yRng*0.1),Math.round(yMin+yRng*0.5),Math.round(yMin+yRng*0.9)];
-  return (
-    <div style={{marginTop:12,background:"#0a0a0f",borderRadius:8,padding:"8px 4px 4px"}}>
-      <div style={{fontSize:12,color:"#64748b",letterSpacing:1,textTransform:"uppercase",marginBottom:4,paddingLeft:PL+"px",display:"flex",alignItems:"center",gap:8}}>
-        P&L Over Session
-        {hoverPnL!==null&&<span style={{fontWeight:700,color:hc,fontSize:13}}>{hoverPnL>=0?"+":""}{$fmt(hoverPnL)}</span>}
-      </div>
-      <svg ref={svgRef} width="100%" viewBox={"0 0 "+W+" "+H} style={{overflow:"visible",cursor:"crosshair",userSelect:"none"}}
-        onMouseMove={function(e){handleMove(e.clientX);}} onMouseLeave={function(){setHoverPnL(null);setHoverX(null);setHoverY(null);setHoverTime(null);}}
-        onTouchMove={function(e){e.preventDefault();if(e.touches.length)handleMove(e.touches[0].clientX);}} onTouchEnd={function(){setHoverPnL(null);setHoverX(null);setHoverY(null);setHoverTime(null);}}>
-        {yTicks.map(function(v,i){var y=yPx(v);if(y<PT||y>PT+chartH)return null;return <line key={i} x1={PL} y1={y} x2={PL+chartW} y2={y} stroke="#1e293b" strokeWidth="1"/>;})}
-        {showZero&&<line x1={PL} y1={zeroY} x2={PL+chartW} y2={zeroY} stroke="#334155" strokeWidth="1" strokeDasharray="3,3"/>}
-        {segs.map(function(s,i){return <path key={"f"+i} d={fillPath(s.pts)} fill={s.pos?"#22c55e22":"#ef444433"}/>;})}
-        {segs.map(function(s,i){return <path key={"l"+i} d={linePath(s.pts)} fill="none" stroke={s.pos?"#22c55e":"#ef4444"} strokeWidth="2" strokeLinejoin="round"/>;})}
-        {points.slice(1,-1).map(function(p,i){return <circle key={i} cx={xPx(p.min)} cy={yPx(p.pnl)} r="3" fill={p.pnl>=0?"#22c55e":"#ef4444"} stroke="#0a0a0f" strokeWidth="1.5"/>;})}
-        {yTicks.map(function(v,i){var y=yPx(v);if(y<PT||y>PT+chartH)return null;if(HIDE_DOLLAR_PNL)return null;return <text key={i} x={PL-4} y={y+4} textAnchor="end" fontSize="8" fill="#475569">{v>=0?"+$"+v:"-$"+Math.abs(v)}</text>;})}
-        {/* CHANGED: When hovering, hide the static x-axis tick labels (they'd overlap with the cursor time label). */}
-        {hoverX===null&&xLabels.map(function(xl){return <text key={xl.min} x={xPx(xl.min)} y={PT+chartH+16} textAnchor="middle" fontSize="8" fill="#475569">{xl.l}</text>;})}
-        <line x1={PL} y1={PT} x2={PL} y2={PT+chartH} stroke="#1e293b" strokeWidth="1"/>
-        <line x1={PL} y1={PT+chartH} x2={PL+chartW} y2={PT+chartH} stroke="#1e293b" strokeWidth="1"/>
-        {hoverX!==null&&<g><line x1={hoverX} y1={PT} x2={hoverX} y2={PT+chartH} stroke="#475569" strokeWidth="1" strokeDasharray="3,3"/><circle cx={hoverX} cy={hoverY} r="5" fill={hc} stroke="#0a0a0f" strokeWidth="2"/>{/* CHANGED: Time label pinned under the cursor line at the bottom. */}{hoverTime&&<text x={hoverX} y={PT+chartH+16} textAnchor="middle" fontSize="9" fontWeight="700" fill="#cbd5e1">{hoverTime}</text>}</g>}
-      </svg>
-    </div>
-  );
 }
 
 // CHANGED: Module-level shared hover-date pub/sub for cross-chart sync. When any daily-aggregated
@@ -3427,19 +3090,22 @@ function CalendarPicker(props){
   var riskMax=parseFloat(props.riskMax)||0;
   var todayCount=(props.todayTrades||[]).filter(function(t){return t&&t.status!=="open";}).length;
   var sessionMap=buildSessionMap(todayPnL,riskMax,todayCount),todayDateStr=todayStr();
+  // CHANGED: the month/year state used to be declared by a useState pair inside an IIFE embedded in
+  // the JSX below. Hooks must be called from the top level of a component — nested inside a function
+  // expression they only happened to keep a stable call order because that IIFE ran unconditionally
+  // in a fixed position. Any future conditional around it would have desynced React's hook list.
+  // Hoisted here, with the initial month still derived from the selected journal date.
+  var _ciy=null,_cim=null;
+  try{var _cp=String(selectedDate).split("/");if(_cp.length===3){_cim=(+_cp[0])-1;_ciy=+_cp[2];}}catch(e){}
+  var [cy,setCy]=useState(_ciy!=null?_ciy:(new Date()).getFullYear());
+  var [cm,setCm]=useState(_cim!=null?_cim:(new Date()).getMonth());
   return (
     <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",background:"#00000088"}} onClick={onClose}>
       <div style={{background:"#111118",border:"1px solid #334155",borderRadius:14,padding:"16px 16px 12px",width:380,maxWidth:"94vw",maxHeight:"92vh",overflowY:"auto",boxShadow:"0 16px 48px #000000bb"}} onClick={function(e){e.stopPropagation();}}>
         <button onClick={function(){onSelect(todayDateStr);}} style={{width:"100%",padding:"8px",background:"#1e1b4b",border:"1px solid #4338ca",borderRadius:8,color:"#a5b4fc",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginBottom:10}}>Today — {todayDateStr}</button>
-        {(function(){
-          // CHANGED: Open the picker on the month of the currently-selected journal date instead
-          // of always defaulting to today's month.
-          var iy=null,im=null;
-          try{var p=String(selectedDate).split("/");if(p.length===3){im=(+p[0])-1;iy=+p[2];}}catch(e){}
-          var [cy,setCy]=useState(iy!=null?iy:(new Date()).getFullYear());
-          var [cm,setCm]=useState(im!=null?im:(new Date()).getMonth());
-          return <CalendarGrid year={cy} month={cm} onMonthChange={function(y,m){setCy(y);setCm(m);}} sessionMap={sessionMap} todayDateStr={todayDateStr} selectedDate={selectedDate} onSelect={onSelect}/>;
-        })()}
+        {/* CHANGED: Opens on the month of the currently-selected journal date rather than always
+           today's month. State now lives at the top of the component (see note there). */}
+        <CalendarGrid year={cy} month={cm} onMonthChange={function(y,m){setCy(y);setCm(m);}} sessionMap={sessionMap} todayDateStr={todayDateStr} selectedDate={selectedDate} onSelect={onSelect}/>
         <CalendarLegend/>
       </div>
     </div>
@@ -5073,187 +4739,9 @@ function ScalingTargetCard(props){
   );
 }
 
-function GamificationWidget(props){
-  var includeToday=props.includeToday||false;
-  var rows=loadJournalRows();
-  var streak=calculateStreak(includeToday);
-  // CHANGED: A-grade streak — feeds the counter card alongside the green streak.
-  var aGradeStreakNow=calculateAGradeStreak(includeToday);
-  var withdrawn=getTotalWithdrawn();
-  var data=loadGamificationData();
-  var seenIds=data.seenAchievements||[];
-  var earned=getEarnedAchievements(rows,streak,withdrawn);
-  var challenges=getWeekChallenges(rows);
-  var [celebration,setCelebration]=useState(null);
-  var [section,setSection]=useState("challenges");
-  // CHANGED: Progress section defaults to collapsed; remember the user's choice across remounts.
-  var [collapsed,setCollapsed]=useState(function(){try{var s=localStorage.getItem("tf-progress-collapsed");return s===null?true:s==="1";}catch(e){return true;}});
-  useEffect(function(){try{localStorage.setItem("tf-progress-collapsed",collapsed?"1":"0");}catch(e){}},[collapsed]);
-  useEffect(function(){
-    syncChallengeCompletions(rows);
-    var newOnes=checkNewAchievements(rows,streak,withdrawn);
-    if(newOnes.length>0){setCelebration(newOnes[0]);setTimeout(function(){setCelebration(null);},4000);}
-  },[]);
-  // CHANGED: Rank/points removed from Progress. The card now shows only the clean-day streak,
-  // Challenges, and Achievements. (Withdrawal allowance moved to Home's WithdrawalAllowanceCard.)
-  var barStyle=function(){return {height:6,background:"#1e293b",borderRadius:3,overflow:"hidden",position:"relative",marginTop:4};};
-  var barFill=function(pct,color){return {position:"absolute",top:0,left:0,bottom:0,width:Math.min(100,pct)+"%",background:color,borderRadius:3,transition:"width 0.5s"};};
-  var tabs=["challenges","achievements"];
-  // CHANGED: Embedded mode — render inside the combined Performance+Progress card (no own chrome,
-  // always expanded, streak tiles omitted because the combined header shows them).
-  var embedded=props.embedded;
-  var eff=embedded?false:collapsed;
-  return (
-    <div style={embedded?{}:CS({marginBottom:16,padding:0,overflow:"hidden"})}>
-      {celebration&&(
-        <div style={{padding:"10px 14px",background:"#1e1b4b",borderBottom:"1px solid #4338ca",display:"flex",alignItems:"center",gap:10}}>
-          <span style={{fontSize:18}}>{celebration.icon}</span>
-          <div>
-            <div style={{fontSize:13,fontWeight:700,color:"#a5b4fc"}}>Achievement unlocked: {celebration.name}</div>
-            <div style={{fontSize:11,color:"#818cf8"}}>{achDesc(celebration)}</div>
-          </div>
-        </div>
-      )}
-      {!embedded&&<div style={{padding:"12px 14px 10px",borderBottom:collapsed?"none":"1px solid #1e293b"}}>
-        <button onClick={function(){setCollapsed(function(o){return !o;});}} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",background:"none",border:"none",padding:0,cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
-          <div style={{fontSize:13,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Progress</div>
-          <div style={{display:"flex",alignItems:"center",gap:6}}>
-            <span style={{fontSize:11,color:"#94a3b8"}}>{earned.length} 🏆 · {getChallengeCompletions()} 🎯</span>
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{transition:"transform 0.2s",transform:collapsed?"rotate(0deg)":"rotate(180deg)"}}><path d="M2 4l4 4 4-4" stroke="#64748b" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          </div>
-        </button>
-      </div>}
-      {/* CHANGED: Account Balance card was moved here from Performance — high-level scaling metric belongs with Progress. */}
-      {!eff&&<div style={{padding:"12px 14px 0"}}>
-        <ScalingTargetCard liveTotalPnL={props.todayPnL||0} settings={props.settings||{}}/>
-      </div>}
-      {/* CHANGED: Clean-day streak banner removed; green streak + A-grade streak now shown as compact counters. */}
-      {!embedded&&!eff&&<div style={{padding:"12px 14px 0",display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-        <div style={{padding:"10px 12px",background:"#0a0a0f",border:"1px solid "+(streak>0?"#16653466":"#1e293b"),borderRadius:8}}>
-          <div style={{fontSize:10,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>🌱 Green Streak</div>
-          <div style={{fontSize:22,fontWeight:800,color:streak>0?"#22c55e":"#64748b",marginTop:2,fontVariantNumeric:"tabular-nums",lineHeight:1}}>{streak}<span style={{fontSize:11,color:"#94a3b8",fontWeight:500,marginLeft:4}}>day{streak===1?"":"s"}</span></div>
-        </div>
-        <div style={{padding:"10px 12px",background:"#0a0a0f",border:"1px solid "+(aGradeStreakNow>0?"#4338ca66":"#1e293b"),borderRadius:8}}>
-          <div style={{fontSize:10,color:"#94a3b8",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>⭐ A-Grade Streak</div>
-          <div style={{fontSize:22,fontWeight:800,color:aGradeStreakNow>0?"#a5b4fc":"#64748b",marginTop:2,fontVariantNumeric:"tabular-nums",lineHeight:1}}>{aGradeStreakNow}<span style={{fontSize:11,color:"#94a3b8",fontWeight:500,marginLeft:4}}>day{aGradeStreakNow===1?"":"s"}</span></div>
-        </div>
-      </div>}
-      {!eff&&<div style={{display:"flex",borderBottom:"1px solid #1e293b",marginTop:12}}>
-        {tabs.map(function(t){var active=section===t;return (
-          <button key={t} onClick={function(){setSection(t);}} style={{flex:1,padding:"8px 2px",background:"none",border:"none",borderBottom:"2px solid "+(active?"#6366f1":"transparent"),color:active?"#e2e8f0":"#475569",fontSize:11,fontWeight:active?700:400,cursor:"pointer",fontFamily:"inherit",textTransform:"capitalize",transition:"color 0.15s"}}>{t}</button>
-        );})}
-      </div>}
-      {!eff&&<div style={{padding:"12px 14px"}}>
-        {section==="challenges"&&(function(){
-          var ws=getWeekStart();
-          var wsLabel=(ws.getMonth()+1)+"/"+ws.getDate();
-          var done=challenges.filter(function(c){return c.done;}).length;
-          return (
-            <div>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                <div style={{fontSize:12,color:"#64748b"}}>Week of {wsLabel}</div>
-                <div style={{fontSize:12,fontWeight:600,color:done===challenges.length?"#22c55e":"#64748b"}}>{done} / {challenges.length} done</div>
-              </div>
-              {challenges.map(function(c){
-                var pct=c.target>0?Math.round(c.current/c.target*100):0;
-                var col=c.done?"#22c55e":"#6366f1";
-                return (
-                  <div key={c.id} style={{marginBottom:10}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
-                      <div style={{display:"flex",alignItems:"center",gap:6}}>
-                        <span style={{fontSize:14}}>{c.icon}</span>
-                        <span style={{fontSize:12,color:c.done?"#e2e8f0":"#94a3b8"}}>{c.name}</span>
-                      </div>
-                      <span style={{fontSize:11,fontWeight:600,color:col}}>{c.done?"✓ Done":c.current+(c.suffix||"")+" / "+c.target+(c.suffix||"")}</span>
-                    </div>
-                    <div style={barStyle()}><div style={barFill(pct,col)}/></div>
-                  </div>
-                );
-              })}
-              <div style={{fontSize:10,color:"#334155",marginTop:8,textAlign:"center"}}>Resets every Sunday · completed challenges stay marked done</div>
-            </div>
-          );
-        })()}
-        {section==="achievements"&&(function(){
-          var earnedIds=earned.map(function(a){return a.id;});
-          var newIds=earnedIds.filter(function(id){return seenIds.indexOf(id)<0;});
-          return (
-            <div>
-              <div style={{fontSize:11,color:"#64748b",marginBottom:10}}>{earned.length} / {ACHIEVEMENTS.length} unlocked</div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-                {ACHIEVEMENTS.map(function(a){
-                  var isEarned=earnedIds.indexOf(a.id)>=0;
-                  var isNew=newIds.indexOf(a.id)>=0;
-                  return (
-                    <div key={a.id} style={{background:isEarned?"#0f1f2a":"#0a0a0f",border:"1px solid "+(isEarned?"#166534":"#1e293b"),borderRadius:6,padding:"8px 10px",opacity:isEarned?1:0.45}}>
-                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
-                        <span style={{fontSize:16,filter:isEarned?"none":"grayscale(1)"}}>{a.icon}</span>
-                        {isNew&&<span style={{fontSize:9,padding:"1px 5px",background:"#4338ca",borderRadius:3,color:"#a5b4fc",fontWeight:700}}>NEW</span>}
-                      </div>
-                      <div style={{fontSize:11,fontWeight:700,color:isEarned?"#e2e8f0":"#475569"}}>{a.name}</div>
-                      <div style={{fontSize:10,color:isEarned?"#64748b":"#334155",marginTop:1,lineHeight:1.3}}>{achDesc(a)}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })()}
-      </div>}
-    </div>
-  );
-}
 // CHANGED: Compact all-time performance summary for the Home tab. Mirrors PerformanceTab's exact
 // formulas (win rate, profit factor, expectancy, P&L) over journal rows + today's live trades, so
 // the headline numbers match the "All Time" view there. Tapping it jumps to the full Performance tab.
-function PerformanceSummary(props){
-  var rows=loadJournalRows();
-  // Include today's live trades as a synthetic row if not already saved (matches PerformanceTab).
-  var todayKey=todayStr();
-  var hasTodayRow=rows.some(function(r){return r.date===todayKey;});
-  var liveTrades=(props.todayTrades||[]).filter(function(t){return t&&t.status!=="open";});
-  var allRows=rows.slice();
-  if(!hasTodayRow&&liveTrades.length>0)allRows.push({date:todayKey,trades:liveTrades});
-  var allTrades=[];allRows.forEach(function(r){(r.trades||[]).forEach(function(t){if(t.status!=="open")allTrades.push(t);});});
-  if(allTrades.length===0)return null; // nothing to summarize yet
-  var wins=allTrades.filter(function(t){return tradeNetPnl(t)>0;});
-  var losses=allTrades.filter(function(t){return tradeNetPnl(t)<0;});
-  var totalPnl=allTrades.reduce(function(s,t){return s+tradeNetPnl(t);},0);
-  var winRate=Math.round((wins.length/allTrades.length)*100);
-  var totalWins=wins.reduce(function(s,t){return s+tradeNetPnl(t);},0);
-  var totalLosses=Math.abs(losses.reduce(function(s,t){return s+tradeNetPnl(t);},0));
-  var pf=totalLosses>0?(totalWins/totalLosses).toFixed(2):totalWins>0?"∞":"0.00";
-  var expValue=totalPnl/allTrades.length;
-  // CHANGED: Match PerformanceTab's expectancy formula EXACTLY — average $ per trade as a % of the
-  // average position size (a ratio of means), NOT the mean of per-trade pctPnl (a mean of ratios).
-  // The two diverge whenever position sizes vary, which made this Home figure disagree with the
-  // Performance tab for the same timeframe.
-  var _posSizes=allTrades.map(function(t){return parseFloat(t.positionSize);}).filter(function(v){return !isNaN(v)&&v>0;});
-  var _avgPosSize=_posSizes.length?_posSizes.reduce(function(s,v){return s+v;},0)/_posSizes.length:0;
-  var expPctVal=_avgPosSize>0?(expValue/_avgPosSize)*100:null;
-  var tradingDays=allRows.filter(function(r){return (r.trades||[]).some(function(t){return t.status!=="open";});}).length;
-  var pfNum=pf==="∞"?Infinity:parseFloat(pf);
-  function Stat(p){return (
-    <div style={{flex:"1 1 0",minWidth:0,padding:"8px 6px",textAlign:"center"}}>
-      <div style={{fontSize:9,color:"#64748b",textTransform:"uppercase",letterSpacing:0.5,fontWeight:600}}>{p.label}</div>
-      <div style={{fontSize:16,fontWeight:700,color:p.color||"#e2e8f0",marginTop:3,fontVariantNumeric:"tabular-nums"}}>{p.value}</div>
-    </div>
-  );}
-  return (
-    <div style={CS({marginBottom:16,padding:0,overflow:"hidden"})}>
-      <button onClick={function(){if(props.onNavigate)props.onNavigate();}} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 14px 8px",background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
-        <span style={{fontSize:13,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Performance · All-time</span>
-        <span style={{fontSize:11,color:"#6366f1",fontWeight:600}}>View all →</span>
-      </button>
-      <div style={{display:"flex",borderTop:"1px solid #1e293b"}}>
-        <Stat label="Win Rate" value={winRate+"%"} color={wrColor(winRate)}/>
-        <Stat label="Expectancy" value={HIDE_AMOUNTS?AMT_MASK:(expPctVal!==null?(expPctVal.toFixed(2)+"%"):"—")} color={expPctVal!=null?(expPctVal>=0?"#22c55e":"#ef4444"):"#94a3b8"}/>
-        <Stat label="Profit Factor" value={pf} color={pfNum>1?"#22c55e":pfNum<1?"#ef4444":"#94a3b8"}/>
-      </div>
-    </div>
-  );
-}
-
 // CHANGED: Combined Performance + Progress card for Home — headline KPIs and streaks in one pretty
 // band, with challenges/achievements/scaling embedded below.
 // CHANGED: Today-first summary strip — the most decision-relevant numbers at a glance.
@@ -5774,24 +5262,6 @@ function DayCommitmentCard(props){
 
 // CHANGED: Compact Conditions chip — always collapsed. Click toggles between Clear and Choppy
 // by marking all condition items checked/unchecked at once.
-function CompactConditions(props){
-  var allGood=props.allGood,condItems=props.condItems,warnings=props.warnings,conditionsChecked=props.conditionsChecked,setState=props.setState;
-  function toggle(){
-    setState(function(s){
-      var c={};
-      if(allGood){condItems.forEach(function(it){c[it.key]=true;});}
-      return Object.assign({},s,{conditionsChecked:c});
-    });
-  }
-  return (
-    <button onClick={toggle} style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,padding:"6px 10px",background:allGood?"#0a1f1066":"#1c0a0a66",border:"1px solid "+(allGood?"#16653466":"#7f1d1d66"),borderRadius:6,cursor:"pointer",fontFamily:"inherit",width:"100%"}}>
-      <span style={{width:6,height:6,borderRadius:"50%",background:allGood?"#22c55e":"#ef4444"}}/>
-      <span style={{fontSize:11,color:allGood?"#86efac":"#fca5a5",fontWeight:600,letterSpacing:0.5}}>{allGood?"Conditions clear":"Conditions choppy"}</span>
-      <span style={{fontSize:10,color:"#64748b",marginLeft:"auto"}}>{allGood?"tap to flag":"tap to clear"}</span>
-    </button>
-  );
-}
-
 // CHANGED: TradesTab now hides position/risk readouts until pre-market checklist is complete.
 // CHANGED: Position/risk readout displays slippage % alongside max instead of "$min-$max".
 // CHANGED: Warns in the Journal when an economic event matching the user's filters is imminent.
@@ -6021,7 +5491,16 @@ function TradesTab(props){
     }catch(e){return NaN;}
   })());
   var displayTrades=rawTrades.slice().filter(function(t){return t.status!=="open";}).map(function(t){return Object.assign({},t,{_dayDiscScore:_dayDisc});});
-  filterDefs.forEach(function(fd){var sel=filters[fd.key];if(!sel||!sel.length)return;displayTrades=displayTrades.filter(function(t){if(fd.key==="emotions")return(t[fd.key]||[]).some(function(e){return sel.indexOf(e)>=0;});if(fd.key==="violations"){var v=(t.violations||[]).slice();var _sm=parseFloat(t.posMaxAtEntry)||0;var _lsf=parseFloat(t.sizeFraction)||1;var _tg=t.grade==="A"?1:t.grade==="B"?0.75:t.grade==="C"?0.5:1;var _lpm=(parseFloat(settings.positionMax)||0)*_lsf*_tg;var _cap=t.grade?_lpm:Math.max(_sm,_lpm);var _pos=parseFloat(t.positionSize)||0;var _oi=v.indexOf("Oversized entry");if(_cap>0&&_pos>_cap){if(_oi<0)v.push("Oversized entry");}else if(_oi>=0){v.splice(_oi,1);}if(sel.indexOf("None")>=0&&v.length===0)return true;return v.some(function(e){return sel.indexOf(e)>=0;});}if(fd.key==="rBucket")return sel.indexOf(_rBucketOf(t))>=0;if(fd.key==="discBucket"){var _ds=DEFAULT_DISCIPLINE_SCORING;try{var _st=JSON.parse(localStorage.getItem("tf-disc-scoring")||"null");if(_st)_ds=Object.assign({},_ds,_st);}catch(e){}var _sen={};try{var _to=JSON.parse(localStorage.getItem("tf-trade-options")||"null");if(_to&&_to.emotionSentiments)_sen=_to.emotionSentiments;}catch(e){}var _tv=(t.violations||[]).slice();var _sm2=parseFloat(t.posMaxAtEntry)||0;var _lsf2=parseFloat(t.sizeFraction)||1;var _tg2=t.grade==="A"?1:t.grade==="B"?0.75:t.grade==="C"?0.5:1;var _lpm2=(parseFloat(settings.positionMax)||0)*_lsf2*_tg2;var _cap2=t.grade?_lpm2:Math.max(_sm2,_lpm2);var _pos2=parseFloat(t.positionSize)||0;var _oi2=_tv.indexOf("Oversized entry");if(_cap2>0&&_pos2>_cap2){if(_oi2<0)_tv.push("Oversized entry");}else if(_oi2>=0){_tv.splice(_oi2,1);}var _mri=_tv.indexOf("Max risk exceeded");var _slPct=parseFloat(t.stopThreshPctAtEntry);if(isNaN(_slPct)||_slPct<=0)_slPct=parseFloat(settings.riskMaxPct)||0;var _pct=parseFloat(t.pctPnl);if(_slPct>0&&!isNaN(_pct)&&_pct<-_slPct){if(_mri<0)_tv.push("Max risk exceeded");}else if(_mri>=0){_tv.splice(_mri,1);}var _sc=100;_sc-=_tv.length*(_ds.violationPenalty||15);_sc-=(t.emotions||[]).filter(function(x){return getEmotionSentiment(x,_sen)==="negative";}).length*(_ds.negEmotionPenalty||10);if(t.grade==="C")_sc-=(_ds.cGradePenalty||5);_sc=Math.max(0,Math.min(100,_sc));var th=loadDisciplineLockThreshold();var b=_sc>=th?"Clean (≥"+th+")":"Broken (<"+th+")";return sel.indexOf(b)>=0;}if(fd.key==="sessionBucket"){var sid=null;try{sid=getSessionForTrade(t);}catch(e){}if(!sid)return sel.indexOf("Out of Session")>=0;var sess=(getSessions(settings)||[]).find(function(x){return x.id===sid;});var nm=sess?(sess.name||sess.label||sess.id):sid;return sel.indexOf(nm)>=0;}return sel.indexOf(t[fd.key])>=0;});});
+  // CHANGED: both filter branches below used to re-implement violation detection and discipline
+    // scoring inline, with the same defects the Performance-tab copies had: a DOLLAR position size
+    // compared against settings.positionMax, which is a CONTRACT COUNT in contracts sizing mode, so
+    // every graded trade falsely matched the "Oversized entry" filter and landed 15 points low in
+    // the Clean/Broken buckets. They also ignored halfSizeAppliesTo and the stamped
+    // riskCapDollarsAtEntry. Now delegated to the canonical effectiveViolations /
+    // tradeDisciplineScore, with one shared ctx built per pass instead of two localStorage parses
+    // per trade.
+    var _fltCtx=buildDisciplineCtx(parseFloat(settings.riskMax)||0);
+    filterDefs.forEach(function(fd){var sel=filters[fd.key];if(!sel||!sel.length)return;displayTrades=displayTrades.filter(function(t){if(fd.key==="emotions")return(t[fd.key]||[]).some(function(e){return sel.indexOf(e)>=0;});if(fd.key==="violations"){var v=effectiveViolations(t,_fltCtx);if(sel.indexOf("None")>=0&&v.length===0)return true;return v.some(function(e){return sel.indexOf(e)>=0;});}if(fd.key==="rBucket")return sel.indexOf(_rBucketOf(t))>=0;if(fd.key==="discBucket"){var _sc=tradeDisciplineScore(t,_fltCtx);var th=loadDisciplineLockThreshold();var b=_sc>=th?"Clean (≥"+th+")":"Broken (<"+th+")";return sel.indexOf(b)>=0;}if(fd.key==="sessionBucket"){var sid=null;try{sid=getSessionForTrade(t);}catch(e){}if(!sid)return sel.indexOf("Out of Session")>=0;var sess=(getSessions(settings)||[]).find(function(x){return x.id===sid;});var nm=sess?(sess.name||sess.label||sess.id):sid;return sel.indexOf(nm)>=0;}return sel.indexOf(t[fd.key])>=0;});});
   // CHANGED: Multi-level sort. Each sort id maps to a comparator; the chain applies them in
   // priority order, falling through to the next only when the current one ties. An empty chain
   // (or only "timestamp") defaults to chronological by openedAt.
@@ -6081,7 +5560,16 @@ function TradesTab(props){
       var _tds=parseFloat(isToday?(state.disciplineScore||NaN):(pastSession&&pastSession.disciplineScore));
       (state.trades||[]).forEach(function(t){if(t.status!=="open")all.push(Object.assign({},t,{date:todayKeyLocal,_dayDiscScore:_tds}));});
     }catch(e){}
-    filterDefs.forEach(function(fd){var sel=filters[fd.key];if(!sel||!sel.length)return;all=all.filter(function(t){if(fd.key==="emotions")return(t[fd.key]||[]).some(function(e){return sel.indexOf(e)>=0;});if(fd.key==="violations"){var v=(t.violations||[]).slice();var _sm=parseFloat(t.posMaxAtEntry)||0;var _lsf=parseFloat(t.sizeFraction)||1;var _tg=t.grade==="A"?1:t.grade==="B"?0.75:t.grade==="C"?0.5:1;var _lpm=(parseFloat(settings.positionMax)||0)*_lsf*_tg;var _cap=t.grade?_lpm:Math.max(_sm,_lpm);var _pos=parseFloat(t.positionSize)||0;var _oi=v.indexOf("Oversized entry");if(_cap>0&&_pos>_cap){if(_oi<0)v.push("Oversized entry");}else if(_oi>=0){v.splice(_oi,1);}if(sel.indexOf("None")>=0&&v.length===0)return true;return v.some(function(e){return sel.indexOf(e)>=0;});}if(fd.key==="rBucket")return sel.indexOf(_rBucketOf(t))>=0;if(fd.key==="discBucket"){var _ds=DEFAULT_DISCIPLINE_SCORING;try{var _st=JSON.parse(localStorage.getItem("tf-disc-scoring")||"null");if(_st)_ds=Object.assign({},_ds,_st);}catch(e){}var _sen={};try{var _to=JSON.parse(localStorage.getItem("tf-trade-options")||"null");if(_to&&_to.emotionSentiments)_sen=_to.emotionSentiments;}catch(e){}var _tv=(t.violations||[]).slice();var _sm2=parseFloat(t.posMaxAtEntry)||0;var _lsf2=parseFloat(t.sizeFraction)||1;var _tg2=t.grade==="A"?1:t.grade==="B"?0.75:t.grade==="C"?0.5:1;var _lpm2=(parseFloat(settings.positionMax)||0)*_lsf2*_tg2;var _cap2=t.grade?_lpm2:Math.max(_sm2,_lpm2);var _pos2=parseFloat(t.positionSize)||0;var _oi2=_tv.indexOf("Oversized entry");if(_cap2>0&&_pos2>_cap2){if(_oi2<0)_tv.push("Oversized entry");}else if(_oi2>=0){_tv.splice(_oi2,1);}var _mri=_tv.indexOf("Max risk exceeded");var _slPct=parseFloat(t.stopThreshPctAtEntry);if(isNaN(_slPct)||_slPct<=0)_slPct=parseFloat(settings.riskMaxPct)||0;var _pct=parseFloat(t.pctPnl);if(_slPct>0&&!isNaN(_pct)&&_pct<-_slPct){if(_mri<0)_tv.push("Max risk exceeded");}else if(_mri>=0){_tv.splice(_mri,1);}var _sc=100;_sc-=_tv.length*(_ds.violationPenalty||15);_sc-=(t.emotions||[]).filter(function(x){return getEmotionSentiment(x,_sen)==="negative";}).length*(_ds.negEmotionPenalty||10);if(t.grade==="C")_sc-=(_ds.cGradePenalty||5);_sc=Math.max(0,Math.min(100,_sc));var th=loadDisciplineLockThreshold();var b=_sc>=th?"Clean (≥"+th+")":"Broken (<"+th+")";return sel.indexOf(b)>=0;}if(fd.key==="sessionBucket"){var sid=null;try{sid=getSessionForTrade(t);}catch(e){}if(!sid)return sel.indexOf("Out of Session")>=0;var sess=(getSessions(settings)||[]).find(function(x){return x.id===sid;});var nm=sess?(sess.name||sess.label||sess.id):sid;return sel.indexOf(nm)>=0;}return sel.indexOf(t[fd.key])>=0;});});
+    // CHANGED: both filter branches below used to re-implement violation detection and discipline
+    // scoring inline, with the same defects the Performance-tab copies had: a DOLLAR position size
+    // compared against settings.positionMax, which is a CONTRACT COUNT in contracts sizing mode, so
+    // every graded trade falsely matched the "Oversized entry" filter and landed 15 points low in
+    // the Clean/Broken buckets. They also ignored halfSizeAppliesTo and the stamped
+    // riskCapDollarsAtEntry. Now delegated to the canonical effectiveViolations /
+    // tradeDisciplineScore, with one shared ctx built per pass instead of two localStorage parses
+    // per trade.
+    var _fltCtx=buildDisciplineCtx(parseFloat(settings.riskMax)||0);
+    filterDefs.forEach(function(fd){var sel=filters[fd.key];if(!sel||!sel.length)return;all=all.filter(function(t){if(fd.key==="emotions")return(t[fd.key]||[]).some(function(e){return sel.indexOf(e)>=0;});if(fd.key==="violations"){var v=effectiveViolations(t,_fltCtx);if(sel.indexOf("None")>=0&&v.length===0)return true;return v.some(function(e){return sel.indexOf(e)>=0;});}if(fd.key==="rBucket")return sel.indexOf(_rBucketOf(t))>=0;if(fd.key==="discBucket"){var _sc=tradeDisciplineScore(t,_fltCtx);var th=loadDisciplineLockThreshold();var b=_sc>=th?"Clean (≥"+th+")":"Broken (<"+th+")";return sel.indexOf(b)>=0;}if(fd.key==="sessionBucket"){var sid=null;try{sid=getSessionForTrade(t);}catch(e){}if(!sid)return sel.indexOf("Out of Session")>=0;var sess=(getSessions(settings)||[]).find(function(x){return x.id===sid;});var nm=sess?(sess.name||sess.label||sess.id):sid;return sel.indexOf(nm)>=0;}return sel.indexOf(t[fd.key])>=0;});});
     all.sort(makeChainCmp(sortChain,true));
     return all;
   })();
@@ -6800,317 +6288,6 @@ function TradesTab(props){
   );
 }
 // CHANGED: Cancel discards changes; Save Changes commits.
-function JournalTab(props){
-  var settings=props.settings;
-  var [entries,setEntries]=useState([]);
-  var [selectedEntry,setSelectedEntry]=useState(null);
-  // CHANGED: Universal-edit state. editDraft holds {note, trades} together.
-  var [editing,setEditing]=useState(false);
-  var [editDraft,setEditDraft]=useState(null);
-  // While in universal-edit mode, editingTradeIdx tracks which trade is currently expanded for editing.
-  var [editingTradeIdx,setEditingTradeIdx]=useState(null);
-  var [confirmDelete,setConfirmDelete]=useState(null);
-  // CHANGED: All hooks must be before any early returns (Rules of Hooks).
-  var [journalSortBy,setJournalSortBy]=useState("date_desc");
-  var [journalFilters,setJournalFilters]=useState({});
-  var [journalSortOpen,setJournalSortOpen]=useState(false);
-  var [journalFilterOpen,setJournalFilterOpen]=useState(false);
-  var [journalCalOpen,setJournalCalOpen]=useState(false);
-  var [journalDateFilter,setJournalDateFilter]=useState(null);
-  function loadAll(){var rows=loadJournalRows();rows.sort(function(a,b){return new Date(b.date)-new Date(a.date);});setEntries(rows);}
-  useEffect(function(){loadAll();},[props.reloadKey]);
-  function deleteEntry(date){try{localStorage.removeItem("journal:"+date.replace(/\//g,"-"));}catch(e){}setSelectedEntry(null);loadAll();if(props.bumpReloadKey)props.bumpReloadKey();}
-  function startEdit(entry){
-    setEditing(true);
-    // Deep clone trades into the draft so changes don't mutate selectedEntry until Save.
-    var draftTrades=(entry.trades||[]).map(function(t){return Object.assign({},t,{entries:(t.entries||[]).map(function(x){return Object.assign({},x);}),exits:(t.exits||[]).map(function(x){return Object.assign({},x);})});});
-    setEditDraft({note:entry.note||"",trades:draftTrades});
-    setEditingTradeIdx(null);
-  }
-  function cancelEdit(){
-    setEditing(false);
-    setEditDraft(null);
-    setEditingTradeIdx(null);
-  }
-  function saveAllEdits(){
-    if(!selectedEntry||!editDraft)return;
-    var fn=props.autoAddViolations||function(x){return x;};
-    // CHANGED: Re-derive openedAt/closedAt from leg times (in case user edited leg timestamps).
-    function deriveTimes(t){
-      var ents=t.entries||[],exs=t.exits||[];
-      var et=ents.map(function(e){return e.time;}).filter(function(x){return !!x;});
-      var xt=exs.map(function(e){return e.time;}).filter(function(x){return !!x;});
-      var openedAt=et.length>0?Math.min.apply(null,et):t.openedAt;
-      var closedAt=t.status==="open"?null:(xt.length>0?Math.max.apply(null,xt):t.closedAt);
-      return Object.assign({},t,{openedAt:openedAt,closedAt:closedAt});
-    }
-    var ut=(editDraft.trades||[]).map(function(t){return fn(deriveTimes(t),settings.positionMax);});
-    // CHANGED: Journal edits a saved (historical) day — preserve its own riskMax and score
-    // against it, so changing the current risk setting never silently rescores past days.
-    var entryRiskMax=(selectedEntry.riskMax!=null&&parseFloat(selectedEntry.riskMax)>0)?parseFloat(selectedEntry.riskMax):(parseFloat(settings.riskMax)||0);
-    var newEntry=Object.assign({},selectedEntry,{
-      note:editDraft.note||"",
-      trades:ut,
-      wins:ut.filter(function(x){return tradeNetPnl(x)>0;}).length,
-      losses:ut.filter(function(x){return tradeNetPnl(x)<0;}).length,
-      pnl:ut.reduce(function(s,x){return s+tradeNetPnl(x);},0),
-      disciplineScore:calcDiscipline(ut,entryRiskMax,selectedEntry.commitments?{commitments:selectedEntry.commitments}:{commitment:selectedEntry.commitment||null}),
-      riskMax:entryRiskMax
-    });
-    try{localStorage.setItem("journal:"+selectedEntry.date.replace(/\//g,"-"),JSON.stringify(newEntry));}catch(e){}
-    setSelectedEntry(newEntry);
-    setEntries(function(arr){return arr.map(function(e){return e.date===newEntry.date?newEntry:e;});});
-    setEditing(false);
-    setEditDraft(null);
-    setEditingTradeIdx(null);
-    if(props.bumpReloadKey)props.bumpReloadKey();
-  }
-  function deleteDraftTrade(idx){
-    setEditDraft(function(d){if(!d)return d;var nt=(d.trades||[]).filter(function(_,i){return i!==idx;});return Object.assign({},d,{trades:nt});});
-    if(editingTradeIdx===idx)setEditingTradeIdx(null);
-  }
-  function updateDraftTrade(idx,updated){
-    setEditDraft(function(d){if(!d)return d;var nt=(d.trades||[]).map(function(t,i){return i===idx?updated:t;});return Object.assign({},d,{trades:nt});});
-  }
-  if(selectedEntry){
-    // CHANGED: When editing, render from draft. Otherwise from saved entry.
-    var viewEntry=editing&&editDraft?Object.assign({},selectedEntry,{trades:editDraft.trades,note:editDraft.note}):selectedEntry;
-    var trades=viewEntry.trades||[];
-    // CHANGED: Day P&L is summed from per-trade NET pnl (tradeNetPnl) rather than the stored
-    // entry.pnl. Stored day totals are gross whenever their trades were logged before commissions
-    // were configured, so the summary read as gross while the cards showed fees separately. Summing
-    // net here keeps Daily Summary == sum of the cards, with fees deducted, regardless of backfill.
-    // Falls back to the stored total only when there are no closed trades to sum.
-    var _closedForPnl=trades.filter(function(t){return t&&t.status!=="open";});
-    var pnlVal=_closedForPnl.length>0?_closedForPnl.reduce(function(s,t){return s+tradeNetPnl(t);},0):(entryNetPnl(viewEntry));
-    var wins=trades.filter(function(t){return tradeNetPnl(t)>0;}).length;
-    var losses=trades.filter(function(t){return tradeNetPnl(t)<0;}).length;
-    var winRate=trades.length>0?Math.round((wins/trades.length)*100):0;
-    var avgWin=wins>0?(trades.filter(function(t){return tradeNetPnl(t)>0;}).reduce(function(s,t){return s+tradeNetPnl(t);},0)/wins):0;
-    var avgLoss=losses>0?Math.abs(trades.filter(function(t){return tradeNetPnl(t)<0;}).reduce(function(s,t){return s+tradeNetPnl(t);},0)/losses):0;
-    var liveDiscipline=editing?calcDiscipline(trades,(selectedEntry.riskMax!=null&&parseFloat(selectedEntry.riskMax)>0)?parseFloat(selectedEntry.riskMax):(parseFloat(settings.riskMax)||0),selectedEntry.commitments?{commitments:selectedEntry.commitments}:{commitment:selectedEntry.commitment||null}):(selectedEntry.disciplineScore||0);
-    // CHANGED: Day % = day P&L ÷ account balance at start of day (consistent across app).
-    var sumPct=(function(){var sb=getAccountBalanceAtDate(selectedEntry.date);return sb>0?(pnlVal/sb*100):0;})();
-    var winPcts=trades.filter(function(t){return tradeNetPnl(t)>0;}).map(function(t){return parseFloat(t.pctPnl);}).filter(function(v){return !isNaN(v);});
-    var lossPcts=trades.filter(function(t){return tradeNetPnl(t)<0;}).map(function(t){return parseFloat(t.pctPnl);}).filter(function(v){return !isNaN(v);});
-    var avgWinPct=winPcts.length>0?(winPcts.reduce(function(s,v){return s+v;},0)/winPcts.length):0;
-    var avgLossPct=lossPcts.length>0?Math.abs(lossPcts.reduce(function(s,v){return s+v;},0)/lossPcts.length):0;
-    function fmtPct(v,signed){var s=v>=0?"+":"-";return (signed?s:(v<0?"-":""))+Math.abs(v).toFixed(2)+"%";}
-    return (
-      <div style={{paddingTop:16}}>
-        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
-          <button onClick={function(){if(editing){if(!confirm("Discard unsaved changes?"))return;}setSelectedEntry(null);setEditing(false);setEditDraft(null);setEditingTradeIdx(null);}} style={{padding:"6px 12px",background:"none",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>← Back</button>
-          <div style={{fontSize:18,fontWeight:700,color:"#e2e8f0"}}>{selectedEntry.date}</div>
-          {editing&&<span style={{fontSize:10,padding:"2px 7px",background:"#1e1b4b",border:"1px solid #4338ca",borderRadius:3,color:"#a5b4fc",fontWeight:700,letterSpacing:0.5}}>EDITING</span>}
-        </div>
-        <div style={CS({marginBottom:14})}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
-            <div>
-              <div style={{fontSize:11,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>Daily P&L</div>
-              <div style={{fontSize:28,fontWeight:700,color:pnlVal>=0?"#22c55e":"#ef4444",marginTop:4}}>{HIDE_AMOUNTS?(pnlVal>0?"WIN":pnlVal<0?"LOSS":"FLAT"):HIDE_DOLLAR_PNL?fmtPct(sumPct,true):((pnlVal>=0?"+":"-")+"$"+Math.abs(pnlVal).toFixed(2))}</div>
-            </div>
-            <div style={{display:"flex",gap:8}}>
-              {!editing&&<button onClick={function(){startEdit(selectedEntry);}} style={{padding:"5px 11px",background:"#1e1b4b",border:"1px solid #4338ca",borderRadius:6,color:"#a5b4fc",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Edit</button>}
-              {!editing&&<button onClick={function(){setConfirmDelete(selectedEntry.date);}} style={{padding:"5px 11px",background:"#7f1d1d33",border:"1px solid #7f1d1d",borderRadius:6,color:"#fca5a5",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Delete entry</button>}
-            </div>
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12}}>
-            <div style={{background:"#0a0a0f",borderRadius:8,padding:"8px 10px",border:"1px solid #1e293b"}}><div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>Trades</div><div style={{fontSize:18,fontWeight:700,color:"#e2e8f0",marginTop:2}}>{trades.length}</div></div>
-            <div style={{background:"#0a0a0f",borderRadius:8,padding:"8px 10px",border:"1px solid #1e293b"}}><div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>Win Rate</div><div style={{fontSize:18,fontWeight:700,color:wrColor(winRate),marginTop:2}}>{winRate}%</div></div>
-            <div style={{background:"#0a0a0f",borderRadius:8,padding:"8px 10px",border:"1px solid #1e293b"}}><div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>Discipline</div><div style={{fontSize:18,fontWeight:700,color:discColor(liveDiscipline),marginTop:2}}>{liveDiscipline}</div></div>
-          </div>
-          {trades.length>0&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            <div style={{background:"#0a0a0f",borderRadius:8,padding:"8px 10px",border:"1px solid #1e293b"}}><div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>Avg Win</div><div style={{fontSize:15,fontWeight:700,color:"#22c55e",marginTop:2}}>{HIDE_AMOUNTS?AMT_MASK:("+"+avgWinPct.toFixed(2)+"%")}</div></div>
-            <div style={{background:"#0a0a0f",borderRadius:8,padding:"8px 10px",border:"1px solid #1e293b"}}><div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>Avg Loss</div><div style={{fontSize:15,fontWeight:700,color:"#ef4444",marginTop:2}}>{HIDE_AMOUNTS?AMT_MASK:("-"+avgLossPct.toFixed(2)+"%")}</div></div>
-          </div>}
-        </div>
-        <div style={CS({marginBottom:14})}>
-          <div style={{fontSize:11,color:"#64748b",letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>Daily Note</div>
-          {editing
-            ?<textarea autoFocus value={editDraft.note} onChange={function(e){var v=e.target.value;setEditDraft(function(d){return Object.assign({},d,{note:v});});}} placeholder="What happened today? Lessons learned, observations, etc..." style={Object.assign({},fld,{minHeight:120,resize:"vertical",fontFamily:"inherit",lineHeight:1.5})}/>
-            :(selectedEntry.note?<div style={{fontSize:14,color:"#cbd5e1",lineHeight:1.6,whiteSpace:"pre-wrap"}}>{selectedEntry.note}</div>:<div style={{fontSize:13,color:"#64748b",fontStyle:"italic"}}>No note for this day. Click Edit to add one.</div>)
-          }
-        </div>
-        {trades.length>0&&!editing&&<PnLChart trades={trades}/>}
-        <div style={{marginTop:14,marginBottom:editing?80:0}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-            <div style={{fontSize:13,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Trades</div>
-            {editing&&<div style={{fontSize:11,color:"#475569"}}>Tap a trade to edit · × to remove</div>}
-          </div>
-          {/* CHANGED: 3 trade cards per row on laptop, single column on mobile. Editing card spans full width. */}
-          <div style={{display:"grid",gridTemplateColumns:props.mobile?"1fr":"1fr 1fr 1fr",gap:12,alignItems:"stretch"}}>
-          {trades.map(function(t,i){
-            // CHANGED: Universal-edit mode — clicking a trade tile opens its inline editor.
-            //          Per-trade Edit/Delete buttons are hidden (handled by hideControls in TradeTile).
-            //          A small × per row in edit mode lets you delete the trade from the draft.
-            //          Inline TradeForm is wrapped to commit changes back to editDraft.trades on its onSave.
-            var isExpanded=editing&&editingTradeIdx===i;
-            if(isExpanded){
-              return (
-                <div key={t.id||i} style={{gridColumn:"1 / -1"}}>
-                <TradeForm
-                  trade={t}
-                  setTrade={function(updater){
-                    setEditDraft(function(d){
-                      if(!d)return d;
-                      var current=d.trades[i];
-                      var next=typeof updater==="function"?updater(current):updater;
-                      var nt=d.trades.slice();nt[i]=next;
-                      return Object.assign({},d,{trades:nt});
-                    });
-                  }}
-                  onSave={function(updated){updateDraftTrade(i,updated);setEditingTradeIdx(null);}}
-                  onCancel={function(){setEditingTradeIdx(null);}}
-                  settings={settings}
-                  tradeOptions={props.tradeOptions}
-                />
-                </div>
-              );
-            }
-            return (
-              <div key={t.id||i} style={{position:"relative"}}>
-                {editing&&(
-                  <div style={{position:"absolute",bottom:10,right:10,zIndex:5,display:"flex",gap:4}}>
-                    <button onClick={function(){setEditingTradeIdx(i);}} style={{padding:"4px 11px",background:"#1e1b4b",border:"1px solid #4338ca",borderRadius:4,color:"#a5b4fc",fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Edit</button>
-                    <button onClick={function(){deleteDraftTrade(i);}} aria-label="Remove" style={{padding:"4px 9px",background:"#7f1d1d33",border:"1px solid #7f1d1d",borderRadius:4,color:"#fca5a5",fontSize:13,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>
-                  </div>
-                )}
-                <TradeTile t={t} i={i} posMax={settings.positionMax} riskMax={settings.riskMax} hideControls={true}/>
-              </div>
-            );
-          })}
-          </div>
-        </div>
-        {/* CHANGED: Sticky action bar at bottom of edit mode for Cancel / Save Changes. */}
-        {editing&&(
-          <div style={{position:"sticky",bottom:60,marginTop:16,padding:"10px 12px",background:"#0a0a0f",border:"1px solid #4338ca",borderRadius:10,display:"flex",gap:8,boxShadow:"0 -4px 16px rgba(0,0,0,0.4)",zIndex:30}}>
-            <button onClick={cancelEdit} style={{flex:1,padding:"10px",background:"none",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Cancel</button>
-            <button onClick={saveAllEdits} style={{flex:2,padding:"10px",background:"#4f46e5",border:"none",borderRadius:6,color:"#fff",fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>Save Changes</button>
-          </div>
-        )}
-        {confirmDelete&&(
-          <div style={{position:"fixed",inset:0,background:"#00000099",display:"flex",alignItems:"center",justifyContent:"center",zIndex:500,padding:20}} onClick={function(){setConfirmDelete(null);}}>
-            <div onClick={function(e){e.stopPropagation();}} style={{background:"#111118",border:"1px solid #7f1d1d",borderRadius:12,padding:20,maxWidth:340,width:"100%"}}>
-              <div style={{fontSize:16,fontWeight:700,color:"#fca5a5",marginBottom:8}}>Delete journal entry?</div>
-              <div style={{fontSize:13,color:"#94a3b8",marginBottom:14,lineHeight:1.5}}>This will permanently remove the entry for {confirmDelete} including all trades and notes. This cannot be undone.</div>
-              <div style={{display:"flex",gap:8}}>
-                <button onClick={function(){setConfirmDelete(null);}} style={{flex:1,padding:"9px",background:"none",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Cancel</button>
-                <button onClick={function(){deleteEntry(confirmDelete);setConfirmDelete(null);}} style={{flex:1,padding:"9px",background:"#7f1d1d",border:"1px solid #ef4444",borderRadius:6,color:"#fca5a5",fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>Delete</button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-  return (
-    <div style={{paddingTop:16}}>
-      <div style={{fontSize:18,fontWeight:700,color:"#e2e8f0",marginBottom:12}}>Journal</div>
-
-      {/* CHANGED: Calendar picker + Sort + Filter row matching Trades tab. */}
-      <div style={{position:"relative",marginBottom:12}}>
-        <div style={{display:"flex",gap:8,marginBottom:6}}>
-          <button onClick={function(){setJournalCalOpen(function(o){return !o;});setJournalSortOpen(false);setJournalFilterOpen(false);}} style={{flex:1,padding:"8px 12px",background:journalDateFilter?"#1e1b4b":"#111118",border:"1px solid "+(journalDateFilter?"#4338ca":"#334155"),borderRadius:6,color:journalDateFilter?"#a5b4fc":"#64748b",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <span>{journalDateFilter||"All Dates"}</span><span style={{fontSize:12}}>📅</span>
-          </button>
-          {journalDateFilter&&<button onClick={function(){setJournalDateFilter(null);}} style={{padding:"8px 10px",background:"transparent",border:"1px solid #334155",borderRadius:6,color:"#64748b",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>✕</button>}
-        </div>
-        {journalCalOpen&&(
-          <div style={{position:"absolute",top:"100%",left:0,right:0,zIndex:400}}>
-            <CalendarPicker selectedDate={journalDateFilter||todayStr()} onSelect={function(d){setJournalDateFilter(d);setJournalCalOpen(false);}} onClose={function(){setJournalCalOpen(false);}}/>
-          </div>
-        )}
-        <div style={{display:"flex",gap:8}}>
-          <div style={{position:"relative",flex:1}}>
-            <button onClick={function(){setJournalSortOpen(function(o){return !o;});setJournalFilterOpen(false);}} style={{width:"100%",padding:"8px 12px",background:journalSortBy!=="date_desc"?"#1e1b4b":"#111118",border:"1px solid "+(journalSortBy!=="date_desc"?"#4338ca":"#334155"),borderRadius:6,color:journalSortBy!=="date_desc"?"#a5b4fc":"#64748b",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <span>Sort{journalSortBy!=="date_desc"?" ✓":""}</span><span style={{fontSize:12}}>▾</span>
-            </button>
-            {journalSortOpen&&(
-              <div style={{position:"absolute",top:"100%",left:0,right:0,background:"#1e293b",border:"1px solid #334155",borderRadius:8,zIndex:300,overflow:"hidden",boxShadow:"0 8px 24px #00000088",marginTop:4}}>
-                {[{id:"date_desc",label:"Newest First"},{id:"date_asc",label:"Oldest First"},{id:"pnl_pos",label:"P&L $ (Best First)"},{id:"pnl_neg",label:"P&L $ (Worst First)"},{id:"trades_desc",label:"Most Trades"},{id:"wr_desc",label:"Win Rate (High→Low)"}].map(function(opt){
-                  return <button key={opt.id} onClick={function(){setJournalSortBy(opt.id);setJournalSortOpen(false);}} style={{width:"100%",padding:"10px 14px",background:journalSortBy===opt.id?"#1e1b4b":"transparent",border:"none",borderBottom:"1px solid #334155",color:journalSortBy===opt.id?"#a5b4fc":"#cbd5e1",fontSize:14,cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>{opt.label}</button>;
-                })}
-              </div>
-            )}
-          </div>
-          {(function(){
-            var jFilterDefs=[{key:"result",label:"Result",options:["Green","Red"]},{key:"grade",label:"Has Grade",options:["A","B","C"]}];
-            var activeCount=Object.values(journalFilters).filter(function(v){return v&&v.length>0;}).length;
-            return (
-              <div style={{position:"relative",flex:1}}>
-                <button onClick={function(){setJournalFilterOpen(function(o){return !o;});setJournalSortOpen(false);}} style={{width:"100%",padding:"8px 12px",background:activeCount>0?"#1e1b4b":"#111118",border:"1px solid "+(activeCount>0?"#4338ca":"#334155"),borderRadius:6,color:activeCount>0?"#a5b4fc":"#64748b",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <span>Filter{activeCount>0?" ("+activeCount+")":""}</span><span style={{fontSize:12}}>▾</span>
-                </button>
-                {journalFilterOpen&&(
-                  <div style={{position:"absolute",top:"100%",right:0,left:0,background:"#1e293b",border:"1px solid #334155",borderRadius:8,zIndex:300,boxShadow:"0 8px 24px #00000088",marginTop:4,padding:"10px 12px"}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                      <span style={{fontSize:13,color:"#64748b",letterSpacing:1,textTransform:"uppercase"}}>Filters</span>
-                      {activeCount>0&&<button onClick={function(){setJournalFilters({});}} style={{background:"none",border:"none",color:"#f87171",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>Clear all</button>}
-                    </div>
-                    {jFilterDefs.map(function(fd){
-                      var selected=journalFilters[fd.key]||[];
-                      return (
-                        <div key={fd.key} style={{marginBottom:10}}>
-                          <div style={{fontSize:12,color:"#6366f1",letterSpacing:1,textTransform:"uppercase",marginBottom:6,fontWeight:600}}>{fd.label}</div>
-                          <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-                            {fd.options.map(function(opt){var active=selected.indexOf(opt)>=0;return <button key={opt} onClick={function(){setJournalFilters(function(f){var cur=f[fd.key]||[];var next=active?cur.filter(function(x){return x!==opt;}):[].concat(cur,[opt]);return Object.assign({},f,{[fd.key]:next});});}} style={{padding:"4px 10px",background:active?"#4f46e5":"#0a0a0f",border:"1px solid "+(active?"#6366f1":"#334155"),borderRadius:4,color:active?"#fff":"#94a3b8",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>{opt}</button>;})}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-        </div>
-      </div>
-
-      {(function(){
-        var filtered=entries.filter(function(entry){
-          if(journalDateFilter&&entry.date!==journalDateFilter)return false;
-          var pnl=entryNetPnl(entry);
-          var res=journalFilters.result||[];
-          if(res.length===1){if(res[0]==="Green"&&pnl<0)return false;if(res[0]==="Red"&&pnl>=0)return false;}
-          var gc=journalFilters.grade||[];
-          if(gc.length>0){var trades=entry.trades||[];var hasGrade=gc.some(function(g){return trades.some(function(t){return t.grade===g;});});if(!hasGrade)return false;}
-          return true;
-        });
-        if(journalSortBy==="date_asc")filtered=filtered.slice().sort(function(a,b){return new Date(a.date)-new Date(b.date);});
-        else if(journalSortBy==="pnl_pos")filtered=filtered.slice().sort(function(a,b){return (parseFloat(b.pnl)||0)-(parseFloat(a.pnl)||0);});
-        else if(journalSortBy==="pnl_neg")filtered=filtered.slice().sort(function(a,b){return (parseFloat(a.pnl)||0)-(parseFloat(b.pnl)||0);});
-        else if(journalSortBy==="trades_desc")filtered=filtered.slice().sort(function(a,b){return (b.trades||[]).length-(a.trades||[]).length;});
-        else if(journalSortBy==="wr_desc")filtered=filtered.slice().sort(function(a,b){var wa=(a.wins||0)/Math.max(1,(a.trades||[]).length),wb=(b.wins||0)/Math.max(1,(b.trades||[]).length);return wb-wa;});
-        if(entries.length===0)return <div style={{textAlign:"center",padding:"40px 20px",borderTop:"1px dashed #1e293b",marginTop:8}}><div style={{fontSize:14,color:"#475569"}}>No journal entries yet</div><div style={{fontSize:12,color:"#64748b",marginTop:4}}>Save your first session to start your journal</div></div>;
-        if(filtered.length===0)return <div style={{textAlign:"center",padding:"32px 20px",color:"#475569"}}><div style={{fontSize:14}}>No entries match</div></div>;
-        return filtered.map(function(entry){
-          var pnl=entryNetPnl(entry);
-          var trades=entry.trades||[];
-          var wins=trades.filter(function(t){return tradeNetPnl(t)>0;}).length;
-          var losses=trades.filter(function(t){return tradeNetPnl(t)<0;}).length;
-          var breakevens=trades.filter(function(t){return Math.abs(tradeNetPnl(t))<0.01;}).length;
-          var winRate=trades.length>0?Math.round((wins/trades.length)*100):0;
-          var sumPct=(function(){var sb=getAccountBalanceAtDate(entry.date);return sb>0?(pnl/sb*100):0;})();
-          return (
-            <button key={entry.date} onClick={function(){setSelectedEntry(entry);}} style={{width:"100%",display:"block",textAlign:"left",background:"#111118",border:"1px solid #1e293b",borderLeft:"3px solid "+(pnl>=0?"#22c55e44":"#ef444444"),borderRadius:10,padding:"12px 14px",marginBottom:8,cursor:"pointer",fontFamily:"inherit"}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
-                <div style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:0}}>
-                  <div style={{fontSize:14,fontWeight:700,color:"#e2e8f0"}}>{entry.date}</div>
-                  <div style={{fontSize:12,color:"#64748b"}}>{trades.length} trade{trades.length===1?"":"s"} · {winRate}% WR{breakevens>0?" · "+breakevens+" BE":""} · D{entry.disciplineScore||0}</div>
-                </div>
-                <div style={{textAlign:"right",flexShrink:0}}>
-                  <div style={{fontSize:16,fontWeight:700,color:pnl>=0?"#22c55e":"#ef4444"}}>{HIDE_AMOUNTS?wlSign(pnl):HIDE_DOLLAR_PNL?((sumPct>=0?"+":"")+sumPct.toFixed(2)+"%"):((pnl>=0?"+":"-")+"$"+Math.abs(pnl).toFixed(2))}</div>
-                </div>
-              </div>
-              {entry.note&&<div style={{fontSize:12,color:"#94a3b8",marginTop:5,fontStyle:"italic",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>"{entry.note}"</div>}
-            </button>
-          );
-        });
-      })()}
-    </div>
-  );
-}
-
 function GoalCard2(props){
   var gp=props;
   var [showInfo,setShowInfo]=useState(false);
@@ -7901,131 +7078,6 @@ function HBar(props){
 
 // CHANGED: PerformanceTab — Avg Win, Avg Loss, Expectancy now respect HIDE_DOLLAR_PNL.
 // CHANGED: AI Coach — generates a summary + focus suggestion, and answers freeform questions about the trader's stats.
-function AICoach(props){
-  var [open,setOpen]=useState(false);
-  var [loading,setLoading]=useState(false);
-  // CHANGED: Persist result/answer to localStorage so they survive tab switches until cleared.
-  var [result,setResult]=useState(function(){try{var s=localStorage.getItem("tf-aicoach-result");return s?JSON.parse(s):null;}catch(e){return null;}});
-  var [error,setError]=useState(null);
-  var [question,setQuestion]=useState(function(){try{return localStorage.getItem("tf-aicoach-question")||"";}catch(e){return "";}});
-  var [qLoading,setQLoading]=useState(false);
-  var [answer,setAnswer]=useState(function(){try{return localStorage.getItem("tf-aicoach-answer")||null;}catch(e){return null;}});
-  useEffect(function(){try{if(result)localStorage.setItem("tf-aicoach-result",JSON.stringify(result));else localStorage.removeItem("tf-aicoach-result");}catch(e){}},[result]);
-  useEffect(function(){try{if(answer)localStorage.setItem("tf-aicoach-answer",answer);else localStorage.removeItem("tf-aicoach-answer");}catch(e){}},[answer]);
-  useEffect(function(){try{localStorage.setItem("tf-aicoach-question",question);}catch(e){}},[question]);
-  function statsBlock(){
-    var s=props.stats;
-    function line(label,val){return (val==null||val===""||val==="n/a")?"":label+": "+val+"\n";}
-    return "Trader's stats ("+(s.rangeLabel||"selected range")+"):\n"+
-      line("Total trades",s.totalTrades)+
-      line("Win rate",s.winRate+"%")+
-      line("Breakeven rate",s.breakevenRate+"%")+
-      line("Profit factor",s.pf)+
-      line("Avg win",s.avgWinPct)+
-      line("Avg loss",s.avgLossPct)+
-      line("Expectancy per trade",s.expectancyPct+" ("+s.expectancyR+")")+
-      line("Best / worst setup",(s.bestSetup||"n/a")+" / "+(s.worstSetup||"n/a"))+
-      line("Best / worst session",(s.bestSession||"n/a")+" / "+(s.worstSession||"n/a"))+
-      line("Best / worst emotion tag",(s.bestEmotion||"n/a")+" / "+(s.worstEmotion||"n/a"))+
-      line("Best / worst direction",(s.bestDirection||"n/a")+" / "+(s.worstDirection||"n/a"))+
-      line("Best / worst instrument",(s.bestInstrument||"n/a")+" / "+(s.worstInstrument||"n/a"))+
-      line("Best / worst timeframe",(s.bestTimeframe||"n/a")+" / "+(s.worstTimeframe||"n/a"))+
-      line("Most common violation",(s.topViolation||"none"))+
-      line("Violation rate",s.violationRate)+
-      line("Avg discipline score",s.avgDiscipline+" (lock threshold "+s.disciplineThreshold+")")+
-      line("Avg trade % on disciplined vs undisciplined days",s.avgTradePctOnDisciplinedDays+" vs "+s.avgTradePctOnUndisciplinedDays)+
-      line("Avg trades/day (max in a day)",s.avgTradesPerDay+" ("+s.maxTradesInADay+")")+
-      line("Avg % after a losing trade vs overall",s.avgPctAfterALoss+" vs "+s.overallAvgPct)+
-      line("Recent form: last 10 trades vs prior",s.last10AvgPct+" vs "+s.priorAvgPct)+
-      line("Grade distribution",s.gradeDistribution);
-  }
-  function callAPI(prompt,onText){
-    // CHANGED: Use the user-provided Anthropic API key (stored in Settings → AI Coach). Without
-    // it the deployed web app can't reach the Anthropic API. The dangerous-direct-browser flag
-    // is required for direct browser-to-anthropic.com calls.
-    var apiKey="";try{apiKey=localStorage.getItem("tf-anthropic-key")||"";}catch(e){}
-    if(!apiKey){
-      return Promise.reject(new Error("No Anthropic API key set. Add yours in Settings → AI Coach."));
-    }
-    return fetch("https://api.anthropic.com/v1/messages",{
-      method:"POST",
-      headers:{
-        "Content-Type":"application/json",
-        "x-api-key":apiKey,
-        "anthropic-version":"2023-06-01",
-        "anthropic-dangerous-direct-browser-access":"true"
-      },
-      body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,messages:[{role:"user",content:prompt}]})
-    }).then(function(r){return r.json();}).then(function(data){
-      if(data&&data.error){throw new Error(data.error.message||"API error");}
-      var text=(data.content||[]).filter(function(b){return b.type==="text";}).map(function(b){return b.text;}).join("");
-      if(!text)throw new Error("Empty response");
-      onText(text);
-    });
-  }
-  function generate(){
-    setLoading(true);setError(null);setResult(null);
-    var prompt="You are an elite trading performance coach reviewing one trader's data. Be specific and personal — cite their actual numbers and named setups/sessions/emotions, never generic platitudes. Identify the single most important pattern in THIS data (e.g. a setup or session that's bleeding money, a discipline-to-outcome link, revenge-trading after losses, overtrading, or a declining recent trend) and explain it using the figures.\n\nWrite a 2-3 sentence summary of their performance grounded in the specifics, then ONE concrete, actionable focus suggestion that names exactly what to change and is tied to a number from the data. Do not use markdown headers.\n\n"+statsBlock()+"\n\nFormat your response as JSON: {\"summary\":\"...\",\"focus\":\"...\"}. Return only JSON, no preamble or markdown.";
-    callAPI(prompt,function(text){
-      var clean=text.replace(/```json|```/g,"").trim();
-      try{setResult(JSON.parse(clean));}catch(e){setResult({summary:clean,focus:""});}
-      setLoading(false);
-    }).catch(function(e){setError(e&&e.message?e.message:"Couldn't generate insights. Try again.");setLoading(false);});
-  }
-  function ask(){
-    var q=question.trim();if(!q)return;
-    setQLoading(true);setAnswer(null);
-    var prompt="You are a sharp, direct trading performance coach. Answer the trader's question using ONLY their data below, citing specific numbers, setups, sessions or emotions where relevant. If the data doesn't support an answer, say so plainly rather than guessing. Keep it to 2-4 sentences, actionable, no markdown headers.\n\n"+statsBlock()+"\n\nQuestion: "+q;
-    callAPI(prompt,function(text){setAnswer(text.trim());setQLoading(false);}).catch(function(e){setAnswer("Couldn't get an answer: "+(e&&e.message?e.message:"unknown error")+". Try again.");setQLoading(false);});
-  }
-  return (
-    <div style={{marginBottom:12,padding:"12px 14px",background:"linear-gradient(135deg,#1a1a2e,#16213e)",border:"1px solid #4338ca",borderRadius:10}}>
-      <div onClick={function(){setOpen(function(o){return !o;});}} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:(open&&(result||loading))?10:0,cursor:"pointer",gap:8}}>
-        <div style={{display:"flex",alignItems:"center",gap:7}}>
-          <span style={{fontSize:14}}>🪄</span>
-          <span style={{fontSize:11,color:"#a5b4fc",letterSpacing:1,textTransform:"uppercase",fontWeight:700}}>AI Coach</span>
-          <span style={{fontSize:11,color:"#cbd5e1"}}>{open?"▴":"▾"}</span>
-        </div>
-        {open&&(
-          <div style={{display:"flex",gap:6,alignItems:"center"}} onClick={function(e){e.stopPropagation();}}>
-            {result&&<button onClick={function(){setResult(null);setError(null);}} style={{padding:"5px 10px",background:"transparent",border:"1px solid #334155",borderRadius:6,color:"#cbd5e1",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>Clear</button>}
-            <button onClick={generate} disabled={loading} style={{padding:"5px 12px",background:loading?"#1e293b":"#4338ca",border:"1px solid #6366f1",borderRadius:6,color:loading?"#94a3b8":"#fff",fontSize:12,fontWeight:600,cursor:loading?"default":"pointer",fontFamily:"inherit"}}>{loading?"Analyzing…":(result?"Regenerate":"Generate Insights")}</button>
-          </div>
-        )}
-      </div>
-      {open&&<>
-      {error&&<div style={{fontSize:12,color:"#fca5a5",marginTop:8}}>{error}</div>}
-      {result&&(
-        <div>
-          <div style={{fontSize:13,color:"#e2e8f0",lineHeight:1.6,marginBottom:result.focus?10:0}}>{result.summary}</div>
-          {result.focus&&(
-            <div style={{padding:"8px 10px",background:"#0a1f1066",border:"1px solid #166534",borderRadius:6}}>
-              <div style={{fontSize:10,color:"#86efac",letterSpacing:1,textTransform:"uppercase",fontWeight:700,marginBottom:3}}>Focus</div>
-              <div style={{fontSize:13,color:"#bbf7d0",lineHeight:1.5}}>{result.focus}</div>
-            </div>
-          )}
-        </div>
-      )}
-      {!result&&!loading&&!error&&<div style={{fontSize:12,color:"#cbd5e1",marginTop:8,lineHeight:1.55}}>Get an AI-generated summary of your performance and a focus suggestion, or ask a question below.</div>}
-      {/* CHANGED: Ask-a-question input. */}
-      <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid #ffffff14"}}>
-        <div style={{display:"flex",gap:6}}>
-          <input value={question} onChange={function(e){setQuestion(e.target.value);}} onKeyDown={function(e){if(e.key==="Enter")ask();}} placeholder="Ask about your trading…" style={{flex:1,padding:"7px 10px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:6,color:"#e2e8f0",fontSize:13,fontFamily:"inherit",boxSizing:"border-box"}}/>
-          <button onClick={ask} disabled={qLoading||!question.trim()} style={{padding:"7px 14px",background:qLoading||!question.trim()?"#1e293b":"#4338ca",border:"1px solid #6366f1",borderRadius:6,color:qLoading||!question.trim()?"#94a3b8":"#fff",fontSize:13,fontWeight:600,cursor:qLoading||!question.trim()?"default":"pointer",fontFamily:"inherit",flexShrink:0}}>{qLoading?"…":"Ask"}</button>
-        </div>
-        {answer&&(
-          <div style={{marginTop:8,padding:"8px 10px",background:"#0a0a0f",border:"1px solid #334155",borderRadius:6}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
-              <div style={{fontSize:13,color:"#cbd5e1",lineHeight:1.6,flex:1}}>{answer}</div>
-              <button onClick={function(){setAnswer(null);setQuestion("");}} style={{background:"transparent",border:"none",color:"#94a3b8",fontSize:16,cursor:"pointer",padding:"0 2px",lineHeight:1,flexShrink:0}}>×</button>
-            </div>
-          </div>
-        )}
-      </div>
-      </>}
-    </div>
-  );
-}
 // CHANGED: Equity curve summary — running cumulative P&L over the filtered period plus a
 // high-water-mark line. Shows current value, max drawdown, and best peak inline.
 // CHANGED: MetricChart — small SVG line chart used by the combined Overview block to plot any
@@ -8062,26 +7114,12 @@ function MetricChart(props){
     var v=compute(slice);
     if(v!=null&&!isNaN(v))pts.push({date:sorted[i].date,v:v});
   }
-  // CHANGED: sortByValue turns the chart from a time series into a sorted distribution (an
-  // exceedance curve). Needed for threshold-compliance metrics where the points are independent
-  // draws rather than a sequence — connecting unrelated events with a line invites the reader to
-  // see a trend in the slope, and there isn't one. Sorted, the slope IS meaningful: it shows where
-  // the mass sits and how far the tail runs. The x-axis stops being time, so date-based footer
-  // labels and cross-chart hover sync are both suppressed below.
-  var sortByValue=!!props.sortByValue;
-  if(sortByValue)pts.sort(function(a,b){return a.v-b.v;});
   if(pts.length<1)return <div style={{padding:24,textAlign:"center",fontSize:12,color:"#64748b"}}>{minTrades>0?("Need at least "+minTrades+" trades for a meaningful trend."):"Not enough data to chart."}</div>;
   // CHANGED: Geometry + visuals match EquityCurve — same viewBox, area fill, dashed baseline,
   // footer with first/last/peak labels — so all charts in the Overview block read consistently.
   var W=320,H=80,padX=4,padY=6;
   var minV=Math.min.apply(null,pts.map(function(p){return p.v;}));
   var maxV=Math.max.apply(null,pts.map(function(p){return p.v;}));
-  // CHANGED: refLine draws a labeled horizontal threshold ({value,label,color}). Added because a
-  // compliance metric is unreadable without the line it is measured against — the reader otherwise
-  // has to hold the threshold in their head and compare it to an unlabeled axis. The threshold is
-  // folded into the y-range here so it can never fall outside the plot.
-  var refLine=props.refLine&&isFinite(props.refLine.value)?props.refLine:null;
-  if(refLine){if(refLine.value<minV)minV=refLine.value;if(refLine.value>maxV)maxV=refLine.value;}
   // Anchor baseline to 0 when the data straddles or is near 0 (rates, expectancy). When all values
   // are far from 0 (e.g. cumulative trade count), keep the range tight to maximize resolution.
   var anchorZero=(minV<=0&&maxV>=0)||(minV>=0&&minV<(maxV-minV)*0.25);
@@ -8108,14 +7146,12 @@ function MetricChart(props){
     // CHANGED: Sync broadcasts only when this chart's domain matches DailyPnLBar's full range —
     // i.e. no minTrades filter dropped early days. Otherwise the same screen X represents
     // different dates on the two charts, so cross-chart hover would land wrong.
-    // CHANGED: also suppressed when sortByValue — the x-axis is rank, not date, so broadcasting
-    // would highlight an unrelated day on every other chart.
-    if(minTrades<=0&&!sortByValue)setSharedDate(pts[idx]&&pts[idx].date||null);
+    if(minTrades<=0)setSharedDate(pts[idx]&&pts[idx].date||null);
   }
-  function handleLeave(){setHoverIdx(null);if(minTrades<=0&&!sortByValue)setSharedDate(null);}
+  function handleLeave(){setHoverIdx(null);if(minTrades<=0)setSharedDate(null);}
   // CHANGED: Same gate — only accept inbound shared hover when domains match.
   var effectiveHoverIdx=hoverIdx;
-  if(minTrades<=0&&!sortByValue&&sharedDate&&hoverIdx==null){
+  if(minTrades<=0&&sharedDate&&hoverIdx==null){
     var found=pts.findIndex(function(p){return p.date===sharedDate;});
     if(found>=0)effectiveHoverIdx=found;
   }
@@ -8131,11 +7167,7 @@ function MetricChart(props){
              aware readouts (e.g. Trades chart's trading time scoped to the hovered day). */}
           {props.meta&&<div style={{fontSize:11,color:"#94a3b8",fontWeight:600,fontVariantNumeric:"tabular-nums"}}>{typeof props.meta==="function"?props.meta(display,effectiveHoverIdx!=null):props.meta}</div>}
         </div>
-        {/* CHANGED: hideChange suppresses the Change readout. It computes last − first, which is
-           only meaningful on a time series. On a sorted distribution that is just (max − min), and
-           on a per-trade chart of independent events it is the difference between two unrelated
-           trades presented as a trend. */}
-        {!props.hideChange&&<div style={{textAlign:"right"}}>
+        <div style={{textAlign:"right"}}>
           <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>Change</div>
           {/* CHANGED: Removed the manual "+" prefix — fmt() now owns its own sign for $/% formats,
              so prepending here produced "++2.85%". For raw-number formats fmt won't have a sign,
@@ -8143,20 +7175,12 @@ function MetricChart(props){
           {/* CHANGED: Change color can be inverted (loss rate, avg loss — where a rising value is
              BAD). With invertChange, a positive delta colors red and a negative delta green. */}
           <div style={{fontSize:13,fontWeight:700,color:(props.invertChange?delta<=0:delta>=0)?"#22c55e":"#ef4444",marginTop:4,fontVariantNumeric:"tabular-nums"}}>{(function(){var s=fmt(delta);if(/^[+\-]/.test(s))return s;return (delta>=0?"+":"")+s;})()}</div>
-        </div>}
+        </div>
       </div>
       <svg ref={svgRef} viewBox={"0 0 "+W+" "+H} style={{display:"block",width:"100%",height:"100%",flex:1,minHeight:120,touchAction:"none",cursor:"crosshair"}} preserveAspectRatio="none" onMouseMove={handleMove} onMouseLeave={handleLeave} onTouchStart={handleMove} onTouchMove={handleMove} onTouchEnd={handleLeave}>
         {anchorZero&&<line x1={padX} x2={W-padX} y1={yFor(0)} y2={yFor(0)} stroke="#334155" strokeWidth="0.5" strokeDasharray="2,2"/>}
         <path d={areaPath} fill={color+"22"} stroke="none"/>
         <path d={linePath} fill="none" stroke={color} strokeWidth="1.5"/>
-        {/* CHANGED: the threshold line, drawn over the area but under the hover cursor, with its
-           label inset at the left so it reads without a legend. */}
-        {refLine&&(
-          <g>
-            <line x1={padX} x2={W-padX} y1={yFor(refLine.value)} y2={yFor(refLine.value)} stroke={refLine.color||"#f59e0b"} strokeWidth="0.8" strokeDasharray="4,3"/>
-            {refLine.label&&<text x={padX+2} y={yFor(refLine.value)-2.5} fill={refLine.color||"#f59e0b"} fontSize="7" fontWeight="700">{refLine.label}</text>}
-          </g>
-        )}
         {effectiveHoverIdx!=null&&(
           <g>
             <line x1={xFor(effectiveHoverIdx)} x2={xFor(effectiveHoverIdx)} y1={padY} y2={H-padY} stroke="#cbd5e1" strokeWidth="0.6" strokeDasharray="2,2"/>
@@ -8174,14 +7198,10 @@ function MetricChart(props){
           );})()}
         </div>
       ):(
-        /* CHANGED: footer adapts. On a time series it still shows first date / peak / last date.
-           On a sorted distribution the end dates are arbitrary, so it shows low / high / n
-           instead. peakLabel lets a loss metric say "worst" rather than "peak", which on a chart
-           of losses reads as an achievement. */
         <div style={{display:"flex",justifyContent:"space-between",marginTop:6,fontSize:10,color:"#64748b",fontWeight:600}}>
-          <span>{sortByValue?("low "+fmt(pts[0].v)):first.date}</span>
-          <span>{(props.peakLabel||"peak")+" "+fmt(peak.v)}</span>
-          <span>{sortByValue?(pts.length+" trades"):last.date}</span>
+          <span>{first.date}</span>
+          <span>peak {fmt(peak.v)}</span>
+          <span>{last.date}</span>
         </div>
       )}
       {/* CHANGED: Inline note explaining why the line doesn't start at the range's left edge on
@@ -8371,57 +7391,17 @@ function EquityCurve(props){
 // CHANGED: What's Working / What's Hurting — auto-detects setups (or asset-class+setup combos) with
 // the highest and lowest expectancy and highlights the top 3 of each so the user can immediately see
 // where to lean in and where to cut.
-function WhatsWorkingPanel(props){
-  var trades=props.trades||[];
-  if(trades.length<5)return null; // not enough data to be meaningful
-  // Group by setup. Falls back to asset class when setup is blank.
-  var groups={};
-  trades.forEach(function(t){
-    var key=(t.setup||"").trim()||((t.assetClass?ASSET_CLASSES[t.assetClass]?ASSET_CLASSES[t.assetClass].label:t.assetClass:"")+" (no setup)").trim();
-    if(!key)key="Untagged";
-    if(!groups[key])groups[key]={n:0,wins:0,losses:0,pnl:0,pctSum:0,pctN:0};
-    var p=tradeNetPnl(t);
-    groups[key].n++;
-    groups[key].pnl+=p;
-    var pc=parseFloat(t.pctPnl);if(!isNaN(pc)){groups[key].pctSum+=pc;groups[key].pctN++;}
-    if(p>0)groups[key].wins++;else if(p<0)groups[key].losses++;
-  });
-  // Compute expectancy (avg pnl per trade). Require ≥3 trades for stability.
-  var rows=Object.keys(groups).map(function(k){var g=groups[k];return {key:k,n:g.n,exp:g.pnl/g.n,expPct:g.pctN>0?g.pctSum/g.pctN:0,pnl:g.pnl,wr:g.n>0?Math.round((g.wins/g.n)*100):0};}).filter(function(r){return r.n>=3;});
-  if(rows.length===0)return null;
-  var working=rows.filter(function(r){return r.exp>0;}).sort(function(a,b){return b.exp-a.exp;}).slice(0,3);
-  var hurting=rows.filter(function(r){return r.exp<0;}).sort(function(a,b){return a.exp-b.exp;}).slice(0,3);
-  // CHANGED: when $ is hidden, expectancy is shown as average % per trade.
-  var fmtExp=function(r){if(HIDE_AMOUNTS)return AMT_MASK;return (r.expPct>=0?"+":"")+r.expPct.toFixed(2)+"%";};
-  function Col(p){return (
-    <div style={{flex:1,minWidth:0,padding:"10px 12px",background:"#0d0d12",border:"1px solid "+p.bd,borderRadius:8,display:"flex",flexDirection:"column"}}>
-      <div style={{fontSize:10,color:p.titleColor,letterSpacing:1,textTransform:"uppercase",fontWeight:700,marginBottom:6,display:"flex",alignItems:"center",gap:6}}><span>{p.icon}</span>{p.title}</div>
-      {p.items.length===0?(
-        <div style={{fontSize:11,color:"#64748b",fontStyle:"italic",padding:"4px 0"}}>{p.empty}</div>
-      ):p.items.map(function(r,i){return (
-        <div key={r.key} style={{padding:"5px 0",borderBottom:i<p.items.length-1?"1px solid #1e293b":"none"}}>
-          <div style={{fontSize:12,color:"#e2e8f0",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.key}</div>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginTop:2,gap:6}}>
-            <span style={{fontSize:10,color:"#64748b"}}>{r.n} · {r.wr}% wr</span>
-            <span style={{fontSize:12,fontWeight:700,color:p.valColor,fontVariantNumeric:"tabular-nums"}}>{fmtExp(r)}<span style={{fontSize:9,color:"#475569",fontWeight:400}}>/trade</span></span>
-          </div>
-        </div>
-      );})}
-    </div>
-  );}
-  return (
-    <div style={{display:"flex",gap:8,marginBottom:12,height:"100%",boxSizing:"border-box",alignItems:"stretch"}}>
-      <Col title="What's Working" icon="▲" bd="#16653466" titleColor="#86efac" valColor="#22c55e" items={working} empty="No positive setups yet"/>
-      <Col title="What's Hurting" icon="▼" bd="#7f1d1d66" titleColor="#fca5a5" valColor="#ef4444" items={hurting} empty="Nothing flagged — clean run"/>
-    </div>
-  );
-}
-
 // CHANGED: R-multiple distribution — the single most diagnostic chart for whether an edge exists.
 // Each trade is converted to R = pnl / planned_risk, where planned_risk is the journal row's
 // riskMax × the trade's sizeFraction (falls back to current settings if a row predates the field).
 // Buckets are <-3R, -3..-2, -2..-1, -1..0, 0..1, 1..2, 2..3, ≥3R. Avg-R and expectancy shown above.
 function RMultipleHistogram(props){
+  // CHANGED: hooks hoisted above the `if(Rs.length<3)return null` guard below. They used to sit
+  // after it, so this component called 0 hooks on a sparse range and 2 on a dense one — React
+  // throws "Rendered more hooks than during the previous render" the moment the data crosses that
+  // threshold, which the Performance range selector does routinely.
+  var [hoverI,setHoverI]=useState(null);
+  var barsRef=React.useRef(null);
   var rows=props.rows||[],fallback=props.fallbackRiskMax||0;
   var Rs=[];
   // CHANGED: Also collect dollar P&L per win/loss to show $ alongside R averages.
@@ -8456,9 +7436,9 @@ function RMultipleHistogram(props){
   var avgWinR=winsR.length>0?winsR.reduce(function(s,v){return s+v;},0)/winsR.length:0;
   var avgLossR=lossesR.length>0?lossesR.reduce(function(s,v){return s+v;},0)/lossesR.length:0;
   var expR=avgR; // expectancy per trade in R, same thing as avgR
-  // CHANGED: Hover/drag — bucket under cursor is highlighted and the headline switches to that bucket's count and % share.
-  var [hoverI,setHoverI]=useState(null);
-  var barsRef=React.useRef(null);
+  // CHANGED: Hover/drag — bucket under cursor is highlighted and the headline switches to that
+  // bucket's count and % share. hoverI/barsRef are declared at the top of this component now, above
+  // the early-return guard, so the hook call order is stable across renders.
   function moveBars(e){
     if(!barsRef.current)return;
     var rect=barsRef.current.getBoundingClientRect();
@@ -8520,7 +7500,120 @@ function RMultipleHistogram(props){
 // score, Y = daily P&L. A reference vertical line marks the user's lock threshold so it's instantly
 // clear whether days under-threshold cluster in the red zone. Hover/drag shows the day's date and
 // P&L in the readout.
+// CHANGED: Risk-cap distribution. Replaces two earlier attempts at visualizing the same metric,
+// both of which failed for opposite reasons:
+//   1. A chronological line of loss-per-contract. Consecutive losing trades are independent draws,
+//      so the connecting line implied a trend that does not exist, and the "Change" readout
+//      reported (last - first) between two unrelated trades — in green, so a run ending badly read
+//      as improvement.
+//   2. A sorted exceedance curve. Precise about the crossing point, but a sorted series is
+//      monotone by construction: EVERY dataset renders as a rising line, so the shape carried no
+//      information. On real data it came out at r=0.91 against rank — visually a diagonal.
+// A histogram is the right form: it shows how often the cap is breached AND by how much, and its
+// shape differs between a trader who clusters just under the cap and one who clusters well under.
+// Bins are cap-RELATIVE (quarters of cap below, then 1.25x/1.5x/2x/beyond) so the cap always lands
+// exactly on a bin boundary rather than floating inside one.
+function RiskCapHistogram(props){
+  var [hoverI,setHoverI]=useState(null);
+  var barsRef=React.useRef(null);
+  var rows=props.rows||[],cap=parseFloat(props.cap)||0;
+  var vals=[],skipped=0;
+  rows.forEach(function(r){
+    (r.trades||[]).forEach(function(t){
+      if(!t||t.status==="open")return;
+      var pnl=(isNaN(parseFloat(t.pnl))?NaN:tradeNetPnl(t));
+      if(isNaN(pnl)||pnl>=0)return;
+      var c=tradeTotalContracts(t);
+      if(!(c>0)){skipped++;return;}
+      var per=Math.abs(pnl)/c;
+      if(!isFinite(per)){skipped++;return;}
+      vals.push(per);
+    });
+  });
+  if(cap<=0||vals.length<3)return null;
+  var mults=[0,0.25,0.5,0.75,1,1.25,1.5,2,Infinity];
+  var counts=[],sums=[],labels=[];
+  for(var b=0;b<mults.length-1;b++){
+    counts.push(0);sums.push(0);
+    labels.push(mults[b+1]===Infinity?("≥"+Math.round(cap*2)):(Math.round(cap*mults[b])+"–"+Math.round(cap*mults[b+1])));
+  }
+  vals.forEach(function(v){
+    for(var i=0;i<counts.length;i++){
+      var lo=cap*mults[i],hi=mults[i+1]===Infinity?Infinity:cap*mults[i+1];
+      if(v>=lo&&v<hi){counts[i]++;sums[i]+=v;break;}
+    }
+  });
+  var maxCount=Math.max.apply(null,counts);
+  var held=vals.filter(function(v){return v<=cap;}).length;
+  var pct=100*held/vals.length;
+  var breaches=vals.length-held;
+  var avgBreach=breaches>0?vals.filter(function(v){return v>cap;}).reduce(function(s,v){return s+v;},0)/breaches:0;
+  var worst=Math.max.apply(null,vals);
+  // CHANGED: overall average loss per contract across every losing trade. Computed from the raw
+  // values, NOT as the mean of the eight bin averages — that would weight a 3-trade bin the same as
+  // a 20-trade one and overstate the tail. Shown as a multiple of cap too, since "is my average
+  // loss inside my risk cap?" is the question the bins answer only indirectly.
+  var avgAll=vals.reduce(function(s,v){return s+v;},0)/vals.length;
+  // Median alongside it: with a right-skewed tail the mean sits above the typical trade, and the
+  // gap between the two is itself the signal that a few outliers are carrying the average.
+  var sortedVals=vals.slice().sort(function(a,b){return a-b;});
+  var medAll=sortedVals.length%2?sortedVals[(sortedVals.length-1)/2]:(sortedVals[sortedVals.length/2-1]+sortedVals[sortedVals.length/2])/2;
+  var capBin=4; // index of the first bin at/above the cap, given the mults above
+  function moveBars(e){
+    if(!barsRef.current)return;
+    var rect=barsRef.current.getBoundingClientRect();
+    var clientX=e.touches?e.touches[0].clientX:e.clientX;
+    var ratio=Math.max(0,Math.min(0.9999,(clientX-rect.left)/rect.width));
+    setHoverI(Math.floor(ratio*counts.length));
+  }
+  function leaveBars(){setHoverI(null);}
+  var money=function(v){return "$"+v.toFixed(2);};
+  var hoverAvg=hoverI!=null&&counts[hoverI]>0?(sums[hoverI]/counts[hoverI]):null;
+  return (
+    <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid #1e293b",borderRadius:10,display:"flex",flexDirection:"column",boxSizing:"border-box"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10,gap:8}}>
+        <div>
+          <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{hoverI!=null?("$"+labels[hoverI]+" / contract"):"Loss per Contract"}</div>
+          {hoverI!=null?(
+            <div style={{fontSize:20,fontWeight:700,color:hoverI>=capBin?"#ef4444":"#22c55e",marginTop:2,fontVariantNumeric:"tabular-nums"}}>{counts[hoverI]}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:4}}>{counts[hoverI]===1?"trade":"trades"}{counts[hoverI]>0?(" · avg "+money(hoverAvg)):""}</span></div>
+          ):(
+            <div style={{fontSize:20,fontWeight:700,color:pct>=85?"#22c55e":(pct>=70?"#f59e0b":"#ef4444"),marginTop:2,fontVariantNumeric:"tabular-nums"}}>{Math.round(pct)+"%"}<span style={{fontSize:10,color:"#94a3b8",fontWeight:500,marginLeft:4}}>within ${Math.round(cap)} cap</span></div>
+          )}
+        </div>
+        <div style={{textAlign:"right",fontSize:10,color:"#94a3b8",lineHeight:1.55}}>
+          <div>Avg / median: <span style={{color:avgAll<=cap?"#86efac":"#fca5a5",fontWeight:700}}>{money(avgAll)}</span><span style={{color:"#64748b"}}> / {money(medAll)}</span><span style={{color:avgAll<=cap?"#86efac":"#fca5a5",fontWeight:600,marginLeft:4}}>({(avgAll/cap).toFixed(1)}×)</span></div>
+          <div>Breaches: <span style={{color:"#fca5a5",fontWeight:700}}>{breaches}</span> of {vals.length}{skipped>0?<span style={{color:"#64748b"}}> · {skipped} excl.</span>:null}</div>
+          <div>Avg breach: <span style={{color:"#fca5a5",fontWeight:700}}>{breaches>0?money(avgBreach):"—"}</span>{breaches>0?<span style={{color:"#fca5a5",fontWeight:600,marginLeft:4}}>({(avgBreach/cap).toFixed(1)}×)</span>:null}</div>
+          <div>Worst: <span style={{color:"#fca5a5",fontWeight:700}}>{money(worst)}</span><span style={{color:"#fca5a5",fontWeight:600,marginLeft:4}}>({(worst/cap).toFixed(1)}×)</span></div>
+        </div>
+      </div>
+      <div ref={barsRef} onMouseMove={moveBars} onMouseLeave={leaveBars} onTouchStart={moveBars} onTouchMove={moveBars} onTouchEnd={leaveBars} style={{display:"flex",alignItems:"flex-end",gap:3,height:120,marginBottom:6,cursor:"crosshair",touchAction:"none"}}>
+        {counts.map(function(c,i){
+          var h=maxCount>0?(c/maxCount)*100:0;
+          var over=i>=capBin;
+          var color=over?"#ef4444":"#22c55e";
+          var isHover=hoverI===i;
+          return (
+            <div key={i} style={Object.assign({flex:1,display:"flex",flexDirection:"column",justifyContent:"flex-end",height:"100%",position:"relative"},i===capBin?{borderLeft:"1px dashed #f59e0b",marginLeft:2,paddingLeft:2}:{})}>
+              {i===capBin?<div style={{position:"absolute",top:-2,left:3,fontSize:7,color:"#f59e0b",fontWeight:700,whiteSpace:"nowrap"}}>cap</div>:null}
+              <div style={{height:Math.max(c>0?3:0,h)+"%",background:color,opacity:isHover?1:(c>0?0.72:0.22),borderRadius:"3px 3px 0 0",transition:"opacity .12s"}}/>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{display:"flex",gap:3,fontSize:8,color:"#64748b",fontWeight:600}}>
+        {labels.map(function(l,i){return <div key={i} style={{flex:1,textAlign:"center",whiteSpace:"nowrap"}}>{l}</div>;})}
+      </div>
+      <div style={{marginTop:6,fontSize:9,color:"#475569",textAlign:"center"}}>realized loss per contract ($) · losing trades only</div>
+    </div>
+  );
+}
 function DisciplineScatter(props){
+  // CHANGED: hooks hoisted above the `if(pts.length<3)return null` guard below, same defect as
+  // RMultipleHistogram — 0 hooks on a sparse range, 2 on a dense one, which React rejects as soon
+  // as the range selector crosses the 3-point threshold.
+  var [hover,setHover]=useState(null);
+  var svgRef=React.useRef(null);
   var rows=props.rows||[],settings=props.settings||{};
   // CHANGED: Per-trade granularity activates whenever the filtered range covers fewer than 30
   // trading days. Previously only this-week/last-week triggered it. The day-count check works
@@ -8536,34 +7629,17 @@ function DisciplineScatter(props){
       if(trades.length===0)return;
       var sorted=trades.slice().sort(function(a,b){var ma=parseTimeToMinsOfDay(a.time)||0;var mb=parseTimeToMinsOfDay(b.time)||0;return ma-mb;});
       var sb=0;try{sb=getAccountBalanceAtDate(r.date);}catch(e){}
+      // CHANGED: replaced a second inline re-implementation of per-trade discipline scoring with
+      // the canonical tradeDisciplineScore/effectiveViolations pair. This copy already handled
+      // contracts-vs-dollars, but it still ignored halfSizeAppliesTo, so an oversized entry taken
+      // while half-size was in force was measured against the FULL cap and went unflagged — the
+      // scatter then disagreed with the trade card badge it was written to match.
+      // CHANGED: also a performance fix. The two localStorage reads + JSON.parse calls used to run
+      // once PER TRADE inside this loop; the ctx is now built once per day. Built per row rather
+      // than once overall so each day keeps using its own stamped riskMax as the fallback risk cap.
+      var _dsCtx=buildDisciplineCtx(parseFloat(r.riskMax)||0);
       sorted.forEach(function(t,i){
-        // CHANGED: Compute per-trade discipline using the SAME live-derived violations the badge
-        // and filter use — so filter + scatter agree. Otherwise stored/live mismatch on
-        // "Oversized entry" / "Max risk exceeded" produced a filter/plot desync.
-        var _ds=DEFAULT_DISCIPLINE_SCORING;try{var _st=JSON.parse(localStorage.getItem("tf-disc-scoring")||"null");if(_st)_ds=Object.assign({},_ds,_st);}catch(e){}
-        var _sen={};try{var _to=JSON.parse(localStorage.getItem("tf-trade-options")||"null");if(_to&&_to.emotionSentiments)_sen=_to.emotionSentiments;}catch(e){}
-        var v=(t.violations||[]).slice();
-        // CHANGED: Contract-based sizing — the cap in settings.positionMax is a CONTRACT count,
-        // so compare total contracts to it (not the $ position size), or every trade falsely
-        // flags "Oversized entry" and drops to 85. Mirrors effectiveViolations.
-        var _ctr=(settings.sizingMode||"pct")==="contracts";
-        var sm=_ctr?0:(parseFloat(t.posMaxAtEntry)||0);
-        var sf=parseFloat(t.sizeFraction)||1;
-        var gm=t.grade==="A"?1:t.grade==="B"?0.75:t.grade==="C"?0.5:1;
-        var lpm=(parseFloat(settings.positionMax)||0)*sf*gm;
-        var cap=t.grade?lpm:Math.max(sm,lpm);
-        var pos=_ctr?tradeTotalContracts(t):(parseFloat(t.positionSize)||0);
-        var oi=v.indexOf("Oversized entry");
-        if(cap>0&&pos>cap){if(oi<0)v.push("Oversized entry");}else if(oi>=0){v.splice(oi,1);}
-        var mri=v.indexOf("Max risk exceeded");
-        var slPct=parseFloat(t.stopThreshPctAtEntry);if(isNaN(slPct)||slPct<=0)slPct=parseFloat(settings.riskMaxPct)||0;
-        var pctPnl=parseFloat(t.pctPnl);
-        if(slPct>0&&!isNaN(pctPnl)&&pctPnl<-slPct){if(mri<0)v.push("Max risk exceeded");}else if(mri>=0){v.splice(mri,1);}
-        var score=100;
-        score-=v.length*(_ds.violationPenalty||15);
-        score-=(t.emotions||[]).filter(function(x){return getEmotionSentiment(x,_sen)==="negative";}).length*(_ds.negEmotionPenalty||10);
-        if(t.grade==="C")score-=(_ds.cGradePenalty||5);
-        score=Math.max(0,Math.min(100,score));
+        var score=tradeDisciplineScore(t,_dsCtx);
         var pnl=tradeNetPnl(t);
         var rv=tradeR(t,parseFloat(r.riskMax)||0);
         pts.push({date:r.date,score:score,pnl:pnl,pct:sb>0?(pnl/sb*100):0,r:rv,n:1});
@@ -8610,8 +7686,7 @@ function DisciplineScatter(props){
   var aboveAvgR=above.length>0?above.reduce(function(s,p){return s+(p.r||0);},0)/above.length:0;
   // CHANGED: All point labels now use R-multiple instead of $ / %.
   var fmtR=function(v){return (v>=0?"+":"")+v.toFixed(2)+"R";};
-  var [hover,setHover]=useState(null);
-  var svgRef=React.useRef(null);
+  // CHANGED: hover/svgRef declared at the top of this component now (see note there).
   function onMove(e){
     if(!svgRef.current)return;
     var rect=svgRef.current.getBoundingClientRect();
@@ -8698,56 +7773,14 @@ function DisciplineScatter(props){
 // CHANGED: Streak tracker — current streak (last consecutive run of same-sign days), longest
 // winning streak, longest losing streak, longest discipline streak (≥ threshold). Pure day-level
 // computation across the filtered range.
-function StreakTracker(props){
-  var rows=(props.rows||[]).slice();
-  // CHANGED: Count days that either have closed trades OR a non-zero stored pnl (covers legacy
-  // entries whose trades array was emptied but whose pnl snapshot is intact).
-  rows=rows.filter(function(r){return (r.trades||[]).some(function(t){return t&&t.status!=="open";})||((entryNetPnl(r))!==0);});
-  if(rows.length<2)return null;
-  // Sort ascending by date (already sorted earlier, but be defensive).
-  rows.sort(function(a,b){return new Date(a.date)-new Date(b.date);});
-  var thr=loadDisciplineLockThreshold();
-  function discScore(r){var s=parseFloat(r.disciplineScore);if(!isNaN(s))return s;return calcDiscipline((r.trades||[]).filter(function(t){return t&&t.status!=="open";}),parseFloat(r.riskMax)||0);}
-  var bestWin=0,bestLose=0,bestDisc=0;
-  var cw=0,cl=0,cd=0;
-  rows.forEach(function(r){
-    var pnl=entryNetPnl(r);
-    if(pnl>0){cw++;cl=0;}else if(pnl<0){cl++;cw=0;}else{cw=0;cl=0;}
-    if(cw>bestWin)bestWin=cw;if(cl>bestLose)bestLose=cl;
-    if(discScore(r)>=thr){cd++;if(cd>bestDisc)bestDisc=cd;}else cd=0;
-  });
-  // Current streak: walk backwards.
-  var curN=0,curKind="flat";
-  for(var i=rows.length-1;i>=0;i--){
-    var pnl=parseFloat(rows[i].pnl)||0;
-    if(i===rows.length-1){if(pnl>0){curKind="win";curN=1;}else if(pnl<0){curKind="lose";curN=1;}else{curKind="flat";break;}continue;}
-    if(curKind==="win"&&pnl>0)curN++;
-    else if(curKind==="lose"&&pnl<0)curN++;
-    else break;
-  }
-  function Card(p){return (
-    <div style={{flex:1,minWidth:0,padding:"8px 10px",background:"#0a0a0f",border:"1px solid "+p.bd,borderRadius:6,display:"flex",flexDirection:"column",justifyContent:"center"}}>
-      <div style={{fontSize:9,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.label}</div>
-      <div style={{fontSize:18,fontWeight:700,color:p.color,marginTop:2,fontVariantNumeric:"tabular-nums"}}>{p.value}<span style={{fontSize:9,color:"#94a3b8",fontWeight:500,marginLeft:3}}>{p.unit}</span></div>
-    </div>
-  );}
-  return (
-    <div style={{marginBottom:12,padding:"12px 14px",background:"#0d0d12",border:"1px solid #1e293b",borderRadius:10,display:"flex",flexDirection:"column",boxSizing:"border-box",alignSelf:"start"}}>
-      <div style={{fontSize:10,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600,marginBottom:8}}>Streaks</div>
-      <div style={{display:"flex",gap:6,alignItems:"stretch"}}>
-        <Card label="Current" value={curN} unit={curKind==="win"?"green":curKind==="lose"?"red":"—"} color={curKind==="win"?"#22c55e":curKind==="lose"?"#ef4444":"#94a3b8"} bd={curKind==="win"?"#16653466":curKind==="lose"?"#7f1d1d66":"#334155"}/>
-        <Card label="Best Win" value={bestWin} unit="days" color="#22c55e" bd="#16653466"/>
-        <Card label="Worst Loss" value={bestLose} unit="days" color="#ef4444" bd="#7f1d1d66"/>
-        <Card label="Discipline" value={bestDisc} unit="≥thr" color="#a5b4fc" bd="#4338ca66"/>
-      </div>
-    </div>
-  );
-}
-
 // CHANGED: Session × Day-of-Week heatmap — rows are configured sessions, cols are Mon–Fri. Cell
 // color/intensity reflects total P&L for that intersection. Click cells to inspect. Helps surface
 // strong/weak slots that are otherwise buried in per-trade noise.
 function SessionDayHeatmap(props){
+  // CHANGED: hook hoisted above the `if(sessions.length===0)return null` guard below. Same defect
+  // as RMultipleHistogram and DisciplineScatter: disabling every session (or enabling the first
+  // one) changed the hook count between renders and crashed the Performance tab.
+  var [hover,setHover]=useState(null);
   var rows=props.rows||[],settings=props.settings||{};
   var sessions=getSessions(settings).filter(function(s){return s.enabled!==false;});
   if(sessions.length===0)return null;
@@ -8793,7 +7826,7 @@ function SessionDayHeatmap(props){
   var maxAbs=0;
   grid.forEach(function(row){row.forEach(function(c){if(Math.abs(c.pnl)>maxAbs)maxAbs=Math.abs(c.pnl);});});
   if(maxAbs===0)maxAbs=1;
-  var [hover,setHover]=useState(null);
+  // CHANGED: hover declared at the top of this component now (see note there).
   var fmt=function(n){if(HIDE_AMOUNTS)return wlSign(n);if(HIDE_DOLLAR_PNL)return (n>=0?"+":"-")+"$•••";return (n>=0?"+":"-")+"$"+Math.abs(n).toFixed(0);};
   var hp=hover?{s:rowSessions[hover.s],d:dayLabels[hover.d],c:grid[hover.s][hover.d]}:null;
   return (
@@ -9016,31 +8049,22 @@ function PerformanceTab(props){
   // CHANGED: Discipline filter now scopes per-trade (matches trade card badge). Keeps day rows
   // but strips trades that don't match the selected discipline bucket. Empty rows drop out.
   if(discFilter==="clean"||discFilter==="broken"){
-    var _ds=DEFAULT_DISCIPLINE_SCORING;try{var _st=JSON.parse(localStorage.getItem("tf-disc-scoring")||"null");if(_st)_ds=Object.assign({},_ds,_st);}catch(e){}
-    var _sen={};try{var _to=JSON.parse(localStorage.getItem("tf-trade-options")||"null");if(_to&&_to.emotionSentiments)_sen=_to.emotionSentiments;}catch(e){}
-    function tradeDisc(t){
-      var v=(t.violations||[]).slice();
-      var sm=parseFloat(t.posMaxAtEntry)||0;
-      var sf=parseFloat(t.sizeFraction)||1;
-      var gm=t.grade==="A"?1:t.grade==="B"?0.75:t.grade==="C"?0.5:1;
-      var lpm=(parseFloat(settings.positionMax)||0)*sf*gm;
-      var cap=t.grade?lpm:Math.max(sm,lpm);
-      var pos=parseFloat(t.positionSize)||0;
-      var oi=v.indexOf("Oversized entry");
-      if(cap>0&&pos>cap){if(oi<0)v.push("Oversized entry");}else if(oi>=0){v.splice(oi,1);}
-      // Max risk exceeded — apply the same live % check the badge does.
-      var mri=v.indexOf("Max risk exceeded");
-      var slPct=parseFloat(t.stopThreshPctAtEntry);
-      if(isNaN(slPct)||slPct<=0)slPct=parseFloat(settings.riskMaxPct)||0;
-      var pct=parseFloat(t.pctPnl);
-      if(slPct>0&&!isNaN(pct)&&pct<-slPct){if(mri<0)v.push("Max risk exceeded");}
-      else if(mri>=0){v.splice(mri,1);}
-      var sc=100;
-      sc-=v.length*(_ds.violationPenalty||15);
-      sc-=(t.emotions||[]).filter(function(x){return getEmotionSentiment(x,_sen)==="negative";}).length*(_ds.negEmotionPenalty||10);
-      if(t.grade==="C")sc-=(_ds.cGradePenalty||5);
-      return Math.max(0,Math.min(100,sc));
-    }
+    // CHANGED: this filter used to re-implement per-trade discipline scoring inline, and the copy
+    // had drifted badly from the canonical tradeDisciplineScore/effectiveViolations pair:
+    //   1. It compared a DOLLAR position size against settings.positionMax, which in contracts
+    //      sizing mode is a CONTRACT COUNT. So a $540 position was tested against a cap of 5 and
+    //      every graded trade falsely picked up an "Oversized entry" violation (-15 points),
+    //      silently corrupting the clean/broken split for anyone in contracts mode.
+    //   2. It ignored halfSizeAppliesTo, so oversized entries taken while half-size was in force
+    //      were measured against the full cap and went unflagged.
+    //   3. It measured historical trades against the CURRENT tier's cap with no fallback to the
+    //      stamped posMaxAtEntry for graded trades, so changing SCALING_TIERS retroactively
+    //      rewrote the discipline history.
+    // Calling the canonical scorer fixes all three and keeps this filter in step with the trade
+    // card badges by construction. The ctx is built once per render, not per trade, since
+    // buildDisciplineCtx reads localStorage.
+    var _discCtx=buildDisciplineCtx(parseFloat(settings.riskMax)||0);
+    function tradeDisc(t){return tradeDisciplineScore(t,_discCtx);}
     filtered=filtered.map(function(r){
       var kept=(r.trades||[]).filter(function(t){if(!t||t.status==="open")return false;var s=tradeDisc(t);return discFilter==="clean"?s>=_discThresh:s<_discThresh;});
       if(kept.length===0)return null;
@@ -9143,27 +8167,26 @@ function PerformanceTab(props){
   var stopStats=(function(){
     var cap=parseFloat(settings&&settings.riskPerContract);
     if(!(cap>0))return null;
-    var n=0,held=0,worst=0,sum=0,skipped=0,breachSum=0;
+    var n=0,held=0,worst=0;
     losses.forEach(function(t){
       var c=0;
       (t.entries||[]).forEach(function(e){var q=parseFloat(e&&e.contracts);if(!isNaN(q)&&q>0)c+=q;});
       if(!(c>0)){var d=parseFloat(t.contracts);if(!isNaN(d)&&d>0)c=d;}
-      // CHANGED: count the losers we cannot measure instead of dropping them silently. Without
-      // this the denominator shrinks invisibly and the rate looks more precise than it is.
-      if(!(c>0)){skipped++;return;}
+      // Losers with no contract count cannot be measured; RiskCapHistogram reports how many it
+      // excluded, so the omission is visible there rather than silently shrinking this denominator.
+      if(!(c>0))return;
       var per=Math.abs(tradeNetPnl(t))/c;
-      if(!isFinite(per)){skipped++;return;}
-      n++;sum+=per;
-      if(per<=cap)held++;else breachSum+=per;
+      if(!isFinite(per))return;
+      n++;
+      if(per<=cap)held++;
       if(per>worst)worst=per;
     });
     if(!n)return null;
-    var nb=n-held;
-    // CHANGED: avgBreach and worst exist because the headline rate is severity-blind — a $41 miss
-    // and a $108 miss are the same event to it. Surfaced in the tile subtitle so the tile cannot
-    // read "77%, mostly fine" while hiding a 2.7x overshoot.
-    return {n:n,held:held,breaches:nb,pct:100*held/n,cap:cap,avg:sum/n,worst:worst,
-            avgBreach:nb>0?breachSum/nb:0,worstX:cap>0?worst/cap:0,skipped:skipped};
+    // CHANGED: worstX exists because the headline rate is severity-blind — a $41 miss and a $108
+    // miss are the same event to it. Surfaced in the tile subtitle so the tile cannot read
+    // "77%, mostly fine" while hiding a 2.7x overshoot. Breach counts and averages live in
+    // RiskCapHistogram, which derives them from the same rows.
+    return {n:n,held:held,pct:100*held/n,cap:cap,worst:worst,worstX:cap>0?worst/cap:0};
   })();
   // CHANGED: Max losing streak — longest run of consecutive losing trades (chronological, by date
   // then time) in the selected range. A count, so it's shown in every display mode.
@@ -9357,20 +8380,12 @@ function PerformanceTab(props){
               // 77% of the data into the bottom third, labeled the maximum "peak", and — worst —
               // reported (last − first) as "Change" in green, so a run ending on a large
               // per-contract loss was presented as improvement.
+              // CHANGED: now a histogram (RiskCapHistogram) rather than a line of any kind. The
+              // sorted-curve version this replaces was monotone by construction, so it rendered as a
+              // diagonal for every possible dataset and showed nothing about the distribution's
+              // shape. The histogram shows breach frequency and breach severity together.
               if(selectedMetric==="stopHeld"){
-                var shRows=[];
-                filtered.forEach(function(r){(r.trades||[]).forEach(function(t){if(t&&t.status!=="open"&&tradeNetPnl(t)<0)shRows.push({date:r.date,trades:[t]});});});
-                shRows.sort(function(a,b){var da=new Date(a.date).getTime(),db=new Date(b.date).getTime();if(da!==db)return da-db;var ma=parseTimeToMinsOfDay(a.trades[0].time)||0,mb=parseTimeToMinsOfDay(b.trades[0].time)||0;return ma-mb;});
-                function computeLossPerCt(slice){
-                  var t=slice[0]&&slice[0].trades&&slice[0].trades[0];if(!t)return null;
-                  var c=0;(t.entries||[]).forEach(function(e){var q=parseFloat(e&&e.contracts);if(!isNaN(q)&&q>0)c+=q;});
-                  if(!(c>0)){var d=parseFloat(t.contracts);if(!isNaN(d)&&d>0)c=d;}
-                  if(!(c>0))return null;
-                  var per=Math.abs(tradeNetPnl(t))/c;
-                  return isFinite(per)?per:null;
-                }
-                var shCap=parseFloat(settings&&settings.riskPerContract);
-                return <MetricChart entries={shRows} perPoint={true} sortByValue={true} hideChange={true} peakLabel="worst" label="Loss / Contract" color="#ef4444" compute={computeLossPerCt} format={function(v){return "$"+v.toFixed(2);}} refLine={shCap>0?{value:shCap,label:"cap $"+Math.round(shCap),color:"#f59e0b"}:null} meta={stopStats?(Math.round(stopStats.pct)+"% within cap"+(stopStats.skipped>0?(" · "+stopStats.skipped+" excl."):"")):null}/>;
+                return <RiskCapHistogram rows={filtered} cap={parseFloat(settings&&settings.riskPerContract)||0}/>;
               }
               // CHANGED: Max Loss Streak chart — per-trade points of the running consecutive-loss count
               // (resets to 0 on any non-losing trade). The tile shows the peak; the chart shows where
