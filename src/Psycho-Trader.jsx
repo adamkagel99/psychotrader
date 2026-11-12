@@ -1249,6 +1249,13 @@ function setHideAmounts(v){HIDE_AMOUNTS=!!v;}
 function wlSign(v){var n=parseFloat(v)||0;return n>0?"+":n<0?"−":"—";}
 function setHideDollarPnL(v){HIDE_DOLLAR_PNL=!!v;}
 // True when the $-hidden branch should run (either plain hide-$ or full outcome-only mode).
+// CHANGED: restored. This was deleted in error by a dead-code sweep whose reference search built
+// a regex as \b + the escaped name; for a name starting with "$" the leading \b can never match
+// (there is no word boundary before a non-word character), so every call site was invisible to it
+// and a live function was classified as unreachable. Its single caller is the trade form's Total
+// P&L block, which renders only once an exit leg has BOTH a price and a contract count — so the
+// app crashed precisely when the scale-out suggestion was tapped or a contract count typed.
+function $fmt(n,opts){opts=opts||{};if(HIDE_AMOUNTS)return opts.signed?wlSign(n):AMT_MASK;if(HIDE_DOLLAR_PNL)return (opts.signed&&n>=0?"+":opts.signed&&n<0?"−":"")+"$•••";var v=parseFloat(n)||0;var sign=opts.signed?(v>=0?"+":"−"):"";return sign+"$"+Math.abs(v).toFixed(opts.decimals!=null?opts.decimals:2);}
 function hideCurrency(){return HIDE_DOLLAR_PNL||HIDE_AMOUNTS;}
 // CHANGED: The display/hide mode ($ → % / R → W/L) is a PER-DEVICE view preference, kept in its own
 // local-only key (tf-view-mode, excluded from cloud sync). It used to live inside the synced
